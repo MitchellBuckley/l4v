@@ -226,8 +226,7 @@ where
          ThreadCap tcb_ptr \<Rightarrow> returnOk tcb_ptr
        | _ \<Rightarrow> throwError (InvalidCapability 1);
      check_prio (args ! 0) auth_tcb;
-     returnOk (ThreadControl (obj_ref_of cap) slot None None
-                             (Some (prio, auth_tcb)) None None None)
+     returnOk (ThreadControlSched (obj_ref_of cap) slot None None (Some (prio, auth_tcb)))
      odE"
 
 
@@ -241,8 +240,7 @@ where
          ThreadCap tcb_ptr \<Rightarrow> returnOk tcb_ptr
        | _ \<Rightarrow> throwError (InvalidCapability 1);
      check_prio (args ! 0) auth_tcb;
-     returnOk (ThreadControl (obj_ref_of cap) slot None (Some (new_mcp, auth_tcb))
-                             None None None None)
+     returnOk (ThreadControlSched (obj_ref_of cap) slot None (Some (new_mcp, auth_tcb)) None)
      odE"
 
 
@@ -259,8 +257,8 @@ where
        | _ \<Rightarrow> throwError (InvalidCapability 1);
      check_prio (args ! 0) auth_tcb;
      check_prio (args ! 1) auth_tcb;
-     returnOk (ThreadControl (obj_ref_of cap) slot None
-                             (Some (new_mcp, auth_tcb)) (Some (new_prio, auth_tcb)) None None None)
+     returnOk (ThreadControlSched (obj_ref_of cap) slot None
+                                  (Some (new_mcp, auth_tcb)) (Some (new_prio, auth_tcb)))
      odE"
 
 
@@ -280,7 +278,7 @@ where
       returnOk $ Some (buffer_cap, bslot)
     odE;
   returnOk $
-    ThreadControl (obj_ref_of cap) slot None None None None None (Some (buffer, newbuf))
+    ThreadControlCaps (obj_ref_of cap) slot None None None (Some (buffer, newbuf))
 odE"
 
 
@@ -317,8 +315,8 @@ where
    unlessE (is_valid_vtable_root vroot_cap') $ throwError IllegalOperation;
    vroot \<leftarrow> returnOk (vroot_cap', vroot_slot);
 
-   returnOk $ ThreadControl (obj_ref_of cap) slot (Some (to_bl fault_ep)) None None
-                            (Some croot) (Some vroot) None
+   returnOk $ ThreadControlCaps (obj_ref_of cap) slot (Some (to_bl fault_ep))
+                                (Some croot) (Some vroot) None
  odE"
 
 
@@ -337,10 +335,9 @@ where
      buffer \<leftarrow> returnOk $ args ! 3;
      set_params \<leftarrow> decode_set_ipc_buffer [buffer] cap slot [buffer_cap];
      set_space \<leftarrow> decode_set_space [fault_ep, croot_data, vroot_data] cap slot crootvroot;
-     returnOk $ ThreadControl (obj_ref_of cap) slot (tc_new_fault_ep set_space)
-                              None None
-                              (tc_new_croot set_space) (tc_new_vroot set_space)
-                              (tc_new_buffer set_params)
+     returnOk $ ThreadControlCaps (obj_ref_of cap) slot (tc_new_fault_ep set_space)
+                                  (tc_new_croot set_space) (tc_new_vroot set_space)
+                                  (tc_new_buffer set_params)
    odE"
 
 definition
