@@ -477,6 +477,18 @@ definition is_timeout_fault :: "fault \<Rightarrow> bool" where
   "is_timeout_fault f \<equiv>
     (case f of Timeout _ _ \<Rightarrow> True | _ \<Rightarrow> False)"
 
+(* FIXME RT: Is this abbreviation-in-place-of-macro a good idea? *)
+abbreviation macro_MCS_DO_IF_SC where
+  "macro_MCS_DO_IF_SC tptr ntfnptr block \<equiv>
+   do
+     maybe_donate_sc tptr ntfnptr;
+     st \<leftarrow> get_thread_state tptr;
+     when (runnable st) $ do
+       sched \<leftarrow> ensure_schedulable tptr;
+       when sched $ block
+     od
+   od"
+
 definition
   receive_ipc :: "obj_ref \<Rightarrow> cap \<Rightarrow> bool \<Rightarrow> cap \<Rightarrow> (unit, 'z::state_ext) s_monad"
 where
@@ -566,9 +578,7 @@ where
          ntfn_sc = sc_ptr \<rparr>;
      set_thread_state dest Running;
      as_user dest $ setRegister badge_register badge;
-     maybe_donate_sc dest ntfnptr;
-     schedulable <- is_schedulable dest;
-     when (schedulable) $ possible_switch_to dest
+     macro_MCS_DO_IF_SC dest ntfnptr (possible_switch_to dest)
    od"
 
 text \<open>Handle a message send operation performed on a notification object.
@@ -596,10 +606,9 @@ where
                       cancel_ipc tcb;
                       set_thread_state tcb Running;
                       as_user tcb $ setRegister badge_register badge;
-                      maybe_donate_sc tcb ntfnptr;
-                      schedulable <- is_schedulable tcb;
-                      when (schedulable) $ possible_switch_to tcb
+                      macro_MCS_DO_IF_SC tcb ntfnptr (possible_switch_to tcb)
                     od
+                  \<comment> \<open>FIXME RT: Does this else branch match source?\<close>
                   else set_notification ntfnptr $ ntfn_obj_update (K (ActiveNtfn badge)) ntfn
             od
        | (IdleNtfn, None) \<Rightarrow> set_notification ntfnptr $ ntfn_obj_update (K (ActiveNtfn badge)) ntfn
@@ -697,9 +706,11 @@ where
             od;
 
           state \<leftarrow> get_thread_state receiver;
-          sched <- ensure_schedulable receiver;
-          when (runnable (state) \<and> sched) $
-             possible_switch_to receiver
+          when (runnable state) $ do
+            sched <- ensure_schedulable receiver;
+            when sched $
+              possible_switch_to receiver
+          od
         od
       | _ \<Rightarrow> return ()
     od)
@@ -969,12 +980,15 @@ where
   "sched_context_bind_tcb sc_ptr tcb_ptr = do
     set_sc_obj_ref sc_tcb_update sc_ptr (Some tcb_ptr);
     set_tcb_obj_ref tcb_sched_context_update tcb_ptr (Some sc_ptr);
-    sched_context_resume sc_ptr;
-    sched <- ensure_schedulable tcb_ptr;
-    when sched $ do
-      tcb_sched_action tcb_sched_enqueue tcb_ptr;
-      reschedule_required
+
+    state \<leftarrow> get_thread_state tcb_ptr;
+    when (runnable state) $ do
+      sched <- ensure_schedulable tcb_ptr;
+      when sched $ do
+        tcb_sched_action tcb_sched_enqueue tcb_ptr;
+        reschedule_required
       od
+    od
   od"
 
 definition
@@ -996,8 +1010,8 @@ definition
     when (\<not> runnable state \<and> \<not> idle state) $ do
       cancel_ipc thread;
       set_thread_state thread Restart;
-      maybeM sched_context_resume sc_opt;
-      test_possible_switch_to thread
+      sched <- ensure_schedulable thread;
+      when sched (possible_switch_to thread)
     od
   od"
 

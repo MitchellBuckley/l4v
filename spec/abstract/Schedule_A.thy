@@ -283,7 +283,6 @@ where
     sc_tcb_opt \<leftarrow> get_sc_obj_ref sc_tcb sc_ptr;
     tcb_ptr \<leftarrow> assert_opt sc_tcb_opt;
 
-    sched_context_resume sc_ptr;
     schedulable <- is_schedulable tcb_ptr;
     if schedulable then do
       refill_unblock_check sc_ptr;

@@ -339,10 +339,12 @@ definition
            | _ \<Rightarrow> flt
       odE
       <catch> handle_fault thread;
-   st \<leftarrow> get_thread_state thread;
-   sched \<leftarrow> ensure_schedulable thread;
-   when (runnable st \<and> \<not>sched) $ reschedule_required
-   od"
+    st \<leftarrow> get_thread_state thread;
+    when (runnable st) $ do
+      sched \<leftarrow> ensure_schedulable thread;
+      when (\<not>sched) reschedule_required
+    od
+  od"
 
 section \<open>Top-level event handling\<close>
 

@@ -485,8 +485,13 @@ where
      ntfn \<leftarrow> get_notification ntfnptr;
      case ntfn_obj ntfn of WaitingNtfn queue \<Rightarrow> do
                       _ \<leftarrow> set_notification ntfnptr $ ntfn_obj_update (K IdleNtfn) ntfn;
-                      mapM_x (\<lambda>t. do set_thread_state t Restart;
-                                     possible_switch_to t od) queue;
+                      mapM_x (\<lambda>t. do
+                        set_thread_state t Restart;
+                        sched \<leftarrow> is_schedulable t;
+                        if sched then
+                          possible_switch_to t
+                        else
+                          set_thread_state t Inactive od) queue;
                       reschedule_required
                      od
                | _ \<Rightarrow> return ()

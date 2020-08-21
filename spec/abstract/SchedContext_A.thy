@@ -278,34 +278,6 @@ where
     modify (\<lambda>s. s\<lparr> reprogram_timer := True \<rparr>)
   od"
 
-text \<open>
-  Resume a scheduling context: check if the bound TCB
-  is runnable and add it to the scheduling queue if required
-\<close>
-definition
-  sched_context_resume :: "obj_ref \<Rightarrow> (unit, 'z::state_ext) s_monad"
-where
-  "sched_context_resume sc_ptr \<equiv> do
-     sc \<leftarrow> get_sched_context sc_ptr;
-     tptr \<leftarrow> assert_opt $ sc_tcb sc;
-     sched \<leftarrow> is_schedulable tptr;
-     when sched $ do
-       ts \<leftarrow> thread_get tcb_state tptr;
-       ready \<leftarrow> get_sc_refill_ready sc_ptr;
-       sufficient \<leftarrow> get_sc_refill_sufficient sc_ptr 0;
-       when (runnable ts \<and> sc_active sc \<and> \<not>(ready \<and> sufficient)) $ do
-
-         \<comment> \<open>C code also asserts that tptr is not in ready q\<close>
-         d \<leftarrow> thread_get tcb_domain tptr;
-         prio \<leftarrow> thread_get tcb_priority tptr;
-         queue \<leftarrow> get_tcb_queue d prio;
-         assert (\<not>(tptr \<in> set queue));
-
-         postpone sc_ptr
-       od
-     od
-   od"
-
 
 text \<open>consumed related functions\<close>
 
@@ -375,8 +347,7 @@ where
          when (sc_tcb = None) $ do
            sched_context_donate sc_ptr tcb_ptr;
            csc \<leftarrow> gets cur_sc;
-           when (sc_ptr \<noteq> csc) $ refill_unblock_check (sc_ptr);
-           sched_context_resume sc_ptr
+           when (sc_ptr \<noteq> csc) $ refill_unblock_check (sc_ptr)
          od
        od)
    od"
