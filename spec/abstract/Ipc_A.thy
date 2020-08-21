@@ -545,7 +545,6 @@ where
                 set_thread_state sender Running;
                 sched \<leftarrow> ensure_schedulable sender;
                 when sched $ possible_switch_to sender
-              \<^cancel>\<open>FIXME RT: the C code has a test here for (refiil_sufficient sender'sc \<or> sender's sc is None)\<close>
               od
             od
    od"
@@ -844,10 +843,18 @@ where
     when (sc_tcb sc \<noteq> None) $ do
       tcb_ptr \<leftarrow> assert_opt $ sc_tcb sc;
       st \<leftarrow> get_thread_state tcb_ptr;
-      sched_context_resume sc_ptr;
-      ct \<leftarrow> gets cur_thread;
-      if tcb_ptr = ct then reschedule_required
-      else when (runnable st) $ possible_switch_to tcb_ptr
+      when (runnable st) $ do
+        ct \<leftarrow> gets cur_time;
+        ready \<leftarrow> return (sc_refill_ready ct sc);
+        if \<not> ready then
+          postpone tcb_ptr
+        else do
+          curth \<leftarrow> gets cur_thread;
+          when (tcb_ptr \<noteq> curth) $ possible_switch_to tcb_ptr
+          od
+        od;
+      curth \<leftarrow> gets cur_thread;
+      when (tcb_ptr = curth) reschedule_required
     od
   od"
 
