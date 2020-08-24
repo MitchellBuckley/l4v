@@ -99,18 +99,21 @@ lemma unbind_maybe_notification_st_tcb_at[wp]:
 
 lemma cancel_all_signals_st_tcb_at_helper:
   fixes P P' t
-  defines "V \<equiv> \<lambda>q s. if t \<in> set q then P (P' Restart) else P (st_tcb_at P' t s)"
+  defines "V \<equiv> \<lambda>q s. if t \<in> set q then P (P' Restart \<and> P' Inactive) else P (st_tcb_at P' t s)"
   shows "\<lbrace>V q\<rbrace>
           mapM_x (\<lambda>t. do set_thread_state t Restart;
-                         possible_switch_to t
-                      od) q
+                      sched <- is_schedulable t;
+                      if sched then possible_switch_to t
+                      else set_thread_state t Inactive
+                   od) q
          \<lbrace>\<lambda>rv s. P (st_tcb_at P' t s)\<rbrace>"
-  by (rule mapM_x_inv_wp2[of \<top> V, simplified]; simp add: V_def)
-     (wpsimp wp: sts_st_tcb_at_cases_strong)
+(*   by (rule mapM_x_inv_wp2[of \<top> V, simplified]; simp add: V_def)
+     (wpsimp wp: sts_st_tcb_at_cases_strong) *)
+  sorry (* lemma statement adjusted but proof not fixed *)
 
 lemma cancel_all_signals_st_tcb_at':
   "\<lbrace>\<lambda>s. if ntfn_at_pred (\<lambda>ntfn. t \<in> fst ` ntfn_q_refs_of (ntfn_obj ntfn)) ntfn s
-        then P (P' Restart)
+        then P (P' Restart \<and> P' Inactive)
         else P (st_tcb_at P' t s)\<rbrace>
     cancel_all_signals ntfn
    \<lbrace>\<lambda>rv s. P (st_tcb_at P' t s)\<rbrace>"
@@ -121,7 +124,7 @@ lemma cancel_all_signals_st_tcb_at':
   done
 
 lemma cancel_all_signals_st_tcb_at:
-  assumes x[simp]: "P Structures_A.Restart" shows
+  assumes x[simp]: "P Structures_A.Restart \<and> P Inactive" shows
   "\<lbrace>st_tcb_at P t\<rbrace> cancel_all_signals ntfnptr \<lbrace>\<lambda>_. st_tcb_at P t\<rbrace>"
   by (auto intro: hoare_weaken_pre[OF cancel_all_signals_st_tcb_at'])
 
@@ -1791,15 +1794,17 @@ lemma cancel_all_signals_invs_helper:
                   \<and> valid_replies s
                   \<and> (\<forall>x\<in>set q. st_tcb_at (Not \<circ> (halted or awaiting_reply)) x s
                                 \<and> fault_tcb_at ((=) None) x s))\<rbrace>
-     mapM_x (\<lambda>t. do y \<leftarrow> set_thread_state t Structures_A.thread_state.Restart;
-                    possible_switch_to t od) q
+     mapM_x (\<lambda>t. do y <- set_thread_state t Restart;
+                   sched <- is_schedulable t;
+                   if sched then possible_switch_to t else set_thread_state t Inactive
+                 od) q
    \<lbrace>\<lambda>rv. invs\<rbrace>"
   apply (simp add: invs_def valid_state_def valid_pspace_def)
   apply (rule mapM_x_inv_wp2, fastforce)
   apply (wpsimp wp: valid_ioports_lift hoare_vcg_const_Ball_lift valid_irq_node_typ sts_only_idle
                     sts_st_tcb_at_cases sts_valid_replies sts_fault_tcbs_valid_states
               cong: conj_cong)
-  apply (intro conjI)
+(*   apply (intro conjI)
     apply (fastforce simp: idle_no_ex_cap)
    apply (subgoal_tac "replies_blocked_upd_tcb_st Restart a (replies_blocked s) = replies_blocked s")
     apply clarsimp
@@ -1811,6 +1816,8 @@ lemma cancel_all_signals_invs_helper:
   by (auto simp: pred_tcb_at_def obj_at_def replies_blocked_upd_tcb_st
           elim!: rsubst[where P=sym_refs]
           split: if_splits)
+ *)
+  sorry (* fixed lemma statement but not proof *)
 
 lemma ep_no_bound_refs:
   "ep_at p s \<Longrightarrow> {r \<in> state_refs_of s p. snd r = TCBBound} = {}"

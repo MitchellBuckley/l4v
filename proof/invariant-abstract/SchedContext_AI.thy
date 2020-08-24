@@ -869,12 +869,6 @@ lemma refill_update_typ_at[wp]: (* check the definition *)
   supply if_split [split del]
   by (wpsimp simp: refill_update_def wp: get_sched_context_wp)
 
-lemma sched_context_resume_typ_at[wp]:
-  "\<lbrace>\<lambda>s. P (typ_at T p s)\<rbrace> sched_context_resume sc_ptr
-      \<lbrace>\<lambda>rv s. P (typ_at T p s)\<rbrace>"
-  by (wpsimp simp: sched_context_resume_def
-      wp: get_sched_context_wp hoare_vcg_if_lift2 hoare_drop_imp)
-
 crunch invs[wp]: set_message_info invs
 
 crunches set_message_info, sched_context_update_consumed, unbind_from_sc

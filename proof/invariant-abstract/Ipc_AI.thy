@@ -2074,9 +2074,6 @@ lemma tcb_bound_refs_eq_restr:
   by (auto dest: refs_in_tcb_bound_refs)
 *)
 
-crunches sched_context_resume
-  for valid_irq_node[wp]: valid_irq_node
-  (wp: crunch_wps)
 
 lemma set_refills_wp:
   "\<lbrace>\<lambda>s. \<forall>sc n. obj_at ((=) (SchedContext sc n)) sc_ptr s
