@@ -2099,13 +2099,224 @@ lemma ksReadyQueuesL2Bitmap_nonzeroI:
    apply clarsimp
    done
 
+lemma shiftr_Suc:
+  "(a >> (Suc n)) = (a  :: 64 word) >> n >> 1"
+  by (simp add: shiftr_shiftr)
+
+lemma morita_context_1:
+  "(a >> n) << n \<le> (a :: 64 word)"
+  apply (simp add: and_not_mask[symmetric])
+  by word_bitwise
+
+lemma morita_context_2:
+  "(a :: 64 word) \<ge> (a << n) >> n"
+  apply (simp add: and_mask2)
+  by word_bitwise
+
+lemma helper:
+  "0x1 << 32 \<le> (x :: 64 word)
+   \<Longrightarrow> 0x1 << 16 \<le> x >> 32
+   \<Longrightarrow> 0x1 << 16 + 32 \<le> x"
+  by (clarsimp, word_bitwise)
+
+lemma fhfjkhsf:
+  "word_log2 ((0x1) << n) = n"
+  apply (clarsimp simp: word_log2_def word_clz_def)
+  subgoal sorry
+  done
+
+lemmas pwersss =
+fhfjkhsf[where n=0, simplified]
+fhfjkhsf[where n=1, simplified]
+fhfjkhsf[where n=2, simplified]
+fhfjkhsf[where n=4, simplified]
+fhfjkhsf[where n=8, simplified]
+fhfjkhsf[where n=16, simplified]
+fhfjkhsf[where n=32, simplified]
+fhfjkhsf[where n=64, simplified]
+
+definition One where "One \<equiv> 0x1 :: 64 word"
+
+lemma One32:
+  "0x1 << n = One << n"
+  by (simp add: One_def)
+
+lemmas One_simps =
+ One32[where n = 2, simplified, symmetric]
+ One32[where n = 4, simplified, symmetric]
+ One32[where n = 8, simplified, symmetric]
+ One32[where n = 16, simplified, symmetric]
+ One32[where n = 32, simplified, symmetric]
+ One32[where n = 1, simplified, symmetric]
+
+lemma fhfjkhsf2:
+  "0x1 << word_log2 (0x1 << n) = 0x1 << n"
+  by (subst fhfjkhsf, simp)
+
+lemma helper_new_aux1:
+  "One << 1 \<le> (x :: 64 word)
+   \<Longrightarrow> One << m \<le> x >> 1 \<Longrightarrow> One << m + 1 \<le> x"
+  apply (induction m)
+   apply (clarsimp simp: One_def)
+   apply (clarsimp simp: One_def)
+  subgoal sorry (* fine *)
+  sorry
+
+lemma helper_new_aux:
+  "0x1 << n \<le> (x :: 64 word)
+   \<Longrightarrow> (\<forall>m. 0x1 << m \<le> x >> n \<longrightarrow> 0x1 << m + n \<le> x)"
+  apply (induction n)
+   apply (clarsimp simp: One_def)
+
+   apply (clarsimp simp: )
+  apply (subst (asm) shiftr_Suc)
+  apply (drule helper_new_aux1[rotated])
+  apply (clarsimp simp: One_def)
+   subgoal sorry (* fine? *)
+  apply (case_tac "m + n \<ge> 63"; simp)
+  apply (subst shiftl_zero_size)
+   apply (clarsimp simp: One_def bit0.size_1 Suc_le_mono)
+   subgoal sorry (* what? *)
+apply clarsimp
+  apply (case_tac "One << n \<le> x"; simp)
+  apply (fastforce)
+   apply (clarsimp simp: One_def bit0.size_1 Suc_le_mono)
+   subgoal sorry (* fine? *)
+   done
+
+find_theorems "Suc _ \<le> Suc _"
+
+lemma helper_new:
+  "One << m \<le> x >> n
+   \<Longrightarrow> One << n \<le> (x :: 64 word)
+   \<Longrightarrow> One << m + n \<le> x"
+  apply (induction n)
+   apply simp
+  sorry
+
+
+lemma helper3_new:
+  "\<not> One << n \<le> x >> m
+   \<Longrightarrow> \<not> (One :: 64 word) << m + n \<le> (x :: 64 word)"
+  sorry
+
+lemma helper4_new_new:
+  " One << (63 - unat m) \<le> (x :: 64 word)
+   \<Longrightarrow> \<not> One << (64 - unat m) \<le> x
+  \<Longrightarrow>
+  of_nat (word_clz x) = m"
+  sorry
+
+lemma helper4_new_new63:
+  " One << 63 \<le> (x :: 64 word)
+  \<Longrightarrow>
+  of_nat (word_clz x) = 0"
+  apply (clarsimp simp: One_def word_clz_def to_bl_def)
+
+
+find_theorems word_clz
+
+  apply (intro conjI impI; word_bitwise)
+  apply fastforce
+  apply fastforce
+  done
+  sorry
+
+lemma helperssfhhf:
+  "0x1 << m \<le> x \<Longrightarrow> (x :: 64 word) && ~~ mask m \<noteq> 0"
+
+thm xtr8
+find_theorems name: word name: alt
+
+  apply (unfold word_le_nat_alt word_numeral_alt)
+  apply (clarsimp simp add: and_mask_mod_2p word_of_int_power_hom word_uint.eq_norm
+      simp del: word_of_int_numeral)
+  apply (drule xtr8 [rotated])
+   apply (rule int_mod_le)
+   apply (auto simp add : mod_pos_pos_trivial)
+  done
+
+  apply (clarsimp)
+find_theorems "2 ^ _" mask
+
+lemma helper5_new:
+  "One << (n - 1) \<le> (x :: 64 word)
+   \<Longrightarrow> \<not> One << n+1 \<le> x
+   \<Longrightarrow> x >> n = (if (One << n \<le> x) then 0x1 else 0x0 )"
+ apply (case_tac n; simp add: One_def)
+   apply (word_bitwise)
+  apply fastforce
+  apply (rename_tac m)
+  apply (auto split: if_split simp: One_def)
+  sorry
+
+lemma helper5_new63:
+  "(x :: 64 word) >> 63 = (if (0x1 << 63 \<le> x) then 0x1 else 0x0 )"
+  apply (clarsimp simp: One_def)
+  apply (intro conjI impI; word_bitwise)
+  done
+
+lemma helper5_new1:
+  "One \<le> (x :: 64 word)
+   \<Longrightarrow> \<not> One << 2 \<le> x
+   \<Longrightarrow> x >> (Suc 0) = (if (One << 1 \<le> x) then 0x1 else 0x0 )"
+  apply (clarsimp simp: One_def)
+  apply (intro conjI impI; word_bitwise)
+  apply fastforce
+  apply fastforce
+  done
+
+lemma clz64_spec:
+  "\<forall>s. \<Gamma> \<turnstile> {\<sigma>. s = \<sigma> \<and> x_' s \<noteq> 0} Call clz64_'proc
+       \<lbrace>\<acute>ret__long = of_nat (word_clz (x_' s)) \<rbrace>"
+  supply if_split [split del]
+apply (hoare_rule HoarePartial.ProcNoRec1)
+
+  oops
+
+method mthhh =
+     ((drule (1) helper_new, clarsimp)+)?,
+    ((drule helper3_new, clarsimp)+)?,
+ (subst helper5_new; clarsimp split: if_split),
+ (intro conjI impI; rule helper4_new_new; clarsimp)
+
+
 lemma clzl_spec:
   "\<forall>s. \<Gamma> \<turnstile> {\<sigma>. s = \<sigma> \<and> x_' s \<noteq> 0} Call clzl_'proc
        \<lbrace>\<acute>ret__long = of_nat (word_clz (x_' s)) \<rbrace>"
-  apply (rule allI, rule conseqPre, vcg)
-  apply clarsimp
-  apply (rule_tac x="ret__long_'_update f x" for f in exI)
-  apply (simp add: mex_def meq_def)
+  supply if_split [split del]
+  apply (rule allI)
+  apply (rule conseqPre)
+  apply (vcg)
+  apply (clarsimp simp: )
+  apply (intro conjI)
+
+    apply (auto split: if_split)[20]
+  apply (auto simp: One_simps shiftr_shiftr split: if_split)[1]
+
+  (* 64 case *)
+    apply (drule (1) helper_new, clarsimp)+
+    apply (subst helper5_new63; clarsimp split: if_split)
+  apply (intro conjI impI)
+   apply (rule helper4_new_new63; clarsimp simp: One_def)
+   apply (rule helper4_new_new; clarsimp simp: One_def)
+
+   apply (mthhh)+
+apply (subst One_def, simp)
+   apply (mthhh)+
+apply (subst One_def, simp)
+   apply (mthhh)+
+apply (subst One_def, simp)
+
+  (* a small case *)
+  apply (subst helper5_new; clarsimp split: if_split simp: One_def)
+  apply (intro conjI impI; rule helper4_new_new; clarsimp simp: One_def)
+
+  (* zero case *)
+  apply (subst helper5_new1; clarsimp simp: One_def lt1_neq0 split: if_split)
+  apply (intro conjI impI; rule helper4_new_new;
+         clarsimp simp: One_def lt1_neq0)
+
   done
 
 lemma l1index_to_prio_spec:
