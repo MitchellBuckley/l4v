@@ -59,22 +59,19 @@ lemma activate_corres:
                  elim!: pred_tcb'_weakenE)
   done *)
 
-
 lemma bind_notification_corres:
   "corres dc
          (invs and tcb_at t and ntfn_at a) (invs' and tcb_at' t and ntfn_at' a)
          (bind_notification t a) (bindNotification t a)"
-  apply (simp add: bind_notification_def bindNotification_def)
+  apply (simp add: bind_notification_def bindNotification_def update_sk_obj_ref_def bind_assoc)
   apply (rule corres_guard_imp)
-  sorry (*
     apply (rule corres_split[OF _ get_ntfn_corres])
       apply (rule corres_split[OF _ set_ntfn_corres])
          apply (rule sbn_corres)
         apply (clarsimp simp: ntfn_relation_def split: Structures_A.ntfn.splits)
        apply (wp)+
    apply auto
-  done *)
-
+  done
 
 abbreviation
   "ct_idle' \<equiv> ct_in_state' idle'"
