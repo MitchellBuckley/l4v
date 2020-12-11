@@ -524,14 +524,6 @@ lemma readreg_invs':
        | clarsimp simp: invs'_def valid_state'_def
                  dest!: global'_no_ex_cap)+
 
-crunch invs'[wp]: getSanitiseRegisterInfo invs'
-
-crunches getSanitiseRegisterInfo
-  for ex_nonz_cap_to'[wp]: "ex_nonz_cap_to' d"
-  and it'[wp]: "\<lambda>s. P (ksIdleThread s)"
-  and tcb_at'[wp]: "tcb_at' a"
-
-
 lemma writereg_invs':
   "\<lbrace>invs' and sch_act_simple and tcb_at' dest and ex_nonz_cap_to' dest\<rbrace>
      invokeTCB (tcbinvocation.WriteRegisters dest resume values arch)

@@ -483,4 +483,46 @@ lemma sc_at_ppred_exm:
   "sc_at_ppred p P scp s = (obj_at (\<lambda>ko. \<exists>sc n. ko = SchedContext sc n) scp s \<and> \<not> sc_at_ppred p (\<lambda>x. \<not> P x) scp s)"
   by (fastforce simp: sc_at_pred_n_def obj_at_def is_sc_obj pred_neg_def)
 
+crunches reply_remove
+  for scheduler_act_not[wp]: "scheduler_act_not tPtr"
+  (wp: crunch_wps)
+
+lemma reply_tcb_sym_refsD:
+  "\<lbrakk>sym_refs (state_refs_of s);
+    st_tcb_at ((=) (Structures_A.thread_state.BlockedOnReply rp1)) thread s;
+    reply_tcb_reply_at (\<lambda>x. x = Some thread) rp2 s\<rbrakk>
+   \<Longrightarrow> rp1 = rp2"
+  apply (clarsimp simp: reply_tcb_reply_at_def)
+  apply (drule (1) sym_refs_obj_atD[where p=rp2])
+  apply clarsimp
+  apply (clarsimp simp: get_refs_def2 obj_at_def pred_tcb_at_def)
+  apply (rename_tac ko; case_tac ko; clarsimp simp: get_refs_def2)
+  done
+
+lemma ipc_queued_thread_def2:
+  "ipc_queued_thread t s = (blocked_on_reply_tcb_at t s \<or> blocked_on_send_tcb_at t s \<or> blocked_on_recv_ntfn_tcb_at t s)"
+  apply (case_tac "tcb_sts_of s t")
+  apply (clarsimp simp: pred_map_def)
+   apply (case_tac a; simp)
+  apply (clarsimp simp: pred_map_def)+
+  done
+
+lemma released_ipc_queuesE1:
+  "released_ipc_queues s \<Longrightarrow> ipc_queued_thread t s \<Longrightarrow> active_if_bound_sc_tcb_at t s"
+  apply (clarsimp simp: released_ipc_queues_defs ipc_queued_thread_def2 released_sc_tcb_at_def)
+  apply (drule_tac x=t in spec)
+  by auto
+
+lemma active_sc_at_equiv:
+  "active_sc_at scPtr = is_active_sc scPtr"
+  by (fastforce simp: obj_at_def pred_map_def vs_all_heap_simps)
+
+lemma TCB_cte_wp_at_obj_at:
+  "tcb_at t s \<Longrightarrow>
+   (cte_wp_at P (t, n) s = obj_at (\<lambda>ko. \<exists>tcb. ko = TCB tcb \<and> case_option False P (tcb_cnode_map tcb n)) t s)"
+   by (fastforce dest!: singleton_eqD
+                  simp: get_object_def gets_the_def gets_def get_def bind_assoc assert_opt_def in_monad
+                        obj_at_def cte_wp_at_def get_cap_def is_tcb
+                 split: option.splits)
+
 end
