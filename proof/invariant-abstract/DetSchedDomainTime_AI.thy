@@ -581,7 +581,7 @@ lemma commit_domain_time_domain_time_left:
   using word_gt_0 by fastforce
 
 lemma commit_time_domain_time_left[wp]:
-  "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s) and K (~ sd)\<rbrace>
+  "\<lbrace> valid_domain_list and (\<lambda>s. if sd then 0 < domain_time s else consumed_time s < domain_time s)\<rbrace>
    commit_time sd
    \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
   supply if_split [split del]

@@ -10109,7 +10109,7 @@ lemma schedule_valid_sched_helper:
    do ct <- gets cur_thread;
       ct_schedulable <- is_schedulable ct;
       action <- gets scheduler_action;
-      switched_dom \<leftarrow> 
+      switched_dom \<leftarrow>
       case action of resume_cur_thread \<Rightarrow> return False
       | switch_thread candidate \<Rightarrow>
           do when ct_schedulable (tcb_sched_action tcb_sched_enqueue ct);
@@ -15665,7 +15665,7 @@ lemma invoke_sched_control_configure_valid_sched:
       apply (fastforce simp: sc_at_pred_n_def obj_at_def pred_tcb_at_def)
      apply (clarsimp simp: pred_tcb_at_def obj_at_def)
     apply (clarsimp simp: pred_map_eq_def pred_map_def obj_at_kh_kheap_simps)
-   
+
    apply (simp add: valid_sched_def)
    apply (wpsimp wp: possible_switch_to_valid_sched_weak[simplified valid_sched_def, simplified])
    apply (clarsimp split: if_split)
@@ -16290,23 +16290,19 @@ lemma invoke_sched_context_scheduler_act_sane[wp]:
    \<lbrace>\<lambda>_. scheduler_act_sane :: 'state_ext state \<Rightarrow> _\<rbrace>"
   unfolding invoke_sched_context_def
   apply (case_tac iv; simp)
-  by (wpsimp simp:  wp: hoare_vcg_if_lift2)+
+  by (wpsimp wp: hoare_vcg_if_lift2)+
 
 lemma invoke_sched_control_configure_scheduler_act_sane[wp]:
-  "\<lbrace>scheduler_act_sane\<rbrace>
-   invoke_sched_control_configure x8
+  "\<lbrace>scheduler_act_sane and valid_sched_control_inv iv and
+    (\<lambda>s. \<forall>scp tptr. sc_tcb_sc_at (\<lambda>t. t = Some tptr) scp s \<longrightarrow>
+                    tptr = cur_thread s \<longrightarrow> scp = cur_sc s)\<rbrace>
+   invoke_sched_control_configure iv
    \<lbrace>\<lambda>_. scheduler_act_sane :: 'state_ext state \<Rightarrow> _\<rbrace>"
   supply if_split [split del]
   unfolding invoke_sched_control_configure_def
-  apply wpsimp
-(*                apply (wpsimp wp: possible_switch_to_scheduler_act_sane' )
-              apply (wpsimp wp:  hoare_vcg_if_lift2 hoare_vcg_imp_lift' )
-             apply (wpsimp wp:  hoare_vcg_if_lift2 hoare_vcg_imp_lift' )
-            apply (rule_tac Q="\<lambda>_ s. scheduler_act_sane s" in hoare_strengthen_post[rotated])
-             apply (clarsimp split: if_split)
-  by (wpsimp wp: hoare_vcg_if_lift2 hoare_drop_imp)+
- *)
-  sorry (* hmmm *)
+               apply (wpsimp wp: possible_switch_to_scheduler_act_sane' hoare_vcg_if_lift2
+                                 hoare_drop_imp[where R="\<lambda>r s. H (runnable r) s" for H])
+  by (auto simp: sc_at_pred_n_def obj_at_def)
 
 crunches invoke_irq_handler
   for scheduler_act_sane[wp]: "scheduler_act_sane::'state_ext state \<Rightarrow> _"
@@ -16333,12 +16329,22 @@ lemma ct_activatable_ct_not_blocked_on_receive[elim!]:
   done
 
 lemma perform_invocation_scheduler_act_sane[wp]:
-  "\<lbrace>valid_invocation iv and simple_sched_action and ct_in_state activatable and invs\<rbrace>
+  "\<lbrace>valid_invocation iv and schact_is_rct and ct_in_state activatable and invs\<rbrace>
    perform_invocation block call can_donate iv
    \<lbrace>\<lambda>_. scheduler_act_sane :: 'state_ext state \<Rightarrow> _\<rbrace>"
   apply (case_tac iv; simp)
-  by (wpsimp wp: hoare_drop_imp invoke_cnode_scheduler_act_sane send_signal_scheduler_act_sane
-                 invoke_tcb_scheduler_act_sane | fastforce)+
+  apply (wpsimp wp: hoare_drop_imp invoke_cnode_scheduler_act_sane send_signal_scheduler_act_sane
+                 invoke_tcb_scheduler_act_sane | fastforce simp: schact_is_rct_def invs_def cur_sc_tcb_def)+
+  (* FIXME: cleanup needed here before merging *)
+      apply (subgoal_tac "cur_sc_tcb s")
+       apply (clarsimp simp: cur_sc_tcb_def schact_is_rct)
+       apply (subst (asm) sym_refs_bound_sc_tcb_iff_sc_tcb_sc_at[symmetric, OF refl refl invs_sym_refs], simp)
+       apply (subst (asm) sym_refs_bound_sc_tcb_iff_sc_tcb_sc_at[symmetric, OF refl refl invs_sym_refs], simp)
+       apply (clarsimp simp: pred_tcb_at_def obj_at_def)
+      apply fastforce
+     apply (wpsimp wp: hoare_drop_imp invoke_cnode_scheduler_act_sane send_signal_scheduler_act_sane
+                    invoke_tcb_scheduler_act_sane | fastforce simp: schact_is_rct_def invs_def cur_sc_tcb_def)+
+  done
 
 lemma postpone_ct_not_in_release_q:
   "\<lbrace>ct_not_in_release_q and (\<lambda>s. \<forall>t. sc_tcb_sc_at ((=) (Some t)) scp s \<longrightarrow> t\<noteq>cur_thread s)\<rbrace>
@@ -16693,18 +16699,21 @@ lemma do_reply_transfer_ct_not_queued[wp]:
   done
 
 lemma handle_invocation_scheduler_act_sane[wp]:
-  "\<lbrace>schact_is_rct and invs and ct_active\<rbrace>
+  "\<lbrace>schact_is_rct and invs and ct_active and ct_not_in_release_q
+    and (\<lambda>s. active_sc_tcb_at (cur_thread s) s)\<rbrace>
    handle_invocation False False True True reply_cptr
    \<lbrace>\<lambda>_. scheduler_act_sane :: 'state_ext state \<Rightarrow> _\<rbrace>"
   unfolding handle_invocation_def syscall_def
   apply (simp add: handle_invocation_def ts_Restart_case_helper split_def
                    liftE_liftM_liftME liftME_def bindE_assoc)
-  apply (wpsimp wp: hoare_drop_imp ct_in_state_set hoare_drop_impE)
+  apply (wpsimp wp: hoare_drop_imp ct_in_state_set hoare_drop_impE
+                    set_thread_state_schact_is_rct_strong)
       apply (rule validE_cases_valid, clarsimp)
       apply (subst validE_R_def[symmetric])
-      apply (rule_tac Q'="\<lambda>rv s. simple_sched_action s \<and> cur_thread s = thread
+      apply (rule_tac Q'="\<lambda>rv s. schact_is_rct s \<and> cur_thread s = thread
                                   \<and> st_tcb_at active thread s \<and> invs s
-                                  \<and> valid_invocation rv s"
+                                  \<and> valid_invocation rv s \<and> active_sc_tcb_at thread s
+                                  \<and> ct_not_in_release_q s"
                    in hoare_post_imp_R[rotated])
        apply (clarsimp cong: conj_cong simp: ct_in_state_def pred_tcb_at_def obj_at_def)
       apply (wp decode_inv_wf)
@@ -16713,8 +16722,7 @@ lemma handle_invocation_scheduler_act_sane[wp]:
      apply (subst validE_R_def[symmetric])
      apply wpsimp+
   apply (intro conjI)
-     apply (erule schact_is_rct_sane)
-    apply (erule schact_is_rct_simple)
+    apply (erule schact_is_rct_sane)
    apply (simp add: pred_tcb_at_def obj_at_def ct_in_state_def)
   apply (erule invs_valid_objs)
   done
@@ -18027,7 +18035,8 @@ lemma cap_cap_slot_fold:
   by (metis fst_conv snd_conv surj_pair)
 
 lemma handle_invocation_schact_sane:
-  "\<lbrace>simple_sched_action and ct_in_state active and invs\<rbrace>
+  "\<lbrace>schact_is_rct and ct_in_state active and invs and (\<lambda>s. active_sc_tcb_at (cur_thread s) s \<and>
+               ct_not_in_release_q s)\<rbrace>
    handle_invocation calling blocking can_donate first_phase cptr
    \<lbrace>\<lambda>rv. scheduler_act_sane :: 'state_ext state \<Rightarrow> _\<rbrace>"
   unfolding handle_invocation_def
@@ -18035,7 +18044,7 @@ lemma handle_invocation_schact_sane:
   apply (wpsimp wp: syscall_valid)
          apply (wpsimp wp: hoare_drop_imp, clarsimp cong: conj_cong)
         apply (wpsimp wp: perform_invocation_scheduler_act_sane, clarsimp cong: conj_cong)
-       apply (wpsimp wp: ct_in_state_set)
+       apply (wpsimp wp: ct_in_state_set set_thread_state_schact_is_rct_strong)
       apply wpsimp
      apply (wpsimp wp: hoare_drop_imps simp: cap_cap_slot_fold)
     apply wpsimp
@@ -18250,7 +18259,7 @@ lemma handle_event_scheduler_act_sane:
     apply (case_tac syscall; simp)
               apply (wpsimp simp: handle_call_def
                               wp: handle_invocation_schact_sane check_budget_restart_true check_budget_restart_false)
-              apply (fastforce elim: active_from_running)
+              apply (fastforce elim: active_from_running schat_is_rct_ct_active_sc)
              apply ((wpsimp wp: handle_invocation_schact_sane check_budget_restart_true
                                  check_budget_restart_false
                     | strengthen ct_runnable_ct_not_blocked active_from_running)+)[1]
@@ -18278,11 +18287,12 @@ lemma handle_event_scheduler_act_sane:
                           wp: handle_invocation_schact_sane check_budget_restart_true
                               check_budget_restart_false
                  | strengthen ct_runnable_ct_not_blocked active_from_running)+)[1]
-          apply fastforce
+         apply (fastforce dest: schat_is_rct_ct_active_sc)
          apply ((wpsimp simp: handle_call_def handle_send_def
                          wp: handle_invocation_schact_sane check_budget_restart_true
                              check_budget_restart_false
                 | strengthen ct_runnable_ct_not_blocked active_from_running)+)[1]
+          apply (strengthen schat_is_rct_ct_active_sc)
          apply fastforce
         apply (wpsimp simp: handle_call_def handle_send_def
                         wp: handle_invocation_schact_sane check_budget_restart_true
@@ -21643,7 +21653,7 @@ lemma handle_event_cur_sc_in_release_q_imp_zero_consumed:
     by (case_tac syscall; simp
         ; cur_sc_in_release_q_imp_zero_consumed_syscall_single?
           , cur_sc_in_release_q_imp_zero_consumed_syscall_combined?) \<comment> \<open>takes 30 seconds or so\<close>
-        fastforce+
+        (fastforce elim: schat_is_rct_ct_active_sc)+
 
       apply (wpsimp wp: check_budget_restart_if_lift
                         update_timestamp_cur_sc_in_release_q_imp_zero_consumed)
