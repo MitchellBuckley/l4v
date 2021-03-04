@@ -97,9 +97,9 @@ where
   od"
 
 definition
-  switch_sched_context :: "(unit,'z::state_ext) s_monad"
+  switch_sched_context :: "bool \<Rightarrow> (unit,'z::state_ext) s_monad"
 where
-  "switch_sched_context = do
+  "switch_sched_context switched_dom = do
     cur_sc \<leftarrow> gets cur_sc;
     cur_th \<leftarrow> gets cur_thread;
     sc_opt \<leftarrow> get_tcb_obj_ref tcb_sched_context cur_th;
@@ -112,16 +112,16 @@ where
      od;
 
     reprogram \<leftarrow> gets reprogram_timer;
-    when reprogram $ commit_time;
+    when reprogram $ commit_time switched_dom;
 
     modify (\<lambda>s. s\<lparr> cur_sc:= scp \<rparr>)
   od"
 
 definition
-  sc_and_timer :: "(unit, 'z::state_ext) s_monad"
+  sc_and_timer :: "bool \<Rightarrow> (unit, 'z::state_ext) s_monad"
 where
-  "sc_and_timer = do
-    switch_sched_context;
+  "sc_and_timer switched_dom = do
+    switch_sched_context switched_dom;
     reprogram \<leftarrow> gets reprogram_timer;
     when reprogram $ do
       set_next_interrupt;
@@ -196,9 +196,11 @@ definition
 definition
   "schedule_choose_new_thread \<equiv> do
      dom_time \<leftarrow> gets domain_time;
-     when (dom_time = 0) next_domain;
+     dom_exp \<leftarrow> gets is_cur_domain_expired;
+     when dom_exp $ next_domain;
      choose_thread;
-     set_scheduler_action resume_cur_thread
+     set_scheduler_action resume_cur_thread;
+     return dom_exp
    od"
 
 definition
@@ -207,8 +209,9 @@ definition
      ct \<leftarrow> gets cur_thread;
      ct_schedulable \<leftarrow> is_schedulable ct;
      action \<leftarrow> gets scheduler_action;
+     switched_dom \<leftarrow> 
      (case action
-       of resume_cur_thread \<Rightarrow> return ()
+       of resume_cur_thread \<Rightarrow> return False
        | choose_new_thread \<Rightarrow> do
            when ct_schedulable (tcb_sched_action tcb_sched_enqueue ct); \<comment> \<open>schedulable\<close>
            schedule_choose_new_thread
@@ -246,10 +249,11 @@ definition
            else do
              switch_to_thread candidate;
              \<comment> \<open>Duplication assists in wp proof under different scheduler actions\<close>
-             set_scheduler_action resume_cur_thread
+             set_scheduler_action resume_cur_thread;
+             return False
            od
         od);
-     sc_and_timer
+     sc_and_timer switched_dom
    od"
 
 

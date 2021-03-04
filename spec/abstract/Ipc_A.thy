@@ -733,13 +733,7 @@ where
     when (sc_tcb sc \<noteq> None) $ do
       tcb_ptr \<leftarrow> assert_opt $ sc_tcb sc;
       tcb_release_remove tcb_ptr;
-      tcb_sched_action tcb_sched_dequeue tcb_ptr;
-      cur_sc \<leftarrow> gets cur_sc;
-      when (cur_sc = sc_ptr) $ commit_time
-           \<comment> \<open>The C code here includes an assert saying that @{text check_budget} returns True.
-               However, we can call @{text invoke_sched_control_configure} only if the call to
-               @{text check_budget_restart} at the beginning of @{text handle_event} returns True, so we
-               know that @{text check_budget} would return True if called here.\<close>
+      tcb_sched_action tcb_sched_dequeue tcb_ptr
     od;
 
     if period = budget
@@ -757,9 +751,7 @@ where
       tcb_ptr \<leftarrow> assert_opt $ sc_tcb sc;
       st \<leftarrow> get_thread_state tcb_ptr;
       sched_context_resume sc_ptr;
-      ct \<leftarrow> gets cur_thread;
-      if tcb_ptr = ct then reschedule_required
-      else when (runnable st) $ possible_switch_to tcb_ptr
+      when (runnable st) $ possible_switch_to tcb_ptr
     od
   od"
 

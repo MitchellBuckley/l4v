@@ -13,6 +13,11 @@ begin
 text \<open> This theory contains operations on scheduling contexts and scheduling control. \<close>
 
 definition
+  is_cur_domain_expired :: "'z::state_ext state \<Rightarrow> bool"
+where
+  "is_cur_domain_expired = (\<lambda>s. domain_time  s < consumed_time s + kernelWCET_ticks)"
+
+definition
   is_round_robin :: "obj_ref \<Rightarrow> (bool,'z::state_ext) s_monad"
 where
   "is_round_robin sc_ptr = do
@@ -441,9 +446,9 @@ where
 
 text \<open> Update time consumption of current scheduling context and current domain. \<close>
 definition
-  commit_time :: "(unit, 'z::state_ext) s_monad"
+  commit_time :: "bool \<Rightarrow> (unit, 'z::state_ext) s_monad"
 where
-  "commit_time = do
+  "commit_time switched_dom = do
     csc \<leftarrow> gets cur_sc;
     sc \<leftarrow> get_sched_context csc;
     when (sc_active sc) $ do
@@ -456,7 +461,7 @@ where
       od;
       update_sched_context csc (\<lambda>sc. sc\<lparr>sc_consumed := (sc_consumed sc) + consumed \<rparr>)
     od;
-    when (num_domains > 1) $
+    when (num_domains > 1 \<and> \<not>switched_dom) $
       commit_domain_time;
     modify (\<lambda>s. s\<lparr>consumed_time := 0\<rparr> )
   od"

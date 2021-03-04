@@ -587,6 +587,8 @@ where
     target_cap \<leftarrow> returnOk $ hd excaps;
     whenE (\<not>is_sched_context_cap target_cap) $ throwError (InvalidCapability 1);
     sc_ptr \<leftarrow> returnOk $ obj_ref_of target_cap;
+    cur_sc \<leftarrow> liftE $ gets cur_sc;
+    whenE (cur_sc = sc_ptr) $ throwError IllegalOperation;
     whenE (MAX_PERIOD_US < budget_\<mu>s \<or> budget_\<mu>s < MIN_BUDGET_US) $
       throwError (RangeError (ucast MIN_BUDGET_US) (ucast MAX_PERIOD_US));
     whenE (MAX_PERIOD_US < period_\<mu>s \<or> period_\<mu>s < MIN_BUDGET_US) $
