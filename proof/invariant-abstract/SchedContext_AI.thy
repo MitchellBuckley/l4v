@@ -31,7 +31,7 @@ lemma ct_in_state_trans_update[simp]: "ct_in_state st (trans_state f s) = ct_in_
   apply (simp add: ct_in_state_def)
   done
 
-(* RT: sc_and_timer invs *)
+(* RT: sc_and_timer sd invs *)
 lemma set_refills_valid_objs:
   "set_refills sc_ptr refills \<lbrace>valid_objs\<rbrace>"
   apply (wpsimp simp: set_refills_def set_object_def
@@ -612,9 +612,10 @@ lemma refill_budget_check_valid_replies[wp]:
                wp: get_refills_wp)
 
 lemma commit_time_valid_replies[wp]:
-  "commit_time \<lbrace> valid_replies_pred P \<rbrace>"
+  "commit_time sd \<lbrace> valid_replies_pred P \<rbrace>"
   by (wpsimp simp: commit_time_def refill_budget_check_round_robin_def
-               wp: hoare_drop_imps cong: sched_context.fold_congs)
+               wp: hoare_drop_imps hoare_vcg_if_lift2 
+             cong: sched_context.fold_congs)
 
 lemma sc_consumed_update_eq:
   "(\<lambda>sc. sc_consumed_update (\<lambda>v. v + x) sc) = (\<lambda>sc. sc\<lparr>sc_consumed := sc_consumed sc + x\<rparr>)"
@@ -633,7 +634,7 @@ lemma commit_times_invs_helper:
          consumed_time s = consumed \<and>
          cur_sc s = csc\<rbrace>
        do y <- update_sched_context csc (\<lambda>sc. sc\<lparr>sc_consumed := sc_consumed sc + consumed\<rparr>);
-          y <- commit_domain_time;
+          y <- when (\<not> sd) commit_domain_time;
           modify (consumed_time_update (\<lambda>_. 0))
        od
        \<lbrace>\<lambda>rv. invs\<rbrace>"
@@ -644,7 +645,7 @@ lemma commit_times_invs_helper:
   done
 
 lemma commit_time_invs:
-  "commit_time \<lbrace>invs\<rbrace>"
+  "commit_time sd \<lbrace>invs\<rbrace>"
   supply fun_upd_apply[simp del]
   apply (clarsimp simp: commit_time_def num_domains_def)
   apply (rule hoare_seq_ext[OF _ gets_sp])
@@ -714,11 +715,11 @@ lemma refill_budget_check_bound_sc_tcb_at [wp]:
 
 lemma commit_time_bound_sc_tcb_at [wp]:
   "\<lbrace>\<lambda>s. bound_sc_tcb_at ((=) (Some sc)) (cur_thread s) s\<rbrace>
-   commit_time
+   commit_time sd
    \<lbrace>\<lambda>_ s. bound_sc_tcb_at ((=) (Some sc)) (cur_thread s) s\<rbrace>"
   by (wpsimp simp: commit_time_def sc_consumed_update_eq[symmetric]
                    refill_budget_check_round_robin_def
-               wp: hoare_drop_imps)
+               wp: hoare_drop_imps hoare_vcg_if_lift2)
 
 lemma refill_unblock_check_bound_sc_tcb_at [wp]:
   "\<lbrace>\<lambda>s. bound_sc_tcb_at ((=) (Some sc)) (cur_thread s) s\<rbrace>
@@ -751,27 +752,27 @@ lemma refill_budget_check_valid_state [wp]:
                wp: valid_irq_node_typ valid_ioports_lift refill_budget_check_valid_idle)
 
 lemma commit_time_valid_state [wp]:
-  "\<lbrace>valid_state\<rbrace> commit_time \<lbrace>\<lambda>_. valid_state\<rbrace>"
+  "\<lbrace>valid_state\<rbrace> commit_time sd \<lbrace>\<lambda>_. valid_state\<rbrace>"
   by (wpsimp simp: commit_time_def sc_consumed_update_eq[symmetric]
                    refill_budget_check_round_robin_def
-               wp: hoare_drop_imps)
+               wp: hoare_drop_imps hoare_vcg_if_lift2)
 
 lemma commit_time_cur_tcb [wp]:
-  "\<lbrace>cur_tcb\<rbrace> commit_time \<lbrace>\<lambda>_. cur_tcb\<rbrace>"
+  "\<lbrace>cur_tcb\<rbrace> commit_time sd \<lbrace>\<lambda>_. cur_tcb\<rbrace>"
   by (wpsimp simp: commit_time_def refill_budget_check_round_robin_def
-               wp: hoare_drop_imps)
+               wp: hoare_drop_imps hoare_vcg_if_lift2)
 
 lemma commit_time_fault_tcbs_valid_states[wp]:
-  "commit_time \<lbrace>fault_tcbs_valid_states\<rbrace>"
+  "commit_time sd \<lbrace>fault_tcbs_valid_states\<rbrace>"
   by (wpsimp simp: commit_time_def refill_budget_check_round_robin_def
-               wp: hoare_drop_imps)
+               wp: hoare_drop_imps hoare_vcg_if_lift2)
 
 crunches switch_sched_context
   for fault_tcbs_valid_states [wp]: fault_tcbs_valid_states
   (wp: crunch_wps hoare_vcg_if_lift2 simp: Let_def ignore: commit_domain_time)
 
 lemma switch_sched_context_invs [wp]:
-  "\<lbrace>valid_state and cur_tcb\<rbrace> switch_sched_context \<lbrace>\<lambda>rv. invs\<rbrace>"
+  "\<lbrace>valid_state and cur_tcb\<rbrace> switch_sched_context sd \<lbrace>\<lambda>rv. invs\<rbrace>"
   apply (simp add: switch_sched_context_def)
   apply (rule hoare_seq_ext[OF _ gets_sp])
   apply (rule hoare_seq_ext[OF _ gets_sp])
@@ -781,7 +782,7 @@ lemma switch_sched_context_invs [wp]:
   done
 
 lemma sc_and_timer_invs:
-  "\<lbrace>valid_state and cur_tcb\<rbrace> sc_and_timer \<lbrace>\<lambda>rv. invs\<rbrace>"
+  "\<lbrace>valid_state and cur_tcb\<rbrace> sc_and_timer sd \<lbrace>\<lambda>rv. invs\<rbrace>"
   by (wpsimp simp: sc_and_timer_def)
 
 (* move to Invariants_AI *)
@@ -828,7 +829,7 @@ lemma refill_unblock_check_ct_in_state[wp]:
            simp: refill_unblock_check_def is_round_robin_def)
 
 lemma switch_sched_context_ct_in_state[wp]:
-  "\<lbrace> ct_in_state t \<rbrace> switch_sched_context \<lbrace> \<lambda>rv. ct_in_state t \<rbrace>"
+  "\<lbrace> ct_in_state t \<rbrace> switch_sched_context sd \<lbrace> \<lambda>rv. ct_in_state t \<rbrace>"
   by (wpsimp simp: switch_sched_context_def get_tcb_queue_def get_sc_obj_ref_def
              wp: hoare_drop_imp hoare_vcg_if_lift2)
 
@@ -841,7 +842,7 @@ lemma set_next_interrupt_activatable:
 
 
 lemma sc_and_timer_activatable:
-  "\<lbrace>ct_in_state activatable\<rbrace> sc_and_timer \<lbrace>\<lambda>rv. ct_in_state activatable\<rbrace>"
+  "\<lbrace>ct_in_state activatable\<rbrace> sc_and_timer sd \<lbrace>\<lambda>rv. ct_in_state activatable\<rbrace>"
   apply (wpsimp simp: sc_and_timer_def switch_sched_context_def get_tcb_queue_def get_sc_obj_ref_def
            wp: hoare_drop_imp modify_wp hoare_vcg_if_lift2 set_next_interrupt_activatable)
   done

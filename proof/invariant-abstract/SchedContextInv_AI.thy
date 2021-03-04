@@ -598,7 +598,8 @@ where
         and ex_nonz_cap_to scptr and K (MIN_REFILLS \<le> mrefills) \<comment> \<open>mrefills = MIN_REFILLS + extra_refills\<close>
         and K (budget \<le> MAX_PERIOD \<and> budget \<ge> MIN_BUDGET)
         and K (period \<le> MAX_PERIOD \<and> budget \<ge> MIN_BUDGET)
-        and K (budget \<le> period))"
+        and K (budget \<le> period)
+        and (\<lambda>s. scptr \<noteq> cur_sc s))"
 
 
 text \<open>refill invariant proofs\<close>  \<comment> \<open>FIXME move? Sporadic_AI?\<close>

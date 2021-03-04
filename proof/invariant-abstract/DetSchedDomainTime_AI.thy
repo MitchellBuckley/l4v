@@ -189,7 +189,7 @@ crunch domain_list_inv[wp]: set_next_interrupt, switch_sched_context
   (wp: crunch_wps)
 
 lemma sc_and_timer_domain_list[wp]:
-  "sc_and_timer \<lbrace>\<lambda>s::det_state. P (domain_list s)\<rbrace>"
+  "sc_and_timer sd \<lbrace>\<lambda>s::det_state. P (domain_list s)\<rbrace>"
   by (wpsimp simp: sc_and_timer_def Let_def wp: get_sched_context_wp)
 
 crunch domain_list_inv[wp]: sc_and_timer "\<lambda>s::det_state. P (domain_list s)"
@@ -581,11 +581,12 @@ lemma commit_domain_time_domain_time_left:
   using word_gt_0 by fastforce
 
 lemma commit_time_domain_time_left[wp]:
-  "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-   commit_time
+  "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s) and K (~ sd)\<rbrace>
+   commit_time sd
    \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
+  supply if_split [split del]
   by (wpsimp simp: commit_time_def num_domains_def
-               wp: commit_domain_time_domain_time_left hoare_drop_imp)
+               wp: commit_domain_time_domain_time_left hoare_vcg_if_lift2)
 
 lemma invoke_sched_control_configure_domain_time_inv[wp]:
   "\<lbrace>valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
@@ -704,7 +705,7 @@ context DetSchedDomainTime_AI begin
 
 lemma switch_sched_context_domain_time_left[wp]:
   "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-     switch_sched_context \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
+     switch_sched_context sd \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
   apply (wpsimp simp: switch_sched_context_def refill_unblock_check_def
            wp: hoare_vcg_if_lift2 hoare_drop_imp split_del: if_split)
   apply (clarsimp simp: word_gt_0)
@@ -712,7 +713,7 @@ lemma switch_sched_context_domain_time_left[wp]:
 
 lemma sc_and_timer_domain_time_left[wp]:
   "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-     sc_and_timer \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
+     sc_and_timer sd \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
   by (wpsimp simp: sc_and_timer_def Let_def)
 (*
 lemma next_domain_domain_time_left[wp]:

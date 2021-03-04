@@ -456,7 +456,7 @@ lemma empty_fail_tcb_ep_find_index[wp]:
 context EmptyFail_AI_schedule begin
 
 lemma schedule_choose_new_thread_empty_fail[intro!, wp, simp]:
-  "empty_fail (schedule_choose_new_thread :: (unit,'state_ext) s_monad)"
+  "empty_fail (schedule_choose_new_thread :: (_,'state_ext) s_monad)"
   by (wpsimp simp: schedule_choose_new_thread_def)
 
 lemma schedule_empty_fail'[intro!, wp, simp]:
