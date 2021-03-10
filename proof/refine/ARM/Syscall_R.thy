@@ -1382,7 +1382,7 @@ lemma hs_corres:
           (invs' and (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and
            (\<lambda>s. ksSchedulerAction s = ResumeCurrentThread) and ct_active')
           (handle_send blocking) (handleSend blocking)"
-  apply (simp add: handle_send_def handleSend_def hinv_corres)
+  apply (simp add: handle_send_def handleSend_def)
   apply (rule corres_guard_imp)
     apply (rule corres_split_liftEE[OF getCapReg_corres])
       apply (simp, rule hinv_corres)
@@ -1637,8 +1637,13 @@ lemma hc_corres:
                 (\<lambda>s. ksSchedulerAction s = ResumeCurrentThread) and
                 ct_active')
          handle_call handleCall"
-  sorry (*
-  by (simp add: handle_call_def handleCall_def liftE_bindE hinv_corres) *)
+  apply (simp add: handle_call_def handleCall_def liftE_bindE hinv_corres)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split[OF getCapReg_corres])
+      apply (simp, rule hinv_corres)
+      apply (clarsimp, assumption)
+     apply (wpsimp simp: getCapReg_def)+
+  done
 
 lemma hc_invs'[wp]:
   "\<lbrace>invs' and (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and
