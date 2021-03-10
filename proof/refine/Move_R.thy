@@ -457,4 +457,22 @@ lemma bind_dummy_ret_val:
    od = do a; b od"
   by simp
 
+(* FIXME RT: move to lib *)
+lemma hoare_case_option_wp2:
+  "\<lbrakk> \<lbrace>P\<rbrace> f None \<lbrace>Q\<rbrace>; \<And>x.  \<lbrace>P' x\<rbrace> f (Some x) \<lbrace>Q' x\<rbrace> \<rbrakk>
+  \<Longrightarrow> \<lbrace>case_option P P' v\<rbrace> f v \<lbrace>\<lambda>rv s. case v of None \<Rightarrow> Q rv s | Some x \<Rightarrow> Q' x rv s\<rbrace>"
+  by (cases v) auto
+
+(* FIXME RT: move to the location of lookup_cap_and_slot_valid_fault2
+        And: Should this replace the existing lookup_cap_and_slot_valid_fault2 ? *)
+lemma lookup_cap_and_slot_valid_fault3[wp]:
+  "\<lbrace>invs and K (p = to_bl p')\<rbrace>
+   lookup_cap_and_slot thread p
+   -,\<lbrace>\<lambda>ft s. valid_fault (ExceptionTypes_A.CapFault p' rp ft)\<rbrace>"
+  using lookup_cap_and_slot_valid_fault
+  apply (clarsimp simp: validE_E_def validE_def valid_def
+                 split: sum.splits)
+  apply (drule invs_valid_objs, fastforce)
+  done
+
 end
