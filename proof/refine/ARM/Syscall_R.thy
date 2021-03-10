@@ -551,34 +551,52 @@ lemma sts_mcpriority_tcb_at'[wp]:
 
 context begin interpretation Arch . (*FIXME: arch_split*)
 
+(* FIXME RT: move to lib *)
+lemma hoare_case_option_wp2:
+  "\<lbrakk> \<lbrace>P\<rbrace> f None \<lbrace>Q\<rbrace>; \<And>x.  \<lbrace>P' x\<rbrace> f (Some x) \<lbrace>Q' x\<rbrace> \<rbrakk>
+  \<Longrightarrow> \<lbrace>case_option P P' v\<rbrace> f v \<lbrace>\<lambda>rv s. case v of None \<Rightarrow> Q rv s | Some x \<Rightarrow> Q' x rv s\<rbrace>"
+  by (cases v) auto
+
 lemma sts_valid_inv'[wp]:
-  "\<lbrace>valid_invocation' i\<rbrace> setThreadState st t \<lbrace>\<lambda>rv. valid_invocation' i\<rbrace>"
-  apply (case_tac i, simp_all add: sts_valid_untyped_inv' sts_valid_arch_inv')
-         apply (wp | simp)+
-     defer
+  "setThreadState st t \<lbrace>valid_invocation' i\<rbrace>"
+  apply (case_tac i; simp)
+             apply (wpsimp wp: sts_valid_untyped_inv')
+            apply (wpsimp+)[4]
+        apply (rename_tac tcbinvocation)
+        apply (case_tac tcbinvocation; simp)
+                apply wpsimp
+               apply wpsimp
+              apply (wpsimp wp: hoare_case_option_wp)
+              apply (clarsimp split: option.splits)
+             apply (wpsimp wp: hoare_case_option_wp2
+                               hoare_case_option_wp sts_mcpriority_tcb_at')
+             apply (clarsimp split: option.splits)
+            apply (wpsimp wp: hoare_case_option_wp)
+            apply (clarsimp split: option.splits)
+           apply (wpsimp+)[4]
+       apply (rename_tac schedcontextinvocation)
+       apply (case_tac schedcontextinvocation; simp)
+           apply wpsimp
+          apply (rename_tac bindCap, case_tac bindCap; wpsimp)
+         apply (rename_tac bindCap, case_tac bindCap; wpsimp)
+        apply wpsimp
+       apply ((wpsimp | wps)+)[1]
+      apply (rename_tac schedcontrolinvocation)
+      apply (case_tac schedcontrolinvocation;
+             wpsimp wp: hoare_vcg_ex_lift)
      apply (rename_tac cnode_invocation)
-     apply (case_tac cnode_invocation, simp_all add: cte_wp_at_ctes_of)
-           apply (wp | simp)+
+     apply (case_tac cnode_invocation;
+            wpsimp simp: cte_wp_at_ctes_of)
     apply (rename_tac irqcontrol_invocation)
-    apply (case_tac irqcontrol_invocation, simp_all)
+    apply (case_tac irqcontrol_invocation; simp)
      apply (rename_tac arch_irqhandler_issue)
-     apply (case_tac arch_irqhandler_issue)
-     apply (wp | simp add: irq_issued'_def)+
+     apply (case_tac arch_irqhandler_issue; wpsimp simp: irq_issued'_def)
+    apply (wpsimp simp: irq_issued'_def)
    apply (rename_tac irqhandler_invocation)
-   apply (case_tac irqhandler_invocation, simp_all)
-   sorry (*
-     apply (wp hoare_vcg_ex_lift ex_cte_cap_to'_pres | simp)+
-  apply (rename_tac tcbinvocation)
-  apply (case_tac tcbinvocation,
-      simp_all add: setThreadState_tcb',
-      auto  intro!: hoare_vcg_conj_lift hoare_vcg_disj_lift
-      simp only: imp_conv_disj simp_thms pred_conj_def,
-      auto  intro!: hoare_vcg_prop
-      sts_cap_to' sts_cte_cap_to'
-      setThreadState_typ_ats
-      split: option.splits)[1]
-    apply (wp hoare_vcg_all_lift hoare_vcg_const_imp_lift)+
-  done *)
+   apply (case_tac irqhandler_invocation;
+          wpsimp wp: hoare_vcg_ex_lift simp: comp_def)
+  apply (wpsimp wp: sts_valid_arch_inv')
+  done
 
 crunches decodeDomainInvocation, decodeSchedContextInvocation, decodeSchedControlInvocation
   for inv[wp]: P
@@ -858,7 +876,6 @@ lemma tcbSchedEnqueue_valid_action:
 
 abbreviation (input) "all_invs_but_sch_extra \<equiv>
     \<lambda>s. valid_pspace' s \<and> valid_queues s \<and>
-    sym_refs (state_refs_of' s) \<and>
     sym_refs (list_refs_of_replies' s) \<and>
     if_live_then_nonz_cap' s \<and>
     if_unsafe_then_cap' s \<and>
@@ -920,22 +937,55 @@ lemma threadSet_not_curthread_ct_domain:
   apply clarsimp
   done
 
+(* FIXME RT: move these two *)
+lemma pred_map_tcbs_of'_obj_at':
+  "tcb_at' t s \<Longrightarrow>
+   pred_map P (tcbs_of' s) t = obj_at' P t s"
+  by (clarsimp simp: pred_map_def obj_at'_real_def ko_wp_at'_def projectKOs
+                     opt_map_def tcb_of'_def)
+
+lemma pred_map_tcb_scs_of'_obj_at':
+  "tcb_at' t s \<Longrightarrow>
+   pred_map (P s) (tcb_scs_of' s) t = (\<exists>scp. obj_at' (\<lambda>tcb. tcbSchedContext tcb = Some scp) t s \<and> P s scp)"
+  by (clarsimp simp: pred_map_def obj_at'_real_def ko_wp_at'_def projectKOs
+                     opt_map_def tcb_of'_def)
+
+lemma isSchedulable_bool_def2:
+  "tcb_at' t s \<Longrightarrow>
+   isSchedulable_bool t s =
+     (st_tcb_at' runnable' t s
+      \<and> obj_at' (\<lambda>tcb. \<not>tcbInReleaseQueue tcb) t s
+      \<and> (\<exists>scp. obj_at' (\<lambda>tcb. tcbSchedContext tcb = Some scp) t s \<and> isScActive scp s))"
+  apply (clarsimp simp: isSchedulable_bool_def pred_map_conj pred_map_tcbs_of'_obj_at'
+                        pred_map_tcb_scs_of'_obj_at')
+  apply (rule arg_cong2[where f=conj])
+   apply (clarsimp simp: pred_tcb_at'_def)
+  apply (rule arg_cong2[where f=conj])
+   apply (clarsimp simp: pred_tcb_at'_def)
+  apply (subst pred_map_tcb_scs_of'_obj_at'; simp)
+  done
+
 lemma setDomain_invs':
-  "\<lbrace> invs' and sch_act_simple and ct_active' and
-     (tcb_at' ptr and sch_act_not ptr and K (domain \<le> maxDomain))\<rbrace>
+  "\<lbrace> invs' and sch_act_simple and tcb_at' ptr and K (domain \<le> maxDomain)\<rbrace>
    setDomain ptr domain
    \<lbrace>\<lambda>_. invs'\<rbrace>"
+  supply rescheduleRequired_invs' [wp del]
   apply (simp add:setDomain_def )
   apply (wp add: hoare_when_wp static_imp_wp static_imp_conj_wp rescheduleRequired_all_invs_but_extra
-                 tcbSchedEnqueue_valid_action hoare_vcg_if_lift2)
+                 tcbSchedEnqueue_valid_action hoare_vcg_if_lift2 valid_irq_handlers_lift')
+      apply (wpsimp wp: isSchedulable_wp)
      apply (rule_tac Q = "\<lambda>r s. all_invs_but_sch_extra s \<and> curThread = ksCurThread s
       \<and> (ptr \<noteq> curThread \<longrightarrow> ct_not_inQ s \<and> sch_act_wf (ksSchedulerAction s) s \<and> ct_idle_or_in_cur_domain' s)"
       in hoare_strengthen_post[rotated])
       apply (clarsimp simp:invs'_def valid_state'_def st_tcb_at'_def[symmetric] valid_pspace'_def)
-  sorry (*
-      apply (erule st_tcb_ex_cap'')
-       apply simp
-      apply (case_tac st,simp_all)[1]
+      apply (intro conjI allI impI)
+         apply (erule valid_objs'_valid_tcbs')
+        apply (clarsimp simp: comp_def)
+       apply (clarsimp simp: isSchedulable_bool_def2 pred_map_conj)
+       apply (erule st_tcb_ex_cap'')
+        apply simp
+       apply (case_tac st,simp_all)[1]
+      apply (clarsimp simp: isSchedulable_bool_def2)
      apply (rule hoare_strengthen_post[OF hoare_vcg_conj_lift])
        apply (rule threadSet_all_invs_but_sch_extra)
       prefer 2
@@ -945,12 +995,13 @@ lemma setDomain_invs':
                threadSet_tcbDomain_update_ct_not_inQ | simp)+
     apply (rule_tac Q = "\<lambda>r s. invs' s \<and> curThread = ksCurThread s \<and> sch_act_simple s
                              \<and> domain \<le> maxDomain
-                             \<and> (ptr \<noteq> curThread \<longrightarrow> ct_not_inQ s \<and> sch_act_not ptr s)"
+                             \<and> (ptr \<noteq> curThread \<longrightarrow> ct_not_inQ s)
+                             \<and> (\<forall>a b. ptr \<notin> set (ksReadyQueues s (a, b)))"
       in hoare_strengthen_post[rotated])
      apply (clarsimp simp:invs'_def valid_state'_def)
-    apply (wp hoare_vcg_imp_lift)+
+    apply (wp hoare_vcg_imp_lift tcbSchedDequeue_not_in_queue hoare_vcg_all_lift)+
   apply (clarsimp simp:invs'_def valid_pspace'_def valid_state'_def)+
-  done *)
+  done
 
 lemma performInv_invs'[wp]:
   "\<lbrace>invs' and sch_act_simple
@@ -1314,14 +1365,30 @@ lemma hinv_invs'[wp]:
                         dest: st_tcb_at_idle_thread')+
   done
 
+lemma getCapReg_corres:
+  "corres (\<lambda>x y. y = of_bl x) ct_active ct_active'
+          (get_cap_reg cap_register) (getCapReg ARM_H.capRegister)"
+  apply (simp add: get_cap_reg_def getCapReg_def cap_register_def capRegister_def)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split[OF gct_corres], simp)
+      apply (rule corres_rel_imp)
+       apply (rule user_getreg_corres)
+      apply (wpsimp simp: ct_in_state_def ct_in_state'_def)+
+  done
+
 lemma hs_corres:
   "corres (dc \<oplus> dc)
           (einvs and (\<lambda>s. scheduler_action s = resume_cur_thread) and ct_active)
           (invs' and (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and
            (\<lambda>s. ksSchedulerAction s = ResumeCurrentThread) and ct_active')
           (handle_send blocking) (handleSend blocking)"
-  sorry (*
-  by (simp add: handle_send_def handleSend_def hinv_corres) *)
+  apply (simp add: handle_send_def handleSend_def hinv_corres)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split_liftEE[OF getCapReg_corres])
+      apply (simp, rule hinv_corres)
+      apply (clarsimp, assumption)
+     apply (wpsimp simp: getCapReg_def)+
+  done
 
 lemma hs_invs'[wp]:
   "\<lbrace>invs' and ct_isSchedulable and

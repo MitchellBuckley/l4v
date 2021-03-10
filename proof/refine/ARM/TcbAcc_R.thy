@@ -107,6 +107,7 @@ crunches setThreadState, threadSet
   and tcb_at'[wp]: "\<lambda>s. P (tcb_at' p s)"
   and obj_at'_reply[wp]: "\<lambda>s. P (obj_at' (Q :: reply \<Rightarrow> bool) p s)"
   and obj_at'_ep[wp]: "\<lambda>s. P (obj_at' (Q :: endpoint \<Rightarrow> bool) p s)"
+  and obj_at'_ntfn[wp]: "\<lambda>s. P (obj_at' (Q :: notification \<Rightarrow> bool) p s)"
   (wp: crunch_wps set_tcb'.set_preserves_some_obj_at')
 
 crunches tcbSchedDequeue, tcbSchedEnqueue
@@ -4601,6 +4602,13 @@ lemma sts_bound_tcb_at'[wp]:
 
 lemma sts_bound_sc_tcb_at'[wp]:
   "setThreadState st t' \<lbrace>bound_sc_tcb_at' P t\<rbrace>"
+  apply (clarsimp simp: setThreadState_def)
+  by (cases "t = t'"
+      ; wpsimp wp: threadSet_pred_tcb_at_state
+             simp: pred_tcb_at'_def)+
+
+lemma sts_bound_yt_tcb_at'[wp]:
+  "setThreadState st t' \<lbrace>bound_yt_tcb_at' P t\<rbrace>"
   apply (clarsimp simp: setThreadState_def)
   by (cases "t = t'"
       ; wpsimp wp: threadSet_pred_tcb_at_state
