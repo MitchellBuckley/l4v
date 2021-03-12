@@ -937,34 +937,6 @@ lemma threadSet_not_curthread_ct_domain:
   apply clarsimp
   done
 
-(* FIXME RT: move these two *)
-lemma pred_map_tcbs_of'_obj_at':
-  "tcb_at' t s \<Longrightarrow>
-   pred_map P (tcbs_of' s) t = obj_at' P t s"
-  by (clarsimp simp: pred_map_def obj_at'_real_def ko_wp_at'_def projectKOs
-                     opt_map_def tcb_of'_def)
-
-lemma pred_map_tcb_scs_of'_obj_at':
-  "tcb_at' t s \<Longrightarrow>
-   pred_map (P s) (tcb_scs_of' s) t = (\<exists>scp. obj_at' (\<lambda>tcb. tcbSchedContext tcb = Some scp) t s \<and> P s scp)"
-  by (clarsimp simp: pred_map_def obj_at'_real_def ko_wp_at'_def projectKOs
-                     opt_map_def tcb_of'_def)
-
-lemma isSchedulable_bool_def2:
-  "tcb_at' t s \<Longrightarrow>
-   isSchedulable_bool t s =
-     (st_tcb_at' runnable' t s
-      \<and> obj_at' (\<lambda>tcb. \<not>tcbInReleaseQueue tcb) t s
-      \<and> (\<exists>scp. obj_at' (\<lambda>tcb. tcbSchedContext tcb = Some scp) t s \<and> isScActive scp s))"
-  apply (clarsimp simp: isSchedulable_bool_def pred_map_conj pred_map_tcbs_of'_obj_at'
-                        pred_map_tcb_scs_of'_obj_at')
-  apply (rule arg_cong2[where f=conj])
-   apply (clarsimp simp: pred_tcb_at'_def)
-  apply (rule arg_cong2[where f=conj])
-   apply (clarsimp simp: pred_tcb_at'_def)
-  apply (subst pred_map_tcb_scs_of'_obj_at'; simp)
-  done
-
 lemma setDomain_invs':
   "\<lbrace> invs' and sch_act_simple and tcb_at' ptr and K (domain \<le> maxDomain)\<rbrace>
    setDomain ptr domain
@@ -981,11 +953,10 @@ lemma setDomain_invs':
       apply (intro conjI allI impI)
          apply (erule valid_objs'_valid_tcbs')
         apply (clarsimp simp: comp_def)
-       apply (clarsimp simp: isSchedulable_bool_def2 pred_map_conj)
-       apply (erule st_tcb_ex_cap'')
-        apply simp
-       apply (case_tac st,simp_all)[1]
-      apply (clarsimp simp: isSchedulable_bool_def2)
+       apply (clarsimp simp: isSchedulable_bool_def pred_map_conj)
+       apply (erule st_tcb_ex_cap''[where P=runnable', rotated], fastforce)
+       apply (clarsimp simp: pred_tcb_at'_pred_map)
+      apply (clarsimp simp: isSchedulable_bool_def pred_tcb_at'_pred_map pred_map_conj)
      apply (rule hoare_strengthen_post[OF hoare_vcg_conj_lift])
        apply (rule threadSet_all_invs_but_sch_extra)
       prefer 2

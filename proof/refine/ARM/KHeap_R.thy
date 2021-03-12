@@ -4002,4 +4002,10 @@ lemma threadGet_getObject:
   apply (simp add: threadGet_def threadRead_def oliftM_def getObject_def[symmetric])
   done
 
+lemma pred_tcb_at'_pred_map:
+  "pred_tcb_at' p P t s = (tcb_at' t s \<and> pred_map (\<lambda>x. P (p (tcb_to_itcb' x))) (tcbs_of' s) t)"
+  by (rule iffI; 
+      clarsimp simp: pred_tcb_at'_def pred_map_def obj_at'_real_def ko_wp_at'_def projectKOs
+                     opt_map_def tcb_of'_def)
+
 end
