@@ -310,15 +310,42 @@ lemma valid_list_init[simp]:
 
 lemmas valid_list_inits[simp] = valid_list_init[simplified]
 
+lemma active_sc_MIN_REFILLS[simp]:
+  "active_sc MIN_REFILLS"
+  by (clarsimp simp: MIN_REFILLS_def active_sc_def)
+
+(* This is provable, and illustrates one way to make valid_sched_init provable *)
+lemma example_valid_init_idle_sc:
+  "MIN_BUDGET \<le> MAX_PERIOD
+   \<Longrightarrow> cfg_valid_refills
+                (sc_refill_cfg_of default_sched_context
+                 \<lparr>scrc_refills := [\<lparr>r_time = 0, r_amount = MIN_BUDGET\<rparr>, \<lparr>r_time = 0, r_amount = 0\<rparr>],
+                 scrc_refill_max := MIN_REFILLS, scrc_budget := MIN_BUDGET\<rparr>)"
+  unfolding cfg_valid_refills_def
+  by (clarsimp simp: default_sched_context_def rr_valid_refills_def)
+
+(* Due to recent changes to refills, the idle_sc_ptr is not a valid rr sched context *)
 lemma valid_sched_init[simp]:
   "valid_sched init_A_st"
   apply (simp add: valid_sched_def init_A_st_def ext_init_def)
-  apply (clarsimp simp:  init_kheap_def
-                    obj_at_def  idle_thread_ptr_def init_globals_frame_def
-                    init_global_pd_def  ct_not_in_q_def not_queued_def
-                    valid_sched_action_def is_activatable_def
-                    ct_in_cur_domain_2_def  valid_idle_etcb_def etcb_at'_def)
-  sorry
+    apply (intro conjI)
+           apply (clarsimp simp: init_kheap_def valid_ready_qs_2_def)
+          apply (clarsimp simp: init_kheap_def ready_or_release_2_def in_queue_2_def)
+         apply (clarsimp simp: init_kheap_def ct_not_in_q_2_def in_queues_2_def)
+        apply (clarsimp simp: init_kheap_def valid_sched_action_2_def is_activatable_2_def
+                              vs_all_heap_simps init_globals_frame_def idle_thread_ptr_def
+                              init_global_pd_def idle_sc_ptr_def)
+       apply (clarsimp simp: init_kheap_def ct_in_cur_domain_2_def)
+      apply (clarsimp simp: init_kheap_def valid_blocked_defs vs_all_heap_simps)
+     apply (clarsimp simp: init_kheap_def valid_idle_etcb_2_def vs_all_heap_simps
+                           etcb_at'_def default_domain_def minBound_word)
+    apply (clarsimp simp: init_kheap_def released_ipc_queues_defs vs_all_heap_simps)
+   apply (clarsimp simp: init_kheap_def active_reply_scs_defs vs_all_heap_simps)
+  apply (clarsimp simp: init_kheap_def active_sc_valid_refills_def vs_all_heap_simps)
+  subgoal sorry
+  (* Due to recent changes to refills, the idle_sc_ptr is not a valid rr sched context.
+     See example_valid_init_idle_sc above. *)
+ done
 
 lemma valid_domain_list_init[simp]:
   "valid_domain_list init_A_st"
