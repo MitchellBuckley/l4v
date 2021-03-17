@@ -58,33 +58,47 @@ definition
   [simp]:
   "global_pd \<equiv> (\<lambda>_. InvalidPDE)( ucast (kernel_base >> 20) := SectionPDE (addrFromPPtr kernel_base) {} 0 {})"
 
+abbreviation
+  "init_idle_tcb \<equiv>
+   TCB \<lparr> tcb_ctable = NullCap,
+         tcb_vtable = NullCap,
+         tcb_ipcframe = NullCap,
+         tcb_fault_handler = NullCap,
+         tcb_timeout_handler = NullCap,
+         tcb_state = IdleThreadState,
+         tcb_ipc_buffer = 0,
+         tcb_fault = None,
+         tcb_bound_notification = None,
+         tcb_mcpriority = minBound,
+         tcb_sched_context = Some idle_sc_ptr,
+         tcb_yield_to = None,
+         tcb_priority = 0,
+         tcb_domain = 0,
+         tcb_arch = init_arch_tcb
+       \<rparr>"
+
+abbreviation
+  "init_idle_sc \<equiv>
+   SchedContext \<lparr> sc_period     = 0,
+                  sc_budget     = MIN_BUDGET,
+                  sc_consumed   = 0,
+                  sc_tcb        = Some idle_thread_ptr,
+                  sc_ntfn       = None,
+                  sc_refills    = [\<lparr>r_time = 0, r_amount = MIN_BUDGET\<rparr>, \<lparr>r_time = 0, r_amount = 0\<rparr>],
+                  sc_refill_max = MIN_REFILLS,
+                  sc_badge      = 0,
+                  sc_yield_from = None,
+                  sc_replies    = []
+                \<rparr> 0"
+
 definition
   "init_kheap \<equiv>
   (\<lambda>x. if \<exists>irq :: irq. init_irq_node_ptr + (ucast irq << cte_level_bits) = x
        then Some (CNode 0 (empty_cnode 0)) else None)
-  (idle_thread_ptr \<mapsto> TCB \<lparr>
-    tcb_ctable = NullCap,
-    tcb_vtable = NullCap,
-    tcb_ipcframe = NullCap,
-    tcb_fault_handler = NullCap,
-    tcb_timeout_handler = NullCap,
-    tcb_state = IdleThreadState,
-    tcb_ipc_buffer = 0,
-    tcb_fault = None,
-    tcb_bound_notification = None,
-    tcb_mcpriority = minBound,
-    tcb_sched_context = Some idle_sc_ptr,
-    tcb_yield_to = None,
-    tcb_priority = 0,
-    tcb_domain = 0,
-    tcb_arch = init_arch_tcb
-  \<rparr>,
-  init_globals_frame \<mapsto> ArchObj (DataPage False ARMSmallPage), \<comment> \<open>FIXME: same reason as why we kept the definition of @{text init_globals_frame}\<close>
-  init_global_pd \<mapsto> ArchObj (PageDirectory global_pd),
-  idle_sc_ptr \<mapsto> SchedContext (default_sched_context
-                                 \<lparr>sc_tcb := Some idle_thread_ptr,
-                                  sc_refills := [\<lparr>r_time = 0, r_amount = 0\<rparr>],
-                                  sc_refill_max := MIN_REFILLS\<rparr>) 0
+  (idle_thread_ptr \<mapsto> init_idle_tcb,
+   init_globals_frame \<mapsto> ArchObj (DataPage False ARMSmallPage), \<comment> \<open>FIXME: same reason as why we kept the definition of @{text init_globals_frame}\<close>
+   init_global_pd \<mapsto> ArchObj (PageDirectory global_pd),
+   idle_sc_ptr \<mapsto> init_idle_sc
   )"
 
 definition
