@@ -90,6 +90,12 @@ abbreviation
                   sc_yield_from = None,
                   sc_replies    = []
                 \<rparr> 0"
+  (* FIXME RT: Is SchedContext sc 0 (size zero) appropriate? *)
+  (* FIXME RT: I have put MIN_BUDGET in two places, but in fact this should be whatever
+               budget is used in the boot code. Should we axiomatise that constant, or is
+               it safe to just use MIN_BUDGET? The proofs should be fine as long as we
+               know that it is at least MIN_BUDGET and no more than MAX_PERIOD.
+   *)
 
 definition
   "init_kheap \<equiv>
