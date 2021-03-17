@@ -314,17 +314,12 @@ lemma active_sc_MIN_REFILLS[simp]:
   "active_sc MIN_REFILLS"
   by (clarsimp simp: MIN_REFILLS_def active_sc_def)
 
-(* This is provable, and illustrates one way to make valid_sched_init provable *)
-lemma example_valid_init_idle_sc:
-  "MIN_BUDGET \<le> MAX_PERIOD
-   \<Longrightarrow> cfg_valid_refills
-                (sc_refill_cfg_of default_sched_context
-                 \<lparr>scrc_refills := [\<lparr>r_time = 0, r_amount = MIN_BUDGET\<rparr>, \<lparr>r_time = 0, r_amount = 0\<rparr>],
-                 scrc_refill_max := MIN_REFILLS, scrc_budget := MIN_BUDGET\<rparr>)"
-  unfolding cfg_valid_refills_def
-  by (clarsimp simp: default_sched_context_def rr_valid_refills_def)
+lemma MIN_BUDGET_MAX_PERIOD[simp]:
+  "MIN_BUDGET \<le> MAX_PERIOD"
+  sorry (* can we prove this, or should it be axiomatised? *)
+  (* In reality, the budget of the idle_sc is determined from configuration
+    and needs to be between these two values. *)
 
-(* Due to recent changes to refills, the idle_sc_ptr is not a valid rr sched context *)
 lemma valid_sched_init[simp]:
   "valid_sched init_A_st"
   apply (simp add: valid_sched_def init_A_st_def ext_init_def)
@@ -341,11 +336,9 @@ lemma valid_sched_init[simp]:
                            etcb_at'_def default_domain_def minBound_word)
     apply (clarsimp simp: init_kheap_def released_ipc_queues_defs vs_all_heap_simps)
    apply (clarsimp simp: init_kheap_def active_reply_scs_defs vs_all_heap_simps)
-  apply (clarsimp simp: init_kheap_def active_sc_valid_refills_def vs_all_heap_simps)
-  subgoal sorry
-  (* Due to recent changes to refills, the idle_sc_ptr is not a valid rr sched context.
-     See example_valid_init_idle_sc above. *)
- done
+  apply (clarsimp simp: init_kheap_def active_sc_valid_refills_def vs_all_heap_simps
+                        sc_valid_refills_def rr_valid_refills_def bounded_release_time_def)
+  done
 
 lemma valid_domain_list_init[simp]:
   "valid_domain_list init_A_st"
