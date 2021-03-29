@@ -417,21 +417,6 @@ lemma asUser_valid_tcbs' [wp]:
              | simp add: valid_tcb'_def tcb_cte_cases_def)+
   done
 
-lemma asUser_valid_release_queue[wp]:
-  "asUser t m \<lbrace>valid_release_queue\<rbrace>"
-  apply (simp add: asUser_def split_def)
-  apply (wp hoare_drop_imps | simp)+
-  apply (wp threadSet_valid_release_queue hoare_drop_imps | simp)+
-  done
-
-lemma asUser_valid_release_queue'[wp]:
-  "asUser t m \<lbrace>valid_release_queue'\<rbrace>"
-  apply (simp add: asUser_def split_def)
-  apply (wp hoare_drop_imps | simp)+
-  apply (wp threadSet_valid_release_queue' threadGet_wp | simp)+
-  apply (clarsimp simp: valid_release_queue'_def obj_at'_real_def ko_wp_at'_def)
-  done
-
 lemma copyreg_corres:
   "corres (dc \<oplus> (=))
         (einvs and simple_sched_action and tcb_at dest and tcb_at src and ex_nonz_cap_to src and

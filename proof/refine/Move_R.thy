@@ -457,4 +457,13 @@ lemma bind_dummy_ret_val:
    od = do a; b od"
   by simp
 
+(* An "excluded middle" lemma for sc_at_ppred *)
+lemma sc_at_ppred_exm:
+  "sc_at g s \<Longrightarrow> sc_at_ppred p P g s = (\<not> sc_at_ppred p (\<lambda>x. \<not> P x) g s)"
+  by (clarsimp simp: sc_at_pred_n_def obj_at_def is_sc_obj pred_neg_def)
+
+lemma tcb_obj_at_equiv:
+  "tcb_at g s \<Longrightarrow> obj_at (P s) g s = (\<forall>ko. ko_at ko g s \<and> is_tcb ko \<longrightarrow> P s ko)"
+  by (clarsimp simp: obj_at_def is_tcb)
+
 end
