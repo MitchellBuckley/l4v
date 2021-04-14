@@ -638,7 +638,7 @@ text \<open>Allow preemption at this point.\<close>
 definition
   is_cur_domain_expired :: "'z::state_ext state \<Rightarrow> bool"
 where
-  "is_cur_domain_expired = (\<lambda>s. domain_time s < consumed_time s + MIN_BUDGET)"
+  "is_cur_domain_expired = (\<lambda>s. domain_time s < consumed_time s + kernelWCET_ticks)"
 
 text \<open>Update current and consumed time.\<close>
 definition
