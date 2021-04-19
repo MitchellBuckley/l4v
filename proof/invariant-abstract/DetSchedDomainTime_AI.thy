@@ -413,10 +413,10 @@ crunch domain_time_inv[wp]:
   get_cap, activate_thread, set_scheduler_action, tcb_sched_action
   "\<lambda>s::det_state. P (domain_time s)" (wp: hoare_drop_imp)
 
-crunch domain_time_inv[wp]: guarded_switch_to "\<lambda>s::det_state. P (domain_time s)"
+crunch cdomain_time_inv[wp]: guarded_switch_to "\<lambda>s::det_state. P (consumed_time s) (domain_time s)"
   (wp: hoare_drop_imp whenE_inv)
 
-crunch domain_time_inv[wp]: choose_thread "\<lambda>s::det_state. P (domain_time s)"
+crunch cdomain_time_inv[wp]: choose_thread "\<lambda>s::det_state. P (consumed_time s) (domain_time s)"
 crunch domain_time_inv[wp]: sched_context_donate "\<lambda>s::det_state. P (domain_time s)"
 
 crunch domain_time_inv[wp]: reply_remove, maybe_donate_sc "\<lambda>s::det_state. P (domain_time s)"
@@ -580,12 +580,13 @@ lemma commit_domain_time_domain_time_left:
   apply (wpsimp simp: commit_domain_time_def Let_def)
   using word_gt_0 by fastforce
 
-lemma commit_time_domain_time_left[wp]:
+lemma commit_time_domain_time_left:
   "\<lbrace> valid_domain_list and (\<lambda>s. if sd then 0 < domain_time s else consumed_time s < domain_time s)\<rbrace>
    commit_time sd
    \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
   supply if_split [split del]
-  by (wpsimp simp: commit_time_def num_domains_def
+  unfolding commit_time_def
+  by (wpsimp simp: num_domains_def
                wp: commit_domain_time_domain_time_left hoare_vcg_if_lift2)
 
 lemma invoke_sched_control_configure_domain_time_inv[wp]:
@@ -662,38 +663,75 @@ lemma handle_call_domain_time_inv[wp]:
       handle_call \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
   by (wpsimp simp: handle_call_def wp: handle_invocation_domain_time_inv)
 
-lemma check_budget_restart_domain_time_inv[wp]:
-  "\<lbrace>valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-      check_budget_restart \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
-  by (wpsimp simp: check_budget_restart_def)
-
 lemma check_budget_restart_domain_consumed_time_gt[wp]:
-  "\<lbrace>(\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-      check_budget_restart \<lbrace>\<lambda>_ s::det_state. consumed_time s  < domain_time s \<rbrace>"
-  by (wpsimp simp: check_budget_restart_def)
-(*
-lemma update_time_stamp_domain_consumed_time_gt[wp]:
-  "\<lbrace>\<lambda>s. P (domain_time s)\<rbrace>
-      update_time_stamp \<lbrace>\<lambda>_ s. P (domain_time s)(consumed_time s) \<rbrace>"
-  apply (clarsimp simp: update_time_stamp_def)
-  apply (wpsimp simp: do_machine_op_def ARM.getCurrentTime_def)
+  "\<lbrace>\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks\<rbrace>
+   check_budget
+   \<lbrace>\<lambda>r s::det_state. r \<longrightarrow> consumed_time s  < domain_time s \<rbrace>"
+  apply (wpsimp simp: check_budget_def)
+  apply (clarsimp simp: is_cur_domain_expired_def not_less)
+  apply (erule order.strict_trans2[rotated])
+  apply (clarsimp simp: refill_sufficient_def refill_capacity_def)
+  done
 
+lemma check_budget_restart_domain_consumed_sdftime_gt[wp]:
+  "\<lbrace>\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks\<rbrace>
+      check_budget_restart \<lbrace>\<lambda>r s::det_state. r \<longrightarrow> consumed_time s  < domain_time s \<rbrace>"
+  apply (wpsimp simp: check_budget_restart_def wp: gts_wp)
+   apply (rule_tac Q="\<lambda>result s. (result \<longrightarrow> consumed_time s < domain_time s)" in hoare_strengthen_post)
+    apply wpsimp+
+  done
+
+lemma check_budget_restart_domain_consumed_tim345e_gt[wp]:
+  "\<lbrace>\<lambda>s. 0 < domain_time s \<rbrace>
+   check_budget
+   \<lbrace>\<lambda>r s::det_state. \<not>r \<longrightarrow> 0 < domain_time s \<rbrace>"
+  by (wpsimp simp: check_budget_def)
+
+lemma check_budget_restart_dweromain_consumed_sdftime_gt[wp]:
+  "\<lbrace>\<lambda>s. 0 < domain_time s\<rbrace>
+      check_budget_restart \<lbrace>\<lambda>r s::det_state. \<not>r \<longrightarrow> 0 < domain_time s \<rbrace>"
+  apply (wpsimp simp: check_budget_restart_def wp: gts_wp)
+   apply (rule_tac Q="\<lambda>r s. ( \<not>r  \<longrightarrow> 0 < domain_time s)" in hoare_strengthen_post)
+    apply wpsimp+
+  done
+
+lemma check_budget_restart_dweromain_consumed_sdftime_sdfgt[wp]:
+  "\<lbrace>\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks\<rbrace>
+      check_budget_restart \<lbrace>\<lambda>r s::det_state. r \<longrightarrow> 0 < domain_time s \<rbrace>"
+  apply (rule_tac hoare_strengthen_post)
+  apply (rule check_budget_restart_domain_consumed_sdftime_gt)
+  apply (clarsimp simp: word_gt_0)
+  done
+
+lemma check_budget_restart_domain_consdfsumed_time_gt[wp]:
+  "\<lbrace>valid_domain_list\<rbrace>
+      check_budget_restart \<lbrace>\<lambda>restart s::det_state. restart \<longrightarrow> valid_domain_list s\<rbrace>"
+  by (rule check_budget_restart_true)
+
+lemma cheat_lemma1[wp]:
+  "\<lbrace>\<top>\<rbrace>
+   update_time_stamp
+   \<lbrace>\<lambda>rv s. consumed_time s < consumed_time s + kernelWCET_ticks\<rbrace>"
+  unfolding update_time_stamp_def
+  apply wpsimp
+  sorry (* this is a possible overflow issue, but should be fine *)
 
 lemma handle_event_domain_time_inv:
-  "\<lbrace>valid_domain_list and (\<lambda>s. consumed_time s < domain_time s) and K (e \<noteq> Interrupt)\<rbrace>
-      handle_event e \<lbrace>\<lambda>_ s. 0 < domain_time s\<rbrace>"
+  "\<lbrace>valid_domain_list and (\<lambda>s. 0 < domain_time s) and K (e \<noteq> Interrupt)\<rbrace>
+      handle_event e \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s\<rbrace>"
+  supply cases_simp[simp del] if_cancel[simp del] imp_conjR[simp] if_fun_split[simp]
   apply (cases e, simp_all)
       apply (rename_tac syscall)
-      apply (case_tac syscall, simp_all add: handle_send_def whenE_def)
-             apply (wpsimp split_del: if_split wp: hoare_vcg_if_lift2 hoare_drop_imp)+
-  apply (clarsimp simp: valid_domain_list_def)
-  using word_gt_0 by fastforce*)
+      apply (case_tac syscall,
+             simp_all add: handle_send_def whenE_def handle_call_def,
+             wpsimp+)
+  done
 
 end
 
-lemma reschedule_required_valid_domain_time:
+lemma reschedule_required_valid_domain_time[wp]:
   "\<lbrace> \<top> \<rbrace> reschedule_required
-   \<lbrace>\<lambda>x s. domain_time s = 0 \<longrightarrow> scheduler_action s = choose_new_thread\<rbrace>"
+   \<lbrace>\<lambda>x s. scheduler_action s = choose_new_thread\<rbrace>"
   unfolding reschedule_required_def set_scheduler_action_def
   by (wpsimp wp: hoare_vcg_imp_lift is_schedulable_wp simp: thread_get_def)
 
@@ -703,50 +741,101 @@ crunch domain_time_inv[wp]: set_next_interrupt "\<lambda>s. P (domain_time s)"
 
 context DetSchedDomainTime_AI begin
 
-lemma switch_sched_context_domain_time_left[wp]:
-  "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-     switch_sched_context sd \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
-  apply (wpsimp simp: switch_sched_context_def refill_unblock_check_def
-           wp: hoare_vcg_if_lift2 hoare_drop_imp split_del: if_split)
-  apply (clarsimp simp: word_gt_0)
+lemma switch_sched_context_domain_time_left:
+  "\<lbrace> valid_domain_list and (\<lambda>s. if sd then 0 < domain_time s else consumed_time s < domain_time s)\<rbrace>
+     switch_sched_context sd
+   \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
+  supply if_split [split del]
+  unfolding switch_sched_context_def
+  apply (wpsimp simp: refill_unblock_check_def if_distribR wp: hoare_vcg_if_lift commit_time_domain_time_left)
+  apply (wpsimp wp: hoare_vcg_if_lift_strong)
+  apply (wpsimp wp: )+
+  apply (rule_tac Q="\<lambda>r s. valid_domain_list s \<and> (if sd then 0 < domain_time s
+                                       else consumed_time s < domain_time s)" in hoare_strengthen_post[rotated])
+  apply (clarsimp split: if_splits simp: word_gt_0)
+  apply (wpsimp wp: get_tcb_obj_ref_wp)+
+  apply (auto split: if_splits simp: word_gt_0)
   done
 
 lemma sc_and_timer_domain_time_left[wp]:
-  "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
-     sc_and_timer sd \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
-  by (wpsimp simp: sc_and_timer_def Let_def)
-(*
+  "\<lbrace> valid_domain_list and (\<lambda>s. if sd then 0 < domain_time s else consumed_time s < domain_time s)\<rbrace>
+   sc_and_timer sd
+   \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
+  unfolding sc_and_timer_def
+  by (wpsimp simp: Let_def wp: switch_sched_context_domain_time_left)
+
 lemma next_domain_domain_time_left[wp]:
-  "\<lbrace> valid_domain_list \<rbrace> next_domain \<lbrace>\<lambda>_ s. 0 < domain_time s \<rbrace>"
-  apply (wpsimp simp: next_domain_def Let_def)
-   apply (clarsimp simp: valid_domain_list_def)
-   apply (simp add: all_set_conv_all_nth)
+  "\<lbrace> valid_domain_list \<rbrace> next_domain \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>"
+  apply (wpsimp simp: next_domain_def Let_def wp: dxo_wp_weak)
+   apply (clarsimp simp: valid_domain_list_def all_set_conv_all_nth)
    apply (erule_tac x="Suc (domain_index s) mod length (domain_list s)" in allE)
-   apply (clarsimp simp: \<mu>s_to_ms_def)
+   apply (clarsimp simp: )
+   apply (subst word_gt_0, subst neq_commute)
+   apply (rule us_to_ticks_nonzero)
+  sorry (* another small overflow issue *)
 
-
-lemma schedule_choose_new_thread_domain_time_left[wp]:
-  "\<lbrace> valid_domain_list \<rbrace>
+lemma schedule_choose_new_thread_domain_time_left:
+  "\<lbrace> valid_domain_list and (\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks)\<rbrace>
    schedule_choose_new_thread
-   \<lbrace>\<lambda>_ s. 0 < domain_time s \<rbrace>"
+   \<lbrace>\<lambda>rv s::det_state. if rv then 0 < domain_time s else consumed_time s < domain_time s\<rbrace>"
   unfolding schedule_choose_new_thread_def
-  by (wpsimp simp: word_gt_0)
+  apply (wpsimp)
+  apply (clarsimp simp: is_cur_domain_expired_def word_gt_0 not_less)
+  apply (erule (1) order.strict_trans2[rotated])
+  done
 
-crunch valid_domain_list: schedule_choose_new_thread valid_domain_list
+crunches tcb_release_dequeue
+  for scheduler_action[wp]: "\<lambda>s. P (scheduler_action s)"
 
-crunch etcb_at[wp]: tcb_sched_action "etcb_at P t"
+lemma sdf[wp]:
+  "possible_switch_to t \<lbrace>\<lambda>s. scheduler_action s = choose_new_thread\<rbrace>"
+  unfolding possible_switch_to_def
+  by (wpsimp wp: whileLoop_wp' thread_get_wp' get_tcb_obj_ref_wp
+           simp: set_scheduler_action_def)
+
+lemma sdf345[wp]:
+  "awaken \<lbrace>\<lambda>s. scheduler_action s = choose_new_thread\<rbrace>"
+  unfolding awaken_def awaken_body_def
+  by (wpsimp wp: whileLoop_wp')
+
+crunches awaken
+  for cdonsumed_time[wp]: "\<lambda>s. P (consumed_time s) (domain_time s)"
+  (wp: whileLoop_wp')
+
+definition ctime_bounded_2 where
+  "ctime_bounded_2 sch ct dt \<equiv> sch \<noteq> choose_new_thread \<longrightarrow> ct < dt"
+
+abbreviation ctime_bounded where
+  "ctime_bounded s \<equiv> ctime_bounded_2 (scheduler_action s) (consumed_time s) (domain_time s)"
+
+lemmas ctime_bounded_def = ctime_bounded_2_def
 
 lemma schedule_domain_time_left:
-  "\<lbrace>valid_domain_list and (\<lambda>s. domain_time s = 0 \<longrightarrow> scheduler_action s = choose_new_thread) \<rbrace>
+  "\<lbrace>valid_domain_list and ctime_bounded
+     and (\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks)\<rbrace>
    schedule
-   \<lbrace>\<lambda>_ s. 0 < domain_time s \<rbrace>" (is "\<lbrace>?P\<rbrace> _ \<lbrace>\<lambda>_ . ?Q\<rbrace>")
-  supply word_neq_0_conv[simp]
+   \<lbrace>\<lambda>_ s::det_state. 0 < domain_time s \<rbrace>" (is "\<lbrace>?P\<rbrace> _ \<lbrace>\<lambda>_ . ?Q\<rbrace>")
+  supply if_split [split del]
   apply (simp add: schedule_def)
-  apply (wp|wpc)+
-(*           apply (wp hoare_drop_imps)[1]
-          apply (wpsimp wp: gts_wp hoare_drop_imps simp: is_schedulable_def)+
-  done*)
-*)
+  apply (wpsimp wp: schedule_choose_new_thread_domain_time_left)
+            apply (wpsimp simp: schedule_switch_thread_fastfail_def)
+           apply (wpsimp wp: thread_get_wp')
+          apply (wpsimp wp: thread_get_wp')
+         apply (wpsimp)
+        apply (rename_tac candidate)
+        apply (rule_tac Q="\<lambda>_. valid_domain_list and (\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks)
+                               and (\<lambda>s. consumed_time s < domain_time s)" in hoare_strengthen_post[rotated])
+         apply auto[1]
+        apply wpsimp
+       apply (wpsimp wp: schedule_choose_new_thread_domain_time_left)
+      apply (wpsimp wp: is_schedulable_wp)+
+   apply (rule_tac Q="\<lambda>_. valid_domain_list and (\<lambda>s. consumed_time s < consumed_time s + kernelWCET_ticks)
+                          and (\<lambda>s. scheduler_action s \<noteq> choose_new_thread \<longrightarrow> consumed_time s < domain_time s)" in hoare_strengthen_post[rotated])
+    apply (auto split: if_splits)[1]
+   apply (wpsimp wp: hoare_vcg_imp_lift')
+  apply (clarsimp simp: ctime_bounded_def)
+  done
+
 end
 
 (* FIXME: move to where hoare_drop_imp is, add E/R variants etc *)
@@ -754,13 +843,349 @@ lemma hoare_false_imp:
   "\<lbrace>P\<rbrace> f \<lbrace>\<lambda>r s. \<not> R r s\<rbrace> \<Longrightarrow> \<lbrace>P\<rbrace> f \<lbrace>\<lambda>r s. R r s \<longrightarrow> Q r s\<rbrace>"
   by (auto simp: valid_def)
 
+crunches do_machine_op
+  for valid_sched_pred_wermisc[wp]:
+    "\<lambda>s. P (consumed_time s) (domain_time s) (scheduler_action s)"
+
 context DetSchedDomainTime_AI_2 begin
-(*
+
+crunches preemption_path
+  for domain_list[wp]: "\<lambda>s. P (domain_list (s::det_state))"
+  (wp: crunch_wps simp: crunch_simps)
+
+lemma cheaers[wp]:
+  "arch_mask_irq_signal f \<lbrace>ctime_bounded\<rbrace>"
+  "handle_reserved_irq f \<lbrace>ctime_bounded\<rbrace>"
+  "make_arch_fault_msg g h \<lbrace>ctime_bounded\<rbrace>"
+  "handle_arch_fault_reply vmf thread x y \<lbrace>ctime_bounded\<rbrace>"
+  "arch_post_cap_deletion a \<lbrace>ctime_bounded\<rbrace>"
+  "prepare_thread_delete b \<lbrace>ctime_bounded\<rbrace>"
+  "arch_finalise_cap c d \<lbrace>ctime_bounded\<rbrace>"
+  "arch_post_modify_registers t t' \<lbrace>ctime_bounded\<rbrace>"
+  "handle_arch_fault_reply vmf thread x y \<lbrace>ctime_bounded\<rbrace>"
+  "handle_arch_fault_reply vmf thread x y \<lbrace>ctime_bounded\<rbrace>"
+  sorry
+
+lemma sdfsdfkjh[simp]:
+  "ctime_bounded_2 choose_new_thread (consumed_time s) (domain_time s) = True"
+  "ctime_bounded_2 (switch_thread d) (consumed_time s) (domain_time s) = (consumed_time s < domain_time s)"
+  "ctime_bounded_2 resume_cur_thread (consumed_time s) (domain_time s) = (consumed_time s < domain_time s)"
+  unfolding ctime_bounded_def
+  by simp+
+
+crunches tcb_sched_action
+  for ctime_bounded[wp]: "\<lambda>s. ctime_bounded s"
+  (wp: crunch_wps simp: crunch_simps)
+
+lemma set_scheduler_action_ctime_bounded[wp]:
+  "\<lbrace>\<lambda>s. ctime_bounded_2 f (consumed_time s) (domain_time s)\<rbrace> set_scheduler_action f \<lbrace>\<lambda>_. ctime_bounded\<rbrace>"
+  unfolding set_scheduler_action_def
+  by wpsimp
+
+lemma set_scheduler_action_cdfgtime_bounded[wp]:
+  "\<lbrace>\<top>\<rbrace> reschedule_required \<lbrace>\<lambda>_. ctime_bounded\<rbrace>"
+  unfolding reschedule_required_def
+  by wpsimp
+
+lemma set_scheduler_action_c08dfgtime_bounded[wp]:
+  "\<lbrace>ctime_bounded\<rbrace> possible_switch_to g \<lbrace>\<lambda>_. ctime_bounded\<rbrace>"
+  unfolding possible_switch_to_def
+  by (wpsimp wp: thread_get_wp' get_tcb_obj_ref_wp)
+
+crunches send_signal
+  for ctime_bounded[wp]: "\<lambda>s. ctime_bounded s"
+  (wp: crunch_wps simp: crunch_simps)
+
+lemma handle_interrupt_domain_time_inv_det_ext[wp]:
+  "\<lbrace> ctime_bounded\<rbrace>
+   handle_interrupt f
+   \<lbrace>\<lambda>_ s. (ctime_bounded (s::det_state)) \<rbrace>"
+  unfolding handle_interrupt_def
+  by (wpsimp wp: hoare_drop_imp)
+
+crunches update_sched_context, refill_reset_rr, refill_budget_check
+  for sdfsdfsf[wp]: "\<lambda>s. P (scheduler_action s) (consumed_time s) (domain_time s)"
+  (wp: crunch_wps)
+
+
+lemma handle_interruwerpt_domain_time_inv_det_ext[wp]:
+  "\<lbrace> \<lambda>s. 0 < domain_time s\<rbrace>
+   charge_budget t g
+   \<lbrace>\<lambda>_ s. (ctime_bounded (s::det_state)) \<rbrace>"
+  unfolding charge_budget_def
+  apply (wpsimp wp: hoare_drop_imp is_schedulable_wp)
+  by (simp add: ctime_bounded_2_def)
+
+lemma check_budget_domain_time_inv_det_ext[wp]:
+  "\<lbrace>\<lambda>s. 0 < domain_time s\<rbrace>
+   check_budget
+   \<lbrace>\<lambda>_ s. (ctime_bounded (s::det_state)) \<rbrace>"
+  unfolding check_budget_def
+  apply (wpsimp wp: )
+  apply (clarsimp simp: is_cur_domain_expired_def ctime_bounded_2_def)
+  apply (clarsimp simp: is_cur_domain_expired_def word_gt_0 not_less)
+  apply (erule order.strict_trans2[rotated])
+  subgoal sorry (* boring overflow question *)
+  done
+
+lemma call_kernel_domain_time_inv_det_ext[wp]:
+  "update_time_stamp
+   \<lbrace>\<lambda>s. 0 < domain_time s \<and>
+            (\<forall>sc. scs_of s (cur_sc s) = Some sc \<longrightarrow>
+                  \<not> sc_active sc \<longrightarrow> scheduler_action s = choose_new_thread)\<rbrace>"
+  unfolding preemption_path_def
+  sorry (* fix later *)
+
+
+lemma preemption_path_domain_time_inv_det_ext:
+  "\<lbrace>\<lambda>s. 0 < domain_time s \<and> (\<forall>sc. scs_of s (cur_sc s) = Some sc  \<longrightarrow> \<not> sc_active sc \<longrightarrow>
+                   scheduler_action s = choose_new_thread)\<rbrace>
+   preemption_path
+   \<lbrace>\<lambda>_ s. (ctime_bounded (s::det_state)) \<rbrace>"
+  unfolding preemption_path_def
+  apply (wpsimp wp: is_schedulable_wp)
+term active_sc
+  apply (rule_tac Q="\<lambda>x s. 0 < domain_time s \<and>
+            ((\<forall>sc. scs_of s (cur_sc s) = Some sc  \<longrightarrow> \<not> sc_active sc \<longrightarrow>
+                   (scheduler_action s = choose_new_thread)))" in hoare_strengthen_post[rotated])
+  apply (clarsimp simp: obj_at_def opt_map_def)
+  subgoal sorry (* fix later *)
+  apply (wpsimp wp: sdf)
+  apply (wpsimp wp: hoare_vcg_if_lift2)
+  apply (rule hoare_vcg_conj_lift)
+  apply (rule hoare_drop_imp)
+  apply wpsimp
+  apply (rule hoare_drop_imp)
+  apply_trace wpsimp
+  apply (clarsimp simp: is_schedulable_bool_def2)
+  apply (auto)
+  apply (clarsimp simp: obj_at_def ctime_bounded_def vs_all_heap_simps)
+  done
+
+lemma cheater2[wp]:
+  "\<lbrace>\<top>\<rbrace> f \<lbrace>\<lambda>rv s. consumed_time s < consumed_time s + kernelWCET_ticks\<rbrace>"
+  sorry
+
+
+lemma call_kernel_dosdfmain_time_inv_det_ext[wp]:
+  "\<lbrace>\<lambda>s. e\<noteq>Interrupt\<rbrace>
+   handle_event e
+   -, \<lbrace>\<lambda>rv s. \<forall>sc. scs_of s (cur_sc s) = Some sc \<longrightarrow> \<not> sc_active sc \<longrightarrow> scheduler_action s = choose_new_thread\<rbrace>"
+  apply (case_tac e; simp)
+  sorry  (* this is unknown *)
+
+lemma cheateee[wp]:
+  "\<lbrace>\<lambda>s. True\<rbrace>
+   ff
+   \<lbrace>\<lambda>rv s. \<forall>sc. scs_of s (cur_sc s) = Some sc \<longrightarrow> \<not> sc_active sc \<longrightarrow> scheduler_action s = choose_new_thread\<rbrace>"
+  sorry  (* this is unknown *)
+
+lemma do_extended_op_ctime_bounded[wp]:
+  "do_extended_op param_b
+   \<lbrace>\<lambda>s. ctime_bounded s\<rbrace>"
+  unfolding do_extended_op_def
+  by wpsimp
+
+lemma invoke_cnode_domain_tim35e_inv[wp]:
+  "\<lbrace>\<lambda>s :: det_state.  ctime_bounded s\<rbrace>
+   delete_objects param_a param_b
+   \<lbrace>\<lambda>rv s. ctime_bounded s \<rbrace>"
+  unfolding delete_objects_def detype_def
+  by wpsimp
+
+lemma sdfjkh:
+  assumes ff: "\<lbrace>A\<rbrace> f \<lbrace>B\<rbrace>"
+  assumes gg: "\<And>test. \<lbrace>B test\<rbrace> g test \<lbrace>\<lambda>_. P\<rbrace>, \<lbrace>\<lambda>_. Q\<rbrace>"
+  shows "
+       \<lbrace>A\<rbrace> f >>= g \<lbrace>\<lambda>rv s. P s\<rbrace>, \<lbrace>\<lambda>_. Q\<rbrace>"
+  using ff gg
+  apply (clarsimp simp: valid_def validE_def in_monad split: if_splits)
+  apply fastforce
+  done
+
+find_theorems "validE _ _ _ _ \<Longrightarrow> valid _ _ _ \<Longrightarrow> validE _ _ _ _"
+
+lemma invoke_cggdnode_domain_tim35e_inv[wp]:
+  "\<lbrace>\<lambda>s :: det_state.  ctime_bounded s\<rbrace>
+   preemption_point
+   \<lbrace>\<lambda>rv s. ctime_bounded s \<rbrace>, \<lbrace>\<lambda>rv s. True\<rbrace>"
+  unfolding preemption_point_def OR_choiceE_def
+  apply wp
+  apply (simp add: K_bind_def)
+  apply wp
+  apply_trace (wpsimp comb_del: hoare_wp_state_combsE comb: sdfjkh)
+  apply (clarsimp simp: validE_R_def validE_def throwError_def returnOk_def)
+  apply wpsimp
+  apply (rule_tac Q="\<lambda>_ s. (\<forall>sc. scs_of s (cur_sc s) = Some sc \<longrightarrow> \<not> sc_active sc \<longrightarrow> scheduler_action s = choose_new_thread)" in hoare_strengthen_post[rotated])
+  apply (auto)[1]
+  apply (clarsimp simp: obj_at_def is_cur_domain_expired_def)
+  subgoal sorry (* this should be fine *)
+ apply (wpsimp)+
+ apply (wpsimp wp: hoare_drop_imp hoare_vcg_all_lift hoare_vcg_imp_lift' simp: Ball_def)
+  apply simp
+  done
+
+crunches cap_insert, set_extra_badge
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+
+lemma handle_invocat567ion_doma35in_time_inv[wp]:
+  "transfer_caps info caps endpoint receiver recv_buffer \<lbrace>\<lambda>s. ctime_bounded s \<rbrace>"
+  unfolding transfer_caps_def
+  by (wpsimp wp: transfer_caps_loop_pres)
+
+crunches create_cap
+  for ctime_bounded[wp]: "\<lambda>s::det_state. ctime_bounded s"
+  (simp: crunch_simps wp: crunch_wps)
+
+lemma handle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace> \<lambda>s::det_state. ctime_bounded s \<rbrace>
+     invoke_untyped x1
+   \<lbrace> \<lambda>_ s::det_state. ctime_bounded s \<rbrace>, -"
+  unfolding invoke_untyped_def
+  apply (wpsimp wp: mapM_x_wp_inv)
+  sorry (* boring fix later *)
+
+crunches send_ipc
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+
+crunches do_reply_transfer
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+
+crunches restart, suspend, maybe_sched_context_unbind_tcb, maybe_sched_context_bind_tcb,
+         set_priority, set_mcpriority
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+
+crunches cap_swap_for_delete, empty_slot
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+
+lemma hansfdle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace> \<lambda>s::det_state. ctime_bounded s \<rbrace>
+     finalise_cap cap fin
+   \<lbrace> \<lambda>_ s::det_state. ctime_bounded s \<rbrace>"
+  supply if_split [split del]
+  apply (case_tac cap; simp)
+  apply wpsimp
+
+  unfolding finalise_cap_def
+  apply (wpsimp wp: rec_del_preservationE)
+
+
+lemma hansfdle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace> \<lambda>s::det_state. ctime_bounded s \<rbrace>
+     cap_delete (x51, tcb_cnode_index n)
+   \<lbrace> \<lambda>_ s::det_state. ctime_bounded s \<rbrace>, -"
+  supply if_split [split del]
+  unfolding cap_delete_def
+  apply (wpsimp wp: rec_del_preservationE)
+
+find_theorems rec_del valid
+
+lemma hansfdle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace> \<lambda>s::det_state. ctime_bounded s \<rbrace>
+     install_tcb_cap x51 x52 n x53
+   \<lbrace> \<lambda>_ s::det_state. ctime_bounded s \<rbrace>, -"
+  supply if_split [split del]
+  unfolding install_tcb_cap_def
+  apply (wpsimp wp: check_cap_inv)
+  apply (case_tac x1; simp)
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+
+lemma hansfdle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace> \<lambda>s::det_state. ctime_bounded s \<rbrace>
+     invoke_tcb x1
+   \<lbrace> \<lambda>_ s::det_state. ctime_bounded s \<rbrace>, -"
+  supply if_split [split del]
+  apply (case_tac x1; simp)
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+
+defer
+
+  apply (wpsimp wp: mapM_x_wp_inv hoare_vcg_if_lift2 hoare_drop_imp)
+
+
+  sorry (* boring fix later *)
+
+
+
+crunches do_reply_transfer
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+crunches do_reply_transfer
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+crunches do_reply_transfer
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+crunches do_reply_transfer
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps transfer_caps_loop_pres)
+
+lemma handle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace>ctime_bounded\<rbrace>
+     perform_invocation blocking calling can_donate iv
+   \<lbrace>\<lambda>_ s::det_state. ctime_bounded s \<rbrace>, -"
+  apply (cases iv; simp)
+  apply wpsimp
+  apply wpsimp
+  apply wpsimp
+  apply wpsimp
+  apply wpsimp
+
+
+
+
+
+
+crunches handle_fault
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps)
+
+crunches reply_from_kernel
+  for ctime_bounded[wp]: ctime_bounded
+  (simp: crunch_simps wp: crunch_wps)
+
+lemma handle_invocation_doma35in_time_inv[wp]:
+  "\<lbrace>valid_domain_list and (\<lambda>s. consumed_time s < domain_time s)\<rbrace>
+     handle_invocation calling blocking can_donate first_phase cptr
+   \<lbrace>\<lambda>_ s::det_state. ctime_bounded s \<rbrace>, -"
+  unfolding handle_invocation_def
+  apply (wpsimp wp: syscall_valid perform_invocation_domain_time_inv)
+  apply (wpsimp wp: hoare_drop_imp)
+  apply (clarsimp cong: conj_cong)
+
+
+lemma call_kernel_dosdfmain_time_inv_det_ext24[wp]:
+  "\<lbrace>\<lambda>s. e\<noteq>Interrupt\<rbrace>
+   handle_event e
+   \<lbrace>\<lambda>_. ctime_bounded\<rbrace>, -"
+  apply (case_tac e; simp)
+    apply (wpsimp simp: handle_call_def)
+  sorry  (* this is unknown *)
+
 lemma call_kernel_domain_time_inv_det_ext:
   "\<lbrace> (\<lambda>s. 0 < domain_time s) and valid_domain_list and (\<lambda>s. e \<noteq> Interrupt \<longrightarrow> ct_running s) \<rbrace>
    (call_kernel e) :: (unit,det_ext) s_monad
    \<lbrace>\<lambda>_ s. 0 < domain_time s \<rbrace>"
   unfolding call_kernel_def
+  apply (wpsimp wp: schedule_domain_time_left)
+  apply (wpsimp wp: preemption_path_domain_time_inv_det_ext)
+    prefer 2
+  apply (assumption)
+  apply (case_tac "e = Interrupt", simp)
+    apply (wpsimp wp: hoare_drop_imp)
+  apply (wpsimp wp: hoare_vcg_E_conj hoare_vcg_conj_liftE handle_event_domain_time_inv)
+  done
+
+(*
   apply (case_tac "e = Interrupt")
    apply simp
    apply (rule hoare_pre)
