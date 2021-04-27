@@ -633,14 +633,28 @@ definition
 throw_on_false :: "'e \<Rightarrow> (bool,'z::state_ext) s_monad \<Rightarrow> ('e + unit,'z::state_ext) s_monad" where
 "throw_on_false ex f \<equiv> doE v \<leftarrow> liftE f; unlessE v $ throwError ex odE"
 
-text \<open>Allow preemption at this point.\<close>
-
+text \<open>Evaluate if the current domain has run out of time.\<close>
 definition
   is_cur_domain_expired :: "'z::state_ext state \<Rightarrow> bool"
 where
-  "is_cur_domain_expired = (\<lambda>s. domain_time s < consumed_time s + MIN_BUDGET)"
+  "is_cur_domain_expired = (\<lambda>s. domain_time s = 0)"
 
-text \<open>Update current and consumed time.\<close>
+text \<open>Update domain time.\<close>
+definition
+  commit_domain_time :: "time \<Rightarrow> (unit, 'z::state_ext) s_monad"
+where
+  "commit_domain_time consumed = do
+    domain_time \<leftarrow> gets domain_time;
+    time' \<leftarrow> return (if domain_time \<le> consumed + MIN_BUDGET then 0 else domain_time - consumed);
+    modify (\<lambda>s. s\<lparr>domain_time := time'\<rparr>);
+    exp \<leftarrow> gets is_cur_domain_expired;
+    when exp $ do
+      modify (\<lambda>s. s\<lparr>reprogram_timer := True\<rparr>); 
+      reschedule_required 
+      od
+    od"
+
+text \<open>Update current, domain, and consumed time.\<close>
 definition
   update_time_stamp :: "(unit, 'z::state_ext) s_monad"
 where
@@ -648,9 +662,12 @@ where
     prev_time \<leftarrow> gets cur_time;
     cur_time' \<leftarrow> do_machine_op getCurrentTime;
     modify (\<lambda>s. s\<lparr> cur_time := cur_time' \<rparr>);
-    modify (\<lambda>s. s\<lparr> consumed_time := consumed_time s + cur_time' - prev_time \<rparr>)
+    consumed \<leftarrow> return (cur_time' - prev_time);
+    modify (\<lambda>s. s\<lparr> consumed_time := consumed_time s + consumed\<rparr>);
+    when (num_domains > 1) $ commit_domain_time consumed
   od"
 
+text \<open>Allow preemption at this point.\<close>
 definition
   preemption_point :: "(unit,'z::state_ext) p_monad"
 where
@@ -658,19 +675,16 @@ where
      liftE $ do_extended_op update_work_units;
      OR_choiceE work_units_limit_reached
      (doE liftE $ do_extended_op reset_work_units;
+          do update_time_stamp;
+             cur_sc \<leftarrow> gets cur_sc;
+             consumed \<leftarrow> gets consumed_time;
+             test \<leftarrow> andM (get_sc_active cur_sc)
+                          (get_sc_refill_sufficient cur_sc consumed);
+             exp \<leftarrow> gets is_cur_domain_expired;
+             if \<not> test \<or> exp then throwError () else returnOk ()
+          od;
           irq_opt \<leftarrow> liftE $ do_machine_op (getActiveIRQ True);
-          if (\<exists>y. irq_opt = Some y)
-             then throwError ()
-             else do update_time_stamp;
-                     cur_sc \<leftarrow> gets cur_sc;
-                     consumed \<leftarrow> gets consumed_time;
-                     test \<leftarrow> andM (get_sc_active cur_sc)
-                                  (get_sc_refill_sufficient cur_sc consumed);
-                     exp \<leftarrow> gets is_cur_domain_expired;
-                     if \<not> test \<or> exp
-                        then throwError ()
-                        else returnOk ()
-                  od
+          if (\<exists>y. irq_opt = Some y) then throwError () else returnOk ()
       odE)
      (returnOk ())
    odE"
