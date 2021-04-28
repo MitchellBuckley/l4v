@@ -104,8 +104,7 @@ crunches delete_objects
 crunches invoke_untyped
   for valid_sched_pred_misc[wp]:
       "\<lambda>s::'state_ext state. P (cur_domain s) (cur_thread s) (idle_thread s)
-                               (ready_queues s) (release_queue s) (scheduler_action s)
-                               (cur_sc s)"
+                               (release_queue s) (cur_sc s)"
   (wp: crunch_wps mapME_x_inv_wp preemption_point_inv
    simp: detype_def whenE_def unless_def wrap_ext_det_ext_ext_def mapM_x_defsym
    ignore: do_machine_op)
@@ -503,6 +502,7 @@ lemma delete_objects_valid_blocked[wp]:
 
 crunch valid_blocked[wp]: reset_untyped_cap "valid_blocked::'z::state_ext state \<Rightarrow> _"
   (wp: preemption_point_inv mapME_x_inv_wp crunch_wps simp: unless_def)
+  (* annoying, fix later *)
 
 crunches retype_region, delete_objects
   for cur_sc[wp]: "\<lambda>(s). P (cur_sc s)"
@@ -890,11 +890,14 @@ lemma retype_region_obj_at_live:
          \<lbrace>\<lambda>rv s. N (obj_at P p s)\<rbrace>"
   by (wpsimp wp: retype_region_obj_at_live_ex[OF live]) fastforce
 
+crunches update_time_stamp
+  for obj_at[wp]: "\<lambda>s. N (obj_at P p s)"
+
 (* FIXME: move *)
 lemma preemption_point_obj_at:
   "preemption_point \<lbrace>\<lambda>s. N (obj_at P p s)\<rbrace>"
   apply (wpsimp simp: preemption_point_def
-                  wp: OR_choiceE_weak_wp dxo_wp_weak hoare_drop_imps update_time_stamp_wp)
+                  wp: OR_choiceE_weak_wp dxo_wp_weak hoare_drop_imps)
   done
 
 (* FIXME: move *)
@@ -1032,6 +1035,10 @@ lemma dmo_getCurrentTime_wp:
          \<lbrace>\<lambda>rv s. Q rv s\<rbrace>"
   apply (strengthen str_post)
   by (wpsimp wp: dmo_getCurrentTime_vmt_sp dmo_inv)
+
+crunches commit_domain_time
+  for is_refill_ready[wp]: "is_refill_ready scp"
+  (wp: crunch_wps)
 
 lemma update_time_stamp_is_refill_ready[wp]:
   "\<lbrace>valid_machine_time and is_refill_ready scp :: 'state_ext state \<Rightarrow> _\<rbrace>

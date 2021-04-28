@@ -120,10 +120,14 @@ lemma dmo_getCurrentTime_vmt_sp[wp, DetSchedAux_AI_assms]:
     done
   done
 
+crunches commit_domain_time
+  for vmt[wp]: "valid_machine_time"
+  (wp: crunch_wps)
+
 lemma update_time_stamp_valid_machine_time[wp, DetSchedAux_AI_assms]:
   "update_time_stamp \<lbrace>valid_machine_time\<rbrace>"
   unfolding update_time_stamp_def
-  apply (wpsimp simp: do_machine_op_def)
+  apply (wpsimp simp: do_machine_op_def simp: commit_domain_time_def)
   apply (fastforce simp: getCurrentTime_def elim: valid_machine_time_getCurrentTime)
   done
 

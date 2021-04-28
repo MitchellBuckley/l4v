@@ -72,8 +72,7 @@ lemma capBadge_ordering_trans:
   by (auto simp: capBadge_ordering_def split: if_split_asm)
 
 definition "irq_state_independent_A (P :: 'z state \<Rightarrow> bool) \<equiv>
-  \<forall>(f :: nat \<Rightarrow> nat) (s :: 'z state). P s \<longrightarrow> P (s\<lparr>machine_state := machine_state s
-                  \<lparr>irq_state := f (irq_state (machine_state s))\<rparr>\<rparr>)"
+  \<forall>(f :: nat \<Rightarrow> nat) (s :: 'z state). P s \<longrightarrow> P (s\<lparr>machine_state := machine_state s \<lparr>irq_state := f (irq_state (machine_state s))\<rparr>\<rparr>)"
 
 lemma irq_state_independent_AI[intro!, simp]:
   "\<lbrakk>\<And>s f. P (s\<lparr>machine_state := machine_state s
@@ -117,7 +116,7 @@ definition time_state_independent_A :: "('z state \<Rightarrow> bool) \<Rightarr
 
 lemma time_state_independent_AI[intro!, simp]:
   "\<lbrakk>\<And>s f. P (s\<lparr>machine_state := machine_state s
-              \<lparr>time_state := f (time_state (machine_state s))\<rparr>\<rparr>) = P s\<rbrakk>
+              \<lparr>time_state := f\<rparr>\<rparr>) = P s\<rbrakk>
    \<Longrightarrow> time_state_independent_A P"
   by (simp add: time_state_independent_A_def)
 
@@ -128,25 +127,23 @@ lemma time_state_independent_A_conjI[intro!]:
    \<Longrightarrow> time_state_independent_A (\<lambda>s. P s \<and> Q s)"
   by (auto simp: time_state_independent_A_def)
 
-definition getCurrentTime_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
-  "getCurrentTime_independent_A P \<equiv>
+definition last_machine_time_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
+  "last_machine_time_independent_A P \<equiv>
      \<forall>f s. P s \<longrightarrow>
-           P (s\<lparr>machine_state :=
-                      machine_state s\<lparr>last_machine_time :=
-                             f (last_machine_time (machine_state s)) (time_state (machine_state s))\<rparr>\<rparr>)"
+           P (s\<lparr>machine_state := machine_state s\<lparr>last_machine_time := f (last_machine_time (machine_state s))\<rparr>\<rparr>)"
 
-lemma getCurrentTime_independent_AI[intro!, simp]:
+lemma last_machine_time_independent_AI[intro!, simp]:
   "\<lbrakk>\<And>s f. P (s\<lparr>machine_state := machine_state s
-              \<lparr>last_machine_time := f (last_machine_time (machine_state s)) (time_state (machine_state s))\<rparr>\<rparr>) = P s\<rbrakk>
-   \<Longrightarrow> getCurrentTime_independent_A P"
-  by (simp add: getCurrentTime_independent_A_def)
+              \<lparr>last_machine_time := f (last_machine_time (machine_state s))\<rparr>\<rparr>) = P s\<rbrakk>
+   \<Longrightarrow> last_machine_time_independent_A P"
+  by (simp add: last_machine_time_independent_A_def)
 
-lemma getCurrentTime_independent_A_conjI[intro!]:
-  "\<lbrakk>getCurrentTime_independent_A P; getCurrentTime_independent_A Q\<rbrakk>
-   \<Longrightarrow> getCurrentTime_independent_A (P and Q)"
-  "\<lbrakk>getCurrentTime_independent_A P; getCurrentTime_independent_A Q\<rbrakk>
-   \<Longrightarrow> getCurrentTime_independent_A (\<lambda>s. P s \<and> Q s)"
-  by (auto simp: getCurrentTime_independent_A_def)
+lemma last_machine_time_independent_A_conjI[intro!]:
+  "\<lbrakk>last_machine_time_independent_A P; last_machine_time_independent_A Q\<rbrakk>
+   \<Longrightarrow> last_machine_time_independent_A (P and Q)"
+  "\<lbrakk>last_machine_time_independent_A P; last_machine_time_independent_A Q\<rbrakk>
+   \<Longrightarrow> last_machine_time_independent_A (\<lambda>s. P s \<and> Q s)"
+  by (auto simp: last_machine_time_independent_A_def)
 
 definition cur_time_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
   "cur_time_independent_A P \<equiv> \<forall>f s. P s \<longrightarrow> P (s\<lparr>cur_time := f (cur_time s)\<rparr>)"
@@ -163,21 +160,50 @@ lemma cur_time_independent_A_conjI[intro!]:
    \<Longrightarrow> cur_time_independent_A (\<lambda>s. P s \<and> Q s)"
   by (auto simp: cur_time_independent_A_def)
 
-definition update_time_stamp_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
-  "update_time_stamp_independent_A P \<equiv>
-      \<forall>f s. P s \<longrightarrow> P (s\<lparr>consumed_time := f (consumed_time s) (cur_time s)\<rparr>)"
+definition consumed_time_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
+  "consumed_time_independent_A P \<equiv> \<forall>f s. P s \<longrightarrow> P (s\<lparr>consumed_time := f (consumed_time s)\<rparr>)"
 
-lemma update_time_stamp_independent_AI[intro!, simp]:
-  "\<lbrakk>\<And>s f. P (s\<lparr>consumed_time := f (consumed_time s) (cur_time s)\<rparr>) = P s\<rbrakk>
-   \<Longrightarrow> update_time_stamp_independent_A P"
-  by (simp add: update_time_stamp_independent_A_def)
+lemma consumed_time_independent_AI[intro!, simp]:
+  "\<lbrakk>\<And>s f. P (s\<lparr>consumed_time := f (consumed_time s)\<rparr>) = P s\<rbrakk>
+   \<Longrightarrow> consumed_time_independent_A P"
+  by (simp add: consumed_time_independent_A_def)
 
-lemma update_time_stamp_independent_A_conjI[intro!]:
-  "\<lbrakk>update_time_stamp_independent_A P; update_time_stamp_independent_A Q\<rbrakk>
-   \<Longrightarrow> update_time_stamp_independent_A (P and Q)"
-  "\<lbrakk>update_time_stamp_independent_A P; update_time_stamp_independent_A Q\<rbrakk>
-   \<Longrightarrow> update_time_stamp_independent_A (\<lambda>s. P s \<and> Q s)"
-  by (auto simp: update_time_stamp_independent_A_def)
+lemma consumed_time_independent_A_conjI[intro!]:
+  "\<lbrakk>consumed_time_independent_A P; consumed_time_independent_A Q\<rbrakk>
+   \<Longrightarrow> consumed_time_independent_A (P and Q)"
+  "\<lbrakk>consumed_time_independent_A P; consumed_time_independent_A Q\<rbrakk>
+   \<Longrightarrow> consumed_time_independent_A (\<lambda>s. P s \<and> Q s)"
+  by (auto simp: consumed_time_independent_A_def)
+
+definition domain_time_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
+  "domain_time_independent_A P \<equiv> \<forall>f s. P s \<longrightarrow> P (s\<lparr>domain_time := f (domain_time s)\<rparr>)"
+
+lemma domain_time_independent_AI[intro!, simp]:
+  "\<lbrakk>\<And>s f. P (s\<lparr>domain_time := f (domain_time s)\<rparr>) = P s\<rbrakk>
+   \<Longrightarrow> domain_time_independent_A P"
+  by (simp add: domain_time_independent_A_def)
+
+lemma domain_time_independent_A_conjI[intro!]:
+  "\<lbrakk>domain_time_independent_A P; domain_time_independent_A Q\<rbrakk>
+   \<Longrightarrow> domain_time_independent_A (P and Q)"
+  "\<lbrakk>domain_time_independent_A P; domain_time_independent_A Q\<rbrakk>
+   \<Longrightarrow> domain_time_independent_A (\<lambda>s. P s \<and> Q s)"
+  by (auto simp: domain_time_independent_A_def)
+
+definition reprogram_timer_independent_A :: "('z state \<Rightarrow> bool) \<Rightarrow> bool" where
+  "reprogram_timer_independent_A P \<equiv> \<forall>f s. P s \<longrightarrow> P (s\<lparr>reprogram_timer := f (reprogram_timer s)\<rparr>)"
+
+lemma reprogram_timer_independent_AI[intro!, simp]:
+  "\<lbrakk>\<And>s f. P (s\<lparr>reprogram_timer := f (reprogram_timer s)\<rparr>) = P s\<rbrakk>
+   \<Longrightarrow> reprogram_timer_independent_A P"
+  by (simp add: reprogram_timer_independent_A_def)
+
+lemma reprogram_timer_independent_A_conjI[intro!]:
+  "\<lbrakk>reprogram_timer_independent_A P; reprogram_timer_independent_A Q\<rbrakk>
+   \<Longrightarrow> reprogram_timer_independent_A (P and Q)"
+  "\<lbrakk>reprogram_timer_independent_A P; reprogram_timer_independent_A Q\<rbrakk>
+   \<Longrightarrow> reprogram_timer_independent_A (\<lambda>s. P s \<and> Q s)"
+  by (auto simp: reprogram_timer_independent_A_def)
 
 lemma OR_choiceE_weak_wp:
   "\<lbrace>P\<rbrace> f \<sqinter> g \<lbrace>Q\<rbrace> \<Longrightarrow> \<lbrace>P\<rbrace> OR_choiceE b f g \<lbrace>Q\<rbrace>"
@@ -186,44 +212,160 @@ lemma OR_choiceE_weak_wp:
           split: option.splits if_split_asm)
   done
 
+lemma OR_choiceE_weak_wp4:
+  "\<lbrace>P\<rbrace> f \<sqinter> g \<lbrace>Q\<rbrace>, - \<Longrightarrow> \<lbrace>P\<rbrace> OR_choiceE b f g \<lbrace>Q\<rbrace>, -"
+  unfolding validE_R_def validE_def
+  by (erule OR_choiceE_weak_wp)
+
+crunches get_sc_refill_sufficient, get_sc_active
+  for inv[wp]: P
+
 locale CSpace_AI_preemption_point_wp =
   fixes state_ext_t :: "'state_ext::state_ext itself"
   assumes getActiveIRQ_wp[wp]:
     "\<And>P :: 'state_ext state \<Rightarrow> bool.
-      irq_state_independent_A P \<Longrightarrow> valid P (do_machine_op (getActiveIRQ in_kernel)) (\<lambda>_. P)"
+      irq_state_independent_A P \<Longrightarrow> (do_machine_op (getActiveIRQ in_kernel)) \<lbrace>P\<rbrace>"
   assumes getCurrentTime_wp[wp]:
     "\<And>P :: 'state_ext state \<Rightarrow> bool.
-      time_state_independent_A P \<Longrightarrow> getCurrentTime_independent_A P \<Longrightarrow>
-      valid P (do_machine_op getCurrentTime) (\<lambda>_. P)"
-  assumes update_time_stamp_wp:
-    "\<And>P :: 'state_ext state \<Rightarrow> bool.
-      update_time_stamp_independent_A P \<Longrightarrow> cur_time_independent_A P \<Longrightarrow>
-      time_state_independent_A P \<Longrightarrow> getCurrentTime_independent_A P \<Longrightarrow>
-      valid P update_time_stamp (\<lambda>_. P)"
+      time_state_independent_A P \<Longrightarrow> last_machine_time_independent_A P \<Longrightarrow>
+      (do_machine_op getCurrentTime) \<lbrace>P\<rbrace>"
 
 context CSpace_AI_preemption_point_wp begin
 
+lemma update_time_stamp_inv:
+  fixes P :: "'state_ext state \<Rightarrow> bool"
+  shows "\<lbrakk>time_state_independent_A P; 
+         last_machine_time_independent_A P;
+         consumed_time_independent_A P;
+         domain_time_independent_A P;
+         reprogram_timer_independent_A P;
+         cur_time_independent_A P\<rbrakk>
+         \<Longrightarrow> reschedule_required \<lbrace>P\<rbrace>
+         \<Longrightarrow> update_time_stamp \<lbrace>P\<rbrace>"
+  apply (clarsimp simp: update_time_stamp_def commit_domain_time_def)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+  apply (rule hoare_seq_ext_skip, erule (1) getCurrentTime_wp)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+   apply (fastforce simp: cur_time_independent_A_def)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+   apply (fastforce simp: consumed_time_independent_A_def)
+  apply wpsimp
+  apply (fastforce simp: domain_time_independent_A_def reprogram_timer_independent_A_def)
+  done
+
 lemma preemption_point_inv:
   fixes P :: "'state_ext state \<Rightarrow> bool"
-  shows "\<lbrakk>irq_state_independent_A P; time_state_independent_A P; getCurrentTime_independent_A P;
-          update_time_stamp_independent_A P; cur_time_independent_A P;
-         \<And>f s. P (trans_state f s) = P s\<rbrakk>
-         \<Longrightarrow> \<lbrace>P\<rbrace> preemption_point \<lbrace>\<lambda>_. P\<rbrace>"
+  shows "\<lbrakk>irq_state_independent_A P; 
+         \<And>f s. P (trans_state f s) = P s;
+         time_state_independent_A P; 
+         last_machine_time_independent_A P;
+         consumed_time_independent_A P;
+         domain_time_independent_A P;
+         reprogram_timer_independent_A P;
+         cur_time_independent_A P\<rbrakk>
+         \<Longrightarrow> reschedule_required \<lbrace>P\<rbrace>
+         \<Longrightarrow> preemption_point \<lbrace>P\<rbrace>"
   apply (clarsimp simp: preemption_point_def)
   apply (rule validE_valid)
-  apply (rule hoare_seq_ext_skipE, wpsimp)
+  apply (rule hoare_seq_ext_skipE)
+   apply wpsimp
   apply (rule valid_validE)
   apply (rule OR_choiceE_weak_wp)
-  apply (rule alternative_valid; (solves wpsimp)?)
+  apply (rule alternative_valid[rotated])
+   apply wpsimp
   apply (rule validE_valid)
-  apply (rule hoare_seq_ext_skipE, solves wpsimp)+
-  apply (rename_tac irq_opt)
-  apply (case_tac irq_opt; clarsimp?, (solves wpsimp)?)
-  apply (rule valid_validE)
-  apply (rule hoare_seq_ext_skip
-         , solves \<open>wpsimp wp: update_time_stamp_wp simp: get_sc_refill_sufficient_def get_sc_active_def\<close>)+
+  apply (rule hoare_seq_ext_skipE)
+   apply wpsimp
+  apply (rule hoare_seq_ext_skipE)
+   apply (rule valid_validE)
+   apply (rule hoare_seq_ext_skip)
+  apply (rule update_time_stamp_inv; simp)
+   apply (rule hoare_seq_ext_skip, wpsimp wp: hoare_drop_imp)+
   apply wpsimp
+  apply (wpsimp wp: hoare_drop_imp)
   done
+
+lemma is_cur_domain_expired_lift:
+  assumes x: "\<And>P. f \<lbrace>\<lambda>s. P (domain_time s)\<rbrace>"
+  shows "f \<lbrace>is_cur_domain_expired\<rbrace>"
+  unfolding is_cur_domain_expired_def
+  by (wp x)
+
+crunches reschedule_required
+  for domain_time[wp]: "\<lambda>s. P (domain_time s)"
+  (wp: crunch_wps)
+
+lemma update_time_stamp_invsf:
+  fixes P :: "'state_ext state \<Rightarrow> bool"
+  shows "\<lbrakk>time_state_independent_A P; 
+         last_machine_time_independent_A P;
+         consumed_time_independent_A P;
+         domain_time_independent_A P;
+         cur_time_independent_A P\<rbrakk>
+         \<Longrightarrow> \<lbrace>P\<rbrace> update_time_stamp \<lbrace>\<lambda>_ s. \<not> is_cur_domain_expired s \<longrightarrow> P s\<rbrace>"
+  apply (clarsimp simp: update_time_stamp_def commit_domain_time_def num_domains_def)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+  apply (rule hoare_seq_ext_skip, erule (1) getCurrentTime_wp)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+   apply (fastforce simp: cur_time_independent_A_def)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+   apply (fastforce simp: consumed_time_independent_A_def)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+  apply (rule hoare_seq_ext_skip, wpsimp)
+   apply (fastforce simp: domain_time_independent_A_def)
+  apply (rule hoare_seq_ext[OF _ gets_sp])
+  apply (rule hoare_when_cases, simp)
+  apply simp
+  apply (rule hoare_seq_ext)
+   apply (wpsimp wp: hoare_vcg_imp_lift' is_cur_domain_expired_lift)
+   apply (rule hoare_pre_cont)
+  apply (wpsimp simp: is_cur_domain_expired_def)
+  done
+
+lemma throwError_wp:
+  "\<lbrace>P (Inl e)\<rbrace> throwError e \<lbrace>P\<rbrace>"
+  by (wpsimp simp: throwError_def)
+
+lemmas hoare_seq_extE_R = validE_R_sp[rotated]
+
+lemma validE_R_sp5:
+  assumes x: "\<lbrace>P\<rbrace> f \<lbrace>Q\<rbrace>"
+  assumes y: "\<And>x. \<lbrace>Q x\<rbrace> g x \<lbrace>R\<rbrace>,-"
+  shows "\<lbrace>P\<rbrace> f >>= (\<lambda>x. g x) \<lbrace>R\<rbrace>,-"
+  apply (insert x y)
+  apply (wpsimp wp: x y simp: validE_R_def validE_def, assumption+)
+  done
+
+lemmas hoare_drop_ret = hoare_drop_imp[where R="\<lambda>r s. f r" for f]
+
+lemma preemption_point_invE_R:
+  fixes P :: "'state_ext state \<Rightarrow> bool"
+  shows "\<lbrakk>irq_state_independent_A P; 
+         time_state_independent_A P; 
+         last_machine_time_independent_A P;
+         consumed_time_independent_A P;
+         domain_time_independent_A P;
+         cur_time_independent_A P;
+         \<And>f s. P (trans_state f s) = P s\<rbrakk>
+         \<Longrightarrow> \<lbrace>P\<rbrace> preemption_point \<lbrace>\<lambda>_. P\<rbrace>, -"
+  apply (clarsimp simp: preemption_point_def)
+  apply (rule hoare_seq_extE_R)
+   apply (rule OR_choiceE_weak_wp4)
+   apply (rule alternativeE_R_wp)
+    apply (rule hoare_seq_extE_R)
+     apply (rule hoare_seq_extE_R)
+      apply (rule hoare_seq_extE_R)
+       apply (wpsimp simp: validE_R_def validE_def)
+      apply (wpsimp wp: hoare_drop_imp)
+     apply (rule validE_R_sp5[rotated])+
+          apply (wpsimp simp: validE_R_def validE_def)
+         apply wpsimp
+        apply (rule_tac Q="\<lambda>_ s. (\<not>is_cur_domain_expired s) \<longrightarrow> P s" in hoare_strengthen_post[rotated])
+         apply clarsimp
+        apply (wpsimp wp: hoare_drop_ret update_time_stamp_invsf)+
+  done
+
+lemmas preemption_point_invE_E = preemption_point_inv[THEN valid_validE_E]
 
 end
 

@@ -1151,6 +1151,7 @@ crunch valid_pdpt_objs[wp]: invoke_sched_context "valid_pdpt_objs::det_state \<R
   (wp: mapM_x_wp' hoare_drop_imps hoare_vcg_if_lift2 simp: is_schedulable_def)
 
 crunch valid_pdpt_objs[wp]: commit_domain_time "valid_pdpt_objs"
+  (simp: crunch_simps)
 crunch valid_pdpt_objs[wp]: end_timeslice "valid_pdpt_objs::det_state \<Rightarrow> _"
   (wp: crunch_wps hoare_drop_imps hoare_vcg_if_lift2)
 
@@ -1663,17 +1664,17 @@ lemma call_kernel_valid_pdpt[wp]:
         apply (rule validE_valid)
         apply (rule_tac Q="\<lambda>_. (\<lambda>s. \<forall>x\<in>ran (kheap s). obj_valid_pdpt x)" in handleE_wp[rotated])
          apply (rule_tac B="\<lambda>_. invs and ct_running and
+(\<lambda>s. \<not>is_cur_domain_expired s \<longrightarrow> scheduler_action s = resume_cur_thread) and
            (\<lambda>s. \<forall>x\<in>ran (kheap s). obj_valid_pdpt x) and
-           (\<lambda>s. scheduler_action s = resume_cur_thread) and
            (\<lambda>s. is_schedulable_bool (cur_thread s) s)" in seqE)
           apply (rule liftE_wp)
-          apply (wpsimp wp: hoare_vcg_ex_lift)
+          apply (wpsimp wp: hoare_vcg_ex_lift update_time_stamp_invsf)
          apply (rule_tac B="\<lambda>rv. invs and (\<lambda>s. rv \<longrightarrow> ct_running s) and
            (\<lambda>s. \<forall>x\<in>ran (kheap s). obj_valid_pdpt x) and
            (\<lambda>s. rv \<longrightarrow> scheduler_action s = resume_cur_thread) and
            (\<lambda>s. rv \<longrightarrow> (is_schedulable_bool (cur_thread s) s))" in seqE)
           apply (rule liftE_wp)
-          apply (wpsimp wp: check_budget_restart_true)
+          apply ((wpsimp wp: hoare_vcg_conj_lift asdfkjhksjhdf | wpsimp wp: check_budget_restart_true)+)[1]
          apply (rule valid_validE)
          apply (wpsimp)
          apply (fastforce simp: ct_in_state_def pred_tcb_weakenE)

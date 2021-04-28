@@ -39,7 +39,7 @@ lemma set_refills_valid_objs:
   apply (clarsimp simp: valid_sched_context_def)
   done
 
-crunches commit_domain_time,set_next_interrupt,set_refills,refill_budget_check
+crunches set_next_interrupt,set_refills,refill_budget_check
   for consumed_time[wp]: "\<lambda>s. P (consumed_time s)"
   and reprogram_timer[wp]: "\<lambda>s. P (reprogram_timer s)"
   and cur_sc[wp]: "\<lambda>s. P (cur_sc s)"
@@ -48,6 +48,14 @@ crunches commit_domain_time,set_next_interrupt,set_refills,refill_budget_check
   and cur_sc_cur_thread[wp]: "\<lambda>s. P (cur_sc s) (cur_thread s)"
   and scheduler_action[wp]: "\<lambda>s. P (scheduler_action s)"
   (wp: crunch_wps simp: Let_def)
+
+crunches commit_domain_time
+  for consumed_time[wp]: "\<lambda>s. P (consumed_time s)"
+  and cur_sc[wp]: "\<lambda>s. P (cur_sc s)"
+  and cur_time[wp]: "\<lambda>s. P (cur_time s)"
+  and arch_state[wp]: "\<lambda>s. P (arch_state s)"
+  and cur_sc_cur_thread[wp]: "\<lambda>s. P (cur_sc s) (cur_thread s)"
+  (wp: crunch_wps simp: Let_def crunch_simps)
 
 crunch reprogram_timer[wp]: commit_time "\<lambda>s. P (reprogram_timer s)"
   (wp: crunch_wps hoare_vcg_if_lift2 ignore: commit_domain_time)
@@ -597,9 +605,9 @@ lemma cur_tcb_domain_time_update[simp]:
   "cur_tcb (domain_time_update f s) = cur_tcb s"
   by (simp add: cur_tcb_def)
 
-lemma commit_domain_time_valid_replies[wp]:
-  "commit_domain_time \<lbrace> valid_replies_pred P \<rbrace>"
-  by (wpsimp simp: commit_domain_time_def)
+crunches commit_domain_time
+  for valid_replies_pred[wp]: "valid_replies_pred P"
+  (simp: crunch_simps wp: crunch_wps)
 
 (* FIXME: move *)
 lemma valid_sched_context_domain_time_update[simp]:
@@ -633,7 +641,6 @@ lemma commit_times_invs_helper:
          consumed_time s = consumed \<and>
          cur_sc s = csc\<rbrace>
        do y <- update_sched_context csc (\<lambda>sc. sc\<lparr>sc_consumed := sc_consumed sc + consumed\<rparr>);
-          y <- commit_domain_time;
           modify (consumed_time_update (\<lambda>_. 0))
        od
        \<lbrace>\<lambda>rv. invs\<rbrace>"
@@ -694,11 +701,10 @@ lemma sc_consumed_update_bound_sc_tcb_at [wp]:
                    obj_at_def)
 
 crunches commit_domain_time
-  for valid_state [wp]: valid_state
-  and cur_tcb [wp]: cur_tcb
+  for cur_tcb [wp]: cur_tcb
   and fault_tcbs_valid_states [wp]: fault_tcbs_valid_states
   and bound_sc_tcb_at [wp]: "\<lambda>s. bound_sc_tcb_at ((=) (Some sc)) (cur_thread s) s"
-  (simp: valid_state_def)
+  (simp: valid_state_def crunch_simps wp: crunch_wps)
 
 lemma set_refills_bound_sc_tcb_at [wp]:
   "\<lbrace>\<lambda>s. bound_sc_tcb_at ((=) (Some sc)) (cur_thread s) s\<rbrace>
@@ -1151,12 +1157,6 @@ crunches tcb_release_remove, tcb_sched_action, set_tcb_obj_ref
   and scheduler_action[wp]: "\<lambda>s. P (scheduler_action s)"
   (simp: crunch_simps)
 
-lemma reschedule_required_cur_sc [wp]:
-  "\<lbrace>\<lambda>s. P (cur_sc s)\<rbrace> reschedule_required \<lbrace>\<lambda>rv s. P (cur_sc s)\<rbrace>"
-  by (wpsimp simp: reschedule_required_def set_scheduler_action_def tcb_sched_action_def
-                   set_tcb_queue_def get_tcb_queue_def thread_get_def is_schedulable_def
-                   cur_sc_tcb_def sc_tcb_sc_at_def obj_at_def)
-
 lemma reschedule_required_scheduler_action [wp]:
   "\<lbrace>\<lambda>s. True\<rbrace>
    reschedule_required
@@ -1455,7 +1455,7 @@ lemma set_scheduler_action_invs[wp]:
 
 lemma reschedule_required_invs[wp]:
   "\<lbrace>invs\<rbrace> reschedule_required \<lbrace>\<lambda>rv. invs\<rbrace>"
-  by (wpsimp simp: reschedule_required_def wp: hoare_drop_imps hoare_vcg_all_lift)
+  by (wpsimp simp: reschedule_required_def wp: hoare_drop_imps hoare_vcg_all_lift is_schedulable_wp)
 
 lemma possible_switch_to_invs[wp]:
   "\<lbrace>invs\<rbrace> possible_switch_to target \<lbrace>\<lambda>rv. invs\<rbrace>"

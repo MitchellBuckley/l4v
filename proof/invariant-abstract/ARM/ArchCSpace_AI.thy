@@ -41,30 +41,14 @@ lemma getActiveIRQ_wp [CSpace_AI_assms]:
   done
 
 lemma getCurrentTime_wp[CSpace_AI_assms]:
-  "time_state_independent_A P \<Longrightarrow> getCurrentTime_independent_A P \<Longrightarrow>
-   valid P (do_machine_op getCurrentTime) (\<lambda>_. P)"
+  "time_state_independent_A P \<Longrightarrow> last_machine_time_independent_A P \<Longrightarrow>
+   (do_machine_op getCurrentTime) \<lbrace>P\<rbrace>"
   apply (simp add: getCurrentTime_def do_machine_op_def split_def
                    select_f_select[simplified liftM_def]
                    select_modify_comm gets_machine_state_modify)
   apply wp
-  apply (fastforce simp: time_state_independent_A_def getCurrentTime_independent_A_def in_monad
+  apply (fastforce simp: time_state_independent_A_def last_machine_time_independent_A_def in_monad
                   split: if_splits)
-  done
-
-lemma update_time_stamp_wp[CSpace_AI_assms]:
-  "\<lbrakk>update_time_stamp_independent_A P; cur_time_independent_A P;
-    time_state_independent_A P; getCurrentTime_independent_A P\<rbrakk>
-   \<Longrightarrow> update_time_stamp \<lbrace>P\<rbrace>"
-  apply (simp add: update_time_stamp_def do_machine_op_def split_def
-                   getCurrentTime_def select_modify_comm gets_machine_state_modify
-                   select_f_select[simplified liftM_def])
-  apply (rule hoare_seq_ext_skip, wpsimp)
-  apply (rule hoare_seq_ext_skip, wpsimp)
-   apply (fastforce simp: time_state_independent_A_def getCurrentTime_independent_A_def in_monad)
-  apply (rule hoare_seq_ext_skip, wpsimp)
-   apply (fastforce simp: cur_time_independent_A_def)
-  apply wpsimp
-  apply (fastforce simp: update_time_stamp_independent_A_def)
   done
 
 lemma weak_derived_valid_cap [CSpace_AI_assms]:

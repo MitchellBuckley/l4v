@@ -330,7 +330,12 @@ global_interpretation DetSchedSchedule_AI_det_ext?: DetSchedSchedule_AI_det_ext
   case 1 show ?case by (unfold_locales; (fact DetSchedSchedule_AI_assms)?; wpsimp)
 qed
 
-context Arch begin global_naming ARM
+context Arch begin global_naming ARM                 by (wpsimp wp: hoare_vcg_imp_conj_lift' check_budget_restart_true
+                          comb: hoare_drop_imps hoare_drop_imp_conj'
+                          simp: if_apply_def2 valid_fault_def
+                     | wps | erule active_from_running
+                     | fastforce simp: tcb_at_invs ct_in_state_def valid_fault_def
+                                elim!: st_tcb_ex_cap dest: active_from_running)+
 
 lemma handle_hyp_fault_trivial[wp]:
   "handle_hypervisor_fault t fault \<lbrace>Q\<rbrace>"

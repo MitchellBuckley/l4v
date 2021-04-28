@@ -1315,7 +1315,7 @@ lemma invs_getCurrentTime_independent:
   "invs (s\<lparr>machine_state := machine_state s\<lparr>last_machine_time :=
                             g (last_machine_time (machine_state s)) (time_state (machine_state s))\<rparr>\<rparr>)
    = invs s"
-  by (clarsimp simp: getCurrentTime_independent_A_def invs_def
+  by (clarsimp simp: invs_def
       valid_state_def valid_pspace_def valid_mdb_def valid_ioc_def valid_idle_def
       only_idle_def if_unsafe_then_cap_def valid_irq_states_def
       valid_global_refs_def valid_arch_state_def
@@ -1330,14 +1330,16 @@ lemma invs_getCurrentTime_independent:
 lemma invs_update_time_stamp_independent:
   "invs (s\<lparr>cur_time := f (cur_time s)\<rparr>) = invs s"
   "invs (s\<lparr>consumed_time := g (consumed_time s) (cur_time s)\<rparr>) = invs s"
-  by (clarsimp simp: update_time_stamp_independent_A_def invs_def
+  "invs (s\<lparr>reprogram_timer := h (reprogram_timer s)\<rparr>) = invs s"
+  "invs (s\<lparr>domain_time := k (domain_time s)\<rparr>) = invs s"
+  by (clarsimp simp: invs_def
       valid_state_def valid_pspace_def valid_mdb_def valid_ioc_def valid_idle_def
       only_idle_def if_unsafe_then_cap_def valid_irq_states_def
       valid_global_refs_def valid_arch_state_def
       valid_irq_node_def valid_irq_handlers_def valid_machine_state_def
       valid_arch_caps_def valid_global_objs_def
       valid_kernel_mappings_def equal_kernel_mappings_def
-      valid_asid_map_def vspace_at_asid_def
+      valid_asid_map_def vspace_at_asid_def ex_cte_cap_wp_to_def
       pspace_in_kernel_window_def cap_refs_in_kernel_window_def
       cur_tcb_def cur_sc_tcb_def sym_refs_def state_refs_of_def
       swp_def valid_replies_pred_pspaceI; safe; clarsimp)+

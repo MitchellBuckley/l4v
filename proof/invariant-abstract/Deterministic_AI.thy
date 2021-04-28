@@ -3884,9 +3884,9 @@ lemma tcb_release_remove_cdt_cdt_list[wp]:
   "\<lbrace>\<lambda>s. P (cdt s) (cdt_list s)\<rbrace> tcb_release_remove t \<lbrace>\<lambda>_ s. P (cdt s) (cdt_list s)\<rbrace>"
   by (wpsimp simp: tcb_release_remove_def)
 
-lemma reschedule_required_cdt_cdt_list[wp]:
-  "\<lbrace>\<lambda>s. P (cdt s) (cdt_list s)\<rbrace> reschedule_required \<lbrace>\<lambda>_ s. P (cdt s) (cdt_list s)\<rbrace>"
-  by (wpsimp simp: reschedule_required_def thread_get_def wp: hoare_drop_imp)
+crunches reschedule_required
+  for cdt_cdt_list[wp]: "\<lambda>s. P (cdt s) (cdt_list s)"
+  (wp: crunch_wps)
 
 lemma test_reschedule_cdt_cdt_list[wp]:
    "\<lbrace>\<lambda>s. P (cdt s) (cdt_list s)\<rbrace> test_reschedule r \<lbrace>\<lambda>_ s. P (cdt s) (cdt_list s)\<rbrace>"
@@ -3973,20 +3973,35 @@ global_interpretation update_work_units_ext_extended: is_extended "update_work_u
 global_interpretation reset_work_units_ext_extended: is_extended "reset_work_units"
   by (unfold_locales; wp)
 
+lemma preemption_point_invsdf'[wp]:
+  "update_work_units \<lbrace>valid_list\<rbrace>"
+  "reset_work_units \<lbrace>valid_list\<rbrace>"
+  unfolding update_work_units_def
+  unfolding reset_work_units_def
+  by wpsimp+
+
 lemma preemption_point_inv':
-  "\<lbrakk>irq_state_independent_A P; time_state_independent_A P; getCurrentTime_independent_A P;
-    update_time_stamp_independent_A P; cur_time_independent_A P;
-    \<And>f s. P (work_units_completed_update f s) = P s\<rbrakk>
-   \<Longrightarrow> \<lbrace>P\<rbrace> preemption_point \<lbrace>\<lambda>_. P\<rbrace>"
+  "preemption_point \<lbrace>valid_list\<rbrace>"
   apply (clarsimp simp: preemption_point_def)
   apply (rule validE_valid)
-  apply (rule hoare_seq_ext_skipE, wpsimp simp: update_work_units_def)
+  apply (rule hoare_seq_ext_skipE)
+   apply wpsimp
+
   apply (rule valid_validE)
   apply (rule OR_choiceE_weak_wp)
-  apply (rule alternative_valid; (solves wpsimp)?)
+  apply (rule alternative_valid[rotated])
+   apply wpsimp
   apply (rule validE_valid)
-  apply (rule hoare_seq_ext_skipE, (solves \<open>wpsimp simp: reset_work_units_def\<close>)?)+
-  apply (wpsimp wp: hoare_vcg_all_lift hoare_drop_imps update_time_stamp_wp)
+  apply (rule hoare_seq_ext_skipE)
+   apply wpsimp
+
+  apply (rule hoare_seq_ext_skipE)
+   apply (rule valid_validE)
+   apply (rule hoare_seq_ext_skip)
+  apply (rule update_time_stamp_inv; simp) apply wpsimp
+   apply (rule hoare_seq_ext_skip, wpsimp wp: hoare_drop_imp)+
+  apply wpsimp
+  apply (wpsimp wp: hoare_drop_imp)
   done
 
 locale Deterministic_AI_1 =

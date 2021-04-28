@@ -1315,13 +1315,13 @@ lemma select_insert:
 lemma update_time_stamp_ct_in_release_queue [wp]:
   "update_time_stamp
    \<lbrace>\<lambda>s. P (in_release_queue (cur_thread s) s)\<rbrace>"
-  by (wpsimp simp: update_time_stamp_def do_machine_op_def
+  by (wpsimp simp: update_time_stamp_def do_machine_op_def commit_domain_time_def
                    is_sc_active_def get_tcb_def in_release_queue_def
             split: option.splits)
 
 lemma update_time_stamp_invs[wp]:
   "update_time_stamp \<lbrace>invs\<rbrace>"
-  by (wpsimp simp: update_time_stamp_def)
+  by (wpsimp simp: update_time_stamp_def commit_domain_time_def)
 
 crunches update_time_stamp
   for valid_objs[wp]: valid_objs
@@ -1331,10 +1331,11 @@ crunches update_time_stamp
   and cur_sc_tcb[wp]: cur_sc_tcb
   and pred_tcb_at[wp]: "\<lambda>s. Q (pred_tcb_at p P t s)"
   and pred_tcb_at_ct[wp]: "\<lambda>s. Q (pred_tcb_at proj P (cur_thread s) s)"
-  and schact[wp]: "\<lambda>s. P (scheduler_action s)"
   and ct[wp]: "\<lambda>s. P (cur_thread s)"
   and ct_active[wp]: "ct_active"
   and ct_running[wp]: ct_running
+  and active_sc[wp]: "sc_at_pred sc_active scp"
+  and release_queue[wp]: "\<lambda>s. P (release_queue s)"
   (wp: hoare_drop_imps simp: crunch_simps do_machine_op_def cur_sc_tcb_def ct_in_state_def)
 
 crunches preemption_point
@@ -1345,13 +1346,16 @@ crunches preemption_point
   and cte_wp_at[wp]: "cte_wp_at P p"
   and cur_sc_tcb[wp]: cur_sc_tcb
   and invs[wp]: invs
-  (rule: preemption_point_inv simp: cur_sc_tcb_def ignore_del: preemption_point)
+  (rule: preemption_point_inv simp: cur_sc_tcb_def ignore_del: preemption_point wp: crunch_wps)
+
 
 lemma update_time_stamp_ct_is_schedulable_bool [wp]:
   "update_time_stamp
    \<lbrace>\<lambda>s. is_schedulable_bool (cur_thread s) s\<rbrace>"
-  by (wpsimp simp: is_schedulable_bool_def' in_release_queue_def
-               wp: hoare_vcg_ex_lift update_time_stamp_wp)
+  apply (rule_tac hoare_weaken_pre, wps)
+  apply (wpsimp simp: is_schedulable_bool_def' in_release_queue_def
+               wp: hoare_vcg_ex_lift)+
+  done
 
 crunches thread_set
   for scheduler_action[wp]: "\<lambda>s. P (scheduler_action s)"
@@ -1563,6 +1567,14 @@ lemma handle_invocation_not_blocking_not_calling_first_phase_ct_active[wp]:
               elim: st_tcb_ex_cap)
   done
 
+
+lemma asdfkjhksjhdf[wp]:
+  "\<lbrace>\<lambda>s. \<not>is_cur_domain_expired s \<longrightarrow> scheduler_action s = resume_cur_thread\<rbrace>
+   check_budget_restart 
+   \<lbrace>\<lambda>rv s. rv \<longrightarrow> scheduler_action s = resume_cur_thread\<rbrace>"
+  unfolding check_budget_restart_def check_budget_def
+  by (wpsimp wp: gts_wp)
+
 lemma he_invs[wp]:
   "\<And>e.
     \<lbrace>\<lambda>s. invs s \<and> (e \<noteq> Interrupt \<longrightarrow> ct_running s) \<and>
@@ -1573,12 +1585,14 @@ lemma he_invs[wp]:
   apply (case_tac e, simp_all)
        apply (rename_tac syscall)
        apply (case_tac syscall, simp_all)
-                 by (wpsimp wp: hoare_vcg_imp_conj_lift' check_budget_restart_true
+              apply (wpsimp wp: hoare_vcg_imp_conj_lift' update_time_stamp_invsf
                           comb: hoare_drop_imps hoare_drop_imp_conj'
                           simp: if_apply_def2 valid_fault_def
+                     | wpsimp wp: check_budget_restart_true
                      | wps | erule active_from_running
                      | fastforce simp: tcb_at_invs ct_in_state_def valid_fault_def
                                 elim!: st_tcb_ex_cap dest: active_from_running)+
+  done
 
 end
 
