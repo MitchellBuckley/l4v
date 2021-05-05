@@ -3864,6 +3864,22 @@ lemma awaken_corres:
   apply (fastforce intro!: awaken_terminates)
   done
 
+lemma switchSchedContext_corres:
+  "corres dc P Q switch_sched_context switchSchedContext"
+  unfolding switchSchedContext_def switch_sched_context_def
+  apply (simp)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split [OF getCurSc_corres])
+      apply (rule corres_split [OF gct_corres])
+        apply (simp, rule corres_split [OF get_tcb_obj_ref_corres, where r'="(=)"])
+           apply (clarsimp simp: tcb_relation_def)
+          apply (rule corres_assert_opt_assume_l)
+          apply (rule corres_split [OF get_sc_corres])
+            apply (rule corres_split [OF corres_when])
+                apply (clarsimp simp: sc_relation_def)
+               apply (rule corres_split [OF setReprogramTimer_corres])
+  oops (* need refill_unblock_check *)
+
 (* note: not safe *)
 lemma tcb_sched_enqueue_in_ready_q3:
   "\<lbrace>\<lambda>_. thread = thread'\<rbrace> tcb_sched_action tcb_sched_enqueue thread \<lbrace>\<lambda>_. in_ready_q thread'\<rbrace>"
