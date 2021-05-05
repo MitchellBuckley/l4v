@@ -3864,6 +3864,142 @@ lemma awaken_corres:
   apply (fastforce intro!: awaken_terminates)
   done
 
+lemma isRoundRobin_corres:
+  "corres (=) (sc_at scp) (sc_at' scp) (is_round_robin scp) (isRoundRobin scp)"
+  unfolding is_round_robin_def isRoundRobin_def
+  apply (rule corres_guard_imp)
+  apply (rule corres_split [OF get_sc_corres corres_return_eq_same])
+  apply (clarsimp simp: sc_relation_def)
+  apply wpsimp+
+  done
+
+lemma refillPopHead_corres:
+  "sc_ptr = scPtr
+   \<Longrightarrow> corres (\<lambda>refill refill'. refill = refill_map refill')
+              (pspace_aligned and pspace_distinct and sc_at sc_ptr and is_active_sc sc_ptr
+               and sc_refills_sc_at (\<lambda>refills. 1 < length refills) sc_ptr)
+              valid_objs'
+              (refill_pop_head sc_ptr) (refillPopHead scPtr)"
+  sorry (* exists in Michael's work *)
+
+lemma updateRefillHd_corres1:
+  "corres dc \<top> \<top>
+             (do refills <- get_refills scp;
+                 set_refill_hd scp (hd refills\<lparr>r_time := ct + kernelWCET_ticks\<rparr>)
+              od)
+             (updateRefillHd scp (rTime_update (\<lambda>_. curTime + kernelWCETTicks)))"
+  sorry (* why is this so complicated? *)
+
+thm update_sched_context_def
+
+lemma updateRefillHd_corres2:
+  "     corres dc \<top> \<top>
+        (do refills' <- get_refills scp;
+            set_refills scp (g refills')
+         od)
+        (updateRefillHd scp f)"
+  apply (clarsimp simp: updateRefillHd_def)
+  apply (clarsimp simp: set_refills_def get_refills_def setSchedContext_def getSchedContext_def update_sched_context_def get_sched_context_def)
+  apply (rule corres_guard_imp)
+  sorry (* why is this so complicated? *)
+
+lemma mergeRefills_corres:
+  "corres dc (pspace_aligned and pspace_distinct and sc_at scp and is_active_sc scp and sc_refills_sc_at (\<lambda>refills. Suc 0 < length refills) scp) 
+              valid_objs' 
+             (merge_refills scp) (mergeRefills scp)"
+  unfolding mergeRefills_def merge_refills_def
+  apply (rule corres_guard_imp)
+  apply (rule corres_split [OF refillPopHead_corres], simp)
+  apply (rule updateRefillHd_corres2)
+  apply wpsimp+
+  done
+
+lemma merge_refills_is_active_sc[wp]:
+  "merge_refills f \<lbrace>is_active_sc scp\<rbrace>"
+  unfolding merge_refills_def
+  apply (wpsimp wp: set_refills_wp get_refills_wp simp: refill_pop_head_def)
+  by (clarsimp simp: pred_map_def obj_at_def vs_all_heap_simps)
+
+lemma refill_head_overlapping_def2:
+  "sc_at scp s \<Longrightarrow> 
+   refill_head_overlapping scp s = Some (pred_map (\<lambda>sc. Suc 0 < length (sc_refills sc)) (scs_of s) scp \<and> pred_map (\<lambda>sc. 
+             r_time (hd (tl (sc_refills sc)))
+             \<le> r_time (refill_hd sc) + r_amount (refill_hd sc)) (scs_of s) scp)"
+  apply (clarsimp simp: refill_head_overlapping_def obind_def read_sched_context_def oreturn_def ofail_def obj_at_def is_sc_obj
+pred_map_def vs_all_heap_simps
+           split: option.splits )
+  done
+
+definition scRefillCount_at where
+  "scRefillCount_at scp s \<equiv> case (ksPSpace s scp) of Some ko \<Rightarrow> (case ko of
+ KOSchedContext sc \<Rightarrow> scRefillCount sc)"
+
+definition rHOLoop_measure where
+  "rHOLoop_measure scp \<equiv> measure (\<lambda>(r, s). scRefillCount_at scp s)"
+
+crunches mergeRefills
+  for sc_at'[wp]: "sc_at' p"
+
+lemma mergeRefills_red[wp]:
+  "\<lbrace>sc_at' f and (\<lambda>s. P (scRefillCount_at f s - 1))\<rbrace>
+   mergeRefills f
+   \<lbrace>\<lambda>_ s. P (scRefillCount_at f s)\<rbrace>"
+  unfolding mergeRefills_def
+  apply (wpsimp simp: refillPopHead_def updateRefillHd_def  setSchedContext_def
+updateScPtr_def getRefillNext_def getMapScPtr_def
+wp: set_sc'.setObject_wp)
+  apply (clarsimp simp: scRefillCount_at_def obj_at'_real_def ko_wp_at'_def projectKOs)
+  done
+
+lemma refillHeadOverlappingLoop_corres:
+  "corres dc (pspace_aligned and pspace_distinct and sc_at scp and is_active_sc scp) 
+          (valid_objs' and active_sc_at' scp)
+          (refill_head_overlapping_loop scp) (refillHeadOverlappingLoop scp)"
+  unfolding refillHeadOverlappingLoop_def refill_head_overlapping_loop_def
+  apply (rule corres_whileLoop)
+        apply (clarsimp simp: refill_head_overlapping_def2)
+  subgoal sorry (* should be ok: need RefillHeadOverlapping*)
+       apply simp
+       apply (rule corres_guard_imp)
+         apply (rule mergeRefills_corres)
+        apply clarsimp
+        apply (frule refill_head_overlapping_true_imp_length_at_least_two)
+         apply (clarsimp simp: sc_at_pred_n_def obj_at_def vs_all_heap_simps)
+        apply (clarsimp simp: sc_at_pred_n_def obj_at_def vs_all_heap_simps)
+       apply simp
+      apply wpsimp
+     apply (wpsimp wp: mergeRefills_valid_objs')
+    apply simp
+  subgoal sorry (* no_fail, should be ok *)
+  apply (rule whileLoop_terminates_inv[where R="rHOLoop_measure scp" and I="\<lambda>r. sc_at' scp"])
+    apply simp
+  subgoal sorry (* should be ok *)
+   apply (simp add: rHOLoop_measure_def)
+   apply wpsimp
+  subgoal sorry (* should be ok: need RefillHeadOverlapping *)
+  apply (clarsimp simp: rHOLoop_measure_def)
+  done
+
+lemma refillUnblockCheck_corres:
+  "corres dc (pspace_aligned and pspace_distinct and is_active_sc scp and active_sc_valid_refills) 
+             valid_objs' 
+             (refill_unblock_check scp) 
+             (refillUnblockCheck scp)"
+  unfolding refillUnblockCheck_def refill_unblock_check_def
+  apply simp
+  apply (rule stronger_corres_guard_imp)
+  apply (rule corres_symb_exec_r')
+  apply (rule corres_assert_assume_r)
+  apply (rule corres_split [OF isRoundRobin_corres])
+  apply (rule corres_split [OF refillReady_corres])
+  apply (rule corres_when, fastforce)
+  apply (rule corres_split [OF setReprogramTimer_corres])
+  apply (rule corres_split [OF getCurTime_corres])
+  apply (subst bind_assoc[symmetric])
+  apply (rule corres_split [OF updateRefillHd_corres1 refillHeadOverlappingLoop_corres])
+  apply (wpsimp wp: scActive_wp)+
+  sorry (* unfinished *)
+
 lemma switchSchedContext_corres:
   "corres dc P Q switch_sched_context switchSchedContext"
   unfolding switchSchedContext_def switch_sched_context_def
@@ -3878,6 +4014,7 @@ lemma switchSchedContext_corres:
             apply (rule corres_split [OF corres_when])
                 apply (clarsimp simp: sc_relation_def)
                apply (rule corres_split [OF setReprogramTimer_corres])
+
   oops (* need refill_unblock_check *)
 
 (* note: not safe *)
