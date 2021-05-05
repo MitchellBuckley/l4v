@@ -3864,6 +3864,28 @@ lemma awaken_corres:
   apply (fastforce intro!: awaken_terminates)
   done
 
+(* note: not safe *)
+lemma tcb_sched_enqueue_in_ready_q3:
+  "\<lbrace>\<lambda>_. thread = thread'\<rbrace> tcb_sched_action tcb_sched_enqueue thread \<lbrace>\<lambda>_. in_ready_q thread'\<rbrace>"
+  apply (wpsimp wp: tcb_sched_action_wp)
+  by (auto simp: vs_all_heap_simps in_queues_2_def tcb_sched_enqueue_def split: if_splits)
+
+(* note: not safe *)
+lemma tcb_sched_append_in_ready_gq:
+  "\<lbrace>\<lambda>_. thread = thread'\<rbrace> tcb_sched_action tcb_sched_append thread \<lbrace>\<lambda>_. in_ready_q thread'\<rbrace>"
+  by (wpsimp wp: tcb_sched_action_wp)
+     (auto simp: vs_all_heap_simps in_queues_2_def tcb_sched_append_def)
+
+lemma isHighestPrio_wp:
+  "\<lbrace>\<lambda>s. if (ksReadyQueuesL1Bitmap s d = 0) then P True s else P (lookupBitmapPriority d s \<le> p) s\<rbrace> isHighestPrio d p \<lbrace>P\<rbrace>"
+  unfolding isHighestPrio_def
+  by (wpsimp simp: getReadyQueuesL1Bitmap_def split: if_splits)
+
+lemma sdkfjh:
+  "scheduler_action s = switch_thread t \<Longrightarrow>
+   valid_blocked_except t s = valid_blocked s"
+  by (fastforce simp: valid_blocked_defs)
+
 lemma schedule_corres:
   "corres dc (invs and valid_sched and valid_list) invs' (Schedule_A.schedule) ThreadDecls_H.schedule"
   supply tcbSchedEnqueue_invs'[wp del]
@@ -3871,6 +3893,109 @@ lemma schedule_corres:
   supply setSchedulerAction_direct[wp]
   supply if_split[split del]
   apply (clarsimp simp: Schedule_A.schedule_def Thread_H.schedule_def)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split [OF awaken_corres])
+      apply (rule corres_split [OF gct_corres], simp)
+        apply (rule corres_split [OF isSchedulable_corres])
+          apply (rule corres_split [OF get_sa_corres])
+            apply (rule corres_split [OF corres_split_sched_act], simp)
+                 apply (rule corres_return_trivial)
+                apply (rule corres_split [OF corres_when2]; simp)
+                   apply (rule tcbSchedEnqueue_corres)
+                  apply (rule corres_split [OF git_corres])
+                    apply (rule corres_split_eqr [OF _ threadget_corres])
+                       apply (rule corres_split_eqr [OF _ corres_if])
+                            apply (rule corres_split [OF schedule_switch_thread_fastfail_corres[OF _ refl]], simp, simp)
+                              apply (rule corres_split [OF curDomain_corres])
+                                apply (rule corres_split [OF isHighestPrio_corres[OF _ refl]], simp)
+                                  apply (rule corres_if, simp)
+                                   apply (rule corres_split [OF tcbSchedEnqueue_corres], simp only: K_bind_def)
+                                     apply (rule corres_split [OF set_sa_corres scheduleChooseNewThread_corres], simp)
+                                      apply (wpsimp wp: set_scheduler_action_cnt_valid_sched)
+                                     apply (wpsimp wp: ssa_invs')
+                                    apply (wpsimp wp: hoare_vcg_all_lift hoare_vcg_imp_lift' tcb_sched_enqueue_in_ready_q3)
+                                   apply (wpsimp wp: tcbSchedEnqueue_invs')
+                                  apply (rule corres_if, simp)
+                                   apply (rule corres_split [OF tcbSchedAppend_corres], simp only: K_bind_def)
+                                     apply (rule corres_split [OF set_sa_corres scheduleChooseNewThread_corres], simp)
+                                      apply (wpsimp wp: set_scheduler_action_cnt_valid_sched)
+                                     apply (wpsimp wp: ssa_invs')
+                                    apply (wpsimp wp: hoare_vcg_all_lift hoare_vcg_imp_lift' tcb_sched_append_in_ready_gq)
+                                   apply (wpsimp)
+                                  apply (rule corres_split [OF switch_thread_corres], simp only: K_bind_def)
+                                    apply (rule set_sa_corres, simp)
+                                   apply wpsimp
+                                  apply wpsimp
+                                 apply wpsimp
+                                apply (wpsimp wp: isHighestPrio_wp)
+                               apply wpsimp
+                              apply wpsimp
+                             apply (wpsimp simp: schedule_switch_thread_fastfail_def)
+                            apply (wpsimp simp: scheduleSwitchThreadFastfail_def)
+                           apply simp
+                          apply (simp, rule threadget_corres, simp add: tcb_relation_def)
+                         apply (rule corres_return_eq_same[OF refl])
+                        apply (wpsimp wp: thread_get_wp')
+                       apply (wpsimp wp: threadGet_wp)
+                      apply (simp add: tcb_relation_def)
+                     apply simp
+                     apply (wpsimp wp: thread_get_wp')
+                    apply (wpsimp wp: threadGet_wp)
+                   apply wpsimp
+                   apply wpsimp
+                 apply (rule_tac Q="\<lambda>_. invs and (\<lambda>s. curThread = cur_thread s) and valid_sched and (\<lambda>s. scheduler_action s = switch_thread t)" in hoare_strengthen_post[rotated])
+                  apply (subgoal_tac "tcb_at t s \<and> tcb_at curThread s \<and> st_tcb_at runnable t s \<and> active_sc_tcb_at t s \<and> budget_ready t s \<and> budget_sufficient t s \<and> not_in_release_q t s")    
+                   apply (clarsimp simp: sdkfjh)
+                   apply (auto simp: if_distribR)[1]
+                     apply (clarsimp split: if_splits)
+                    apply (clarsimp split: if_splits simp: invs_def valid_state_def valid_pspace_def valid_sched_def valid_arch_caps_def)
+                   apply (clarsimp split: if_splits simp: invs_def valid_state_def valid_pspace_def valid_sched_def valid_arch_caps_def)
+  subgoal sorry (* fix later *)
+                 apply (wpsimp)
+                apply (rule_tac Q="\<lambda>_. invs' and (\<lambda>s. curThread = ksCurThread s) and (\<lambda>s. ksSchedulerAction s = SwitchToThread t)" in hoare_strengthen_post[rotated])
+                 apply (subgoal_tac "tcb_at' t s \<and> tcb_at' (ksCurThread s) s \<and> tcb_at' (ksIdleThread s) s") 
+                  apply (clarsimp simp: invs'_def valid_state'_def valid_pspace'_def)
+                  apply (auto simp: if_distribR)[1]
+                  apply (clarsimp split: if_splits simp: invs'_def)
+                  apply (clarsimp split: if_splits simp: invs'_def valid_state'_def valid_pspace'_def)
+  subgoal sorry (* fix later *)
+  subgoal sorry (* fix later *)
+                apply (wpsimp wp: tcbSchedEnqueue_invs')
+               apply (simp)
+               apply (rule corres_split [OF corres_when [OF _ tcbSchedEnqueue_corres] scheduleChooseNewThread_corres], simp)
+                apply wpsimp
+               apply (wpsimp wp: tcbSchedEnqueue_invs')
+              apply (simp only: sc_and_timer_def)
+   apply (rule corres_split)
+
+
+
+find_theorems switchSchedContext corres_underlying
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   sorry (* schedule_corres *) (*
   apply (subst thread_get_test)
   apply (subst thread_get_comm)
