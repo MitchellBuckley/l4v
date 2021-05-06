@@ -3876,9 +3876,9 @@ lemma isRoundRobin_corres:
 lemma refillPopHead_corres:
   "sc_ptr = scPtr
    \<Longrightarrow> corres (\<lambda>refill refill'. refill = refill_map refill')
-              (pspace_aligned and pspace_distinct and sc_at sc_ptr and is_active_sc sc_ptr
+              (sc_at sc_ptr and is_active_sc sc_ptr
                and sc_refills_sc_at (\<lambda>refills. 1 < length refills) sc_ptr)
-              valid_objs'
+              (valid_objs' and sc_at' sc_ptr)
               (refill_pop_head sc_ptr) (refillPopHead scPtr)"
   sorry (* exists in Michael's work *)
 
@@ -3904,8 +3904,8 @@ lemma updateRefillHd_corres2:
   sorry (* why is this so complicated? *)
 
 lemma mergeRefills_corres:
-  "corres dc (pspace_aligned and pspace_distinct and sc_at scp and is_active_sc scp and sc_refills_sc_at (\<lambda>refills. Suc 0 < length refills) scp) 
-              valid_objs' 
+  "corres dc (sc_at scp and is_active_sc scp and sc_refills_sc_at (\<lambda>refills. Suc 0 < length refills) scp) 
+             (valid_objs' and sc_at' scp)
              (merge_refills scp) (mergeRefills scp)"
   unfolding mergeRefills_def merge_refills_def
   apply (rule corres_guard_imp)
@@ -3922,12 +3922,29 @@ lemma merge_refills_is_active_sc[wp]:
 
 lemma refill_head_overlapping_def2:
   "sc_at scp s \<Longrightarrow> 
-   refill_head_overlapping scp s = Some (pred_map (\<lambda>sc. Suc 0 < length (sc_refills sc)) (scs_of s) scp \<and> pred_map (\<lambda>sc. 
-             r_time (hd (tl (sc_refills sc)))
-             \<le> r_time (refill_hd sc) + r_amount (refill_hd sc)) (scs_of s) scp)"
+   refill_head_overlapping scp s = Some (pred_map (\<lambda>sc. Suc 0 < length (sc_refills sc)) (scs_of s) scp \<and> 
+                                         pred_map (\<lambda>sc. r_time (hd (tl (sc_refills sc)))
+                                                        \<le> r_time (refill_hd sc) + r_amount (refill_hd sc)) (scs_of s) scp)"
   apply (clarsimp simp: refill_head_overlapping_def obind_def read_sched_context_def oreturn_def ofail_def obj_at_def is_sc_obj
 pred_map_def vs_all_heap_simps
            split: option.splits )
+  done
+
+definition scRefillNext where
+  "scRefillNext sc index \<equiv> if (index = scRefillMax sc - 1) then 0 else index + 1"
+
+lemma refillHeadOverlapping_def2:
+  "sc_at' scp s \<Longrightarrow> 
+   refillHeadOverlapping scp s = Some (pred_map (\<lambda>sc. Suc 0 < scRefillCount sc) (scs_of' s) scp
+\<and> pred_map (\<lambda>sc. rTime (refillIndex (scRefillNext sc (scRefillHead sc)) sc)
+                        \<le> rTime (refillHd sc) + rAmount (refillHd sc)) (scs_of' s) scp)"
+  apply (clarsimp simp: refillHeadOverlapping_def obind_def obj_at'_def readMapScPtr_def
+  readSchedContext_def projectKOs readRefillSize_def readRefillNext_def 
+  pred_map_def vs_all_heap_simps opt_map_def scRefillNext_def
+           split: option.splits ) 
+  apply (safe)
+                  apply (auto simp: obj_at'_def projectKOs)
+  subgoal sorry (* annoying *)
   done
 
 definition scRefillCount_at where
@@ -3937,8 +3954,19 @@ definition scRefillCount_at where
 definition rHOLoop_measure where
   "rHOLoop_measure scp \<equiv> measure (\<lambda>(r, s). scRefillCount_at scp s)"
 
-crunches mergeRefills
-  for sc_at'[wp]: "sc_at' p"
+find_theorems obj_at' getMapScPtr
+
+lemma getMapScPtr_sc_at'[wp]:
+  "\<lbrace>\<top>\<rbrace> getMapScPtr x f \<lbrace>\<lambda>_ s. sc_at' x s\<rbrace>"
+  by (wpsimp wp: getMapScPtr_wp)
+
+lemma getMapScPtr_sc_at'3[wp]:
+  "\<lbrace>\<top>\<rbrace> updateRefillHd x f \<lbrace>\<lambda>_ s. sc_at' x s\<rbrace>"
+  by (wpsimp simp: updateRefillHd_def)
+
+lemma getMapScPtr_sfc_at'3[wp]:
+  "\<lbrace>\<top>\<rbrace> mergeRefills x \<lbrace>\<lambda>_ s. sc_at' x s\<rbrace>"
+  by (wpsimp simp: mergeRefills_def)
 
 lemma mergeRefills_red[wp]:
   "\<lbrace>sc_at' f and (\<lambda>s. P (scRefillCount_at f s - 1))\<rbrace>
@@ -3952,13 +3980,19 @@ wp: set_sc'.setObject_wp)
   done
 
 lemma refillHeadOverlappingLoop_corres:
-  "corres dc (pspace_aligned and pspace_distinct and sc_at scp and is_active_sc scp) 
-          (valid_objs' and active_sc_at' scp)
+  "corres dc (sc_at scp and is_active_sc scp) 
+          (valid_objs' and active_sc_at' scp and sc_at' scp)
           (refill_head_overlapping_loop scp) (refillHeadOverlappingLoop scp)"
   unfolding refillHeadOverlappingLoop_def refill_head_overlapping_loop_def
   apply (rule corres_whileLoop)
-        apply (clarsimp simp: refill_head_overlapping_def2)
-  subgoal sorry (* should be ok: need RefillHeadOverlapping*)
+        apply (subgoal_tac "sc_at' scp s'")
+         apply (clarsimp simp: refill_head_overlapping_def2 refillHeadOverlapping_def2 runReaderT_def)
+         apply (rule conj_cong)
+          apply (clarsimp simp: refillHeadOverlapping_def2 runReaderT_def pred_map_def opt_map_def obj_at'_def projectKOs scRefillCount_at_def
+  obj_at_def vs_all_heap_simps)  subgoal sorry (* should be ok *)
+         apply (clarsimp simp: refillHeadOverlapping_def2 runReaderT_def pred_map_def opt_map_def obj_at'_def projectKOs scRefillCount_at_def
+  obj_at_def vs_all_heap_simps)  subgoal sorry (* should be ok *)
+        apply (clarsimp simp: active_sc_at'_def)
        apply simp
        apply (rule corres_guard_imp)
          apply (rule mergeRefills_corres)
@@ -3973,16 +4007,22 @@ lemma refillHeadOverlappingLoop_corres:
   subgoal sorry (* no_fail, should be ok *)
   apply (rule whileLoop_terminates_inv[where R="rHOLoop_measure scp" and I="\<lambda>r. sc_at' scp"])
     apply simp
-  subgoal sorry (* should be ok *)
+    apply (clarsimp simp: active_sc_at'_def)
    apply (simp add: rHOLoop_measure_def)
    apply wpsimp
-  subgoal sorry (* should be ok: need RefillHeadOverlapping *)
+   apply (clarsimp simp: refillHeadOverlapping_def2 runReaderT_def pred_map_def opt_map_def obj_at'_def projectKOs scRefillCount_at_def)
   apply (clarsimp simp: rHOLoop_measure_def)
   done
 
+lemma sdfhhfj[wp]:
+  "set_refill_hd a b \<lbrace>is_active_sc scp\<rbrace>"
+  unfolding set_refill_hd_def
+  apply (wpsimp simp: update_refill_hd_def wp: set_refills_wp get_refills_wp)
+  by (clarsimp simp: is_active_sc_def vs_all_heap_simps obj_at_def)
+
 lemma refillUnblockCheck_corres:
-  "corres dc (pspace_aligned and pspace_distinct and is_active_sc scp and active_sc_valid_refills) 
-             valid_objs' 
+  "corres dc (is_active_sc scp and active_sc_valid_refills) 
+             (valid_objs' and active_sc_at' scp and sc_at' scp)
              (refill_unblock_check scp) 
              (refillUnblockCheck scp)"
   unfolding refillUnblockCheck_def refill_unblock_check_def
@@ -3997,11 +4037,134 @@ lemma refillUnblockCheck_corres:
   apply (rule corres_split [OF getCurTime_corres])
   apply (subst bind_assoc[symmetric])
   apply (rule corres_split [OF updateRefillHd_corres1 refillHeadOverlappingLoop_corres])
-  apply (wpsimp wp: scActive_wp)+
+  apply (wpsimp wp: )
+  apply (wpsimp wp: scActive_wp)
   sorry (* unfinished *)
 
+lemma refillBudgetCheckRoundRobin_corres:
+  "consumed = consumed' \<Longrightarrow> 
+   corres dc \<top> \<top> (refill_budget_check_round_robin consumed)
+                  (refillBudgetCheckRoundRobin consumed')"
+  sorry (* leave for now *)
+
+lemma refillBudgetCheck_corres:
+  "consumed = consumed' \<Longrightarrow> 
+   corres dc \<top> \<top> (refill_budget_check consumed)
+                 (refillBudgetCheck consumed')"
+  sorry (* leave for now *)
+
+lemma getReprogramTimer_corres:
+  "corres (=) \<top> \<top> (gets reprogram_timer) getReprogramTimer"
+  by (clarsimp simp: getReprogramTimer_def state_relation_def)
+
+lemma updateScPtr_corres:
+  "\<lbrakk>\<forall>sc n sc'. sc_relation sc n sc' \<longrightarrow> sc_relation (f sc) n (f' sc');
+    \<forall>sc. sc_replies sc = sc_replies (f sc); \<forall>sc'. objBits sc' = objBits (f' sc');
+    \<forall>sc'. scReply (f' sc') = scReply sc' \<rbrakk> \<Longrightarrow>
+   corres dc (sc_at scPtr and pspace_aligned and pspace_distinct) \<top>
+             (update_sched_context scPtr f)
+             (updateScPtr scPtr f')"
+  unfolding updateScPtr_def  
+  by (rule update_sc_no_reply_stack_update_corres; simp)
+
+lemma setDomainTime_corres:
+  "dt = dt' \<Longrightarrow> 
+   corres dc \<top> \<top>
+             (modify (domain_time_update (\<lambda>_. dt)))
+             (setDomainTime dt')"
+  apply (clarsimp simp: setDomainTime_def, rule corres_modify)
+  apply (clarsimp simp: state_relation_def)
+  sorry (* boring fix later *)
+
+lemma setConsumedTime_corres:
+  "ct = ct' \<Longrightarrow> 
+   corres dc \<top> \<top>
+             (modify (consumed_time_update (\<lambda>_. ct)))
+             (setConsumedTime ct')"
+  apply (clarsimp simp: setConsumedTime_def, rule corres_modify)
+  apply (clarsimp simp: state_relation_def)
+  sorry (* boring fix later *)
+
+
+(*corres dc (?R136 csc scPtr sc refillMax y ya yb)
+             (?R'136 csc scPtr sc refillMax y ya yc) (modify (consumed_time_update (\<lambda>_. 0)))
+             (setConsumedTime 0)*)
+
+find_theorems obj_at' getMapScPtr
+crunches refill_budget_check_round_robin 
+  for sc_at[wp]: "sc_at scp"
+  and pspace_aligned[wp]: pspace_aligned
+  and pspace_distinct[wp]: pspace_distinct
+
+lemma commitTime_corres:
+  "corres dc ((\<lambda>s. sc_at (cur_sc s) s) and pspace_aligned and pspace_distinct) \<top> commit_time commitTime"
+  unfolding commit_time_def commitTime_def
+  apply (simp)
+  apply (rule stronger_corres_guard_imp)
+    apply (rule corres_split [OF getCurSc_corres], simp only:)
+       apply (rule corres_symb_exec_l')
+        apply (rule corres_symb_exec_r')
+           apply (rule corres_split)
+              apply (rule corres_when)
+  subgoal sorry (* fix later *)
+              apply (rule corres_split [OF getConsumedTime_corres], simp only:)
+                apply (rule corres_split [OF corres_when], simp)
+                   apply (simp add: ifM_def)
+                   apply (rule corres_split [OF isRoundRobin_corres])
+                     apply (rule corres_if[OF _ refillBudgetCheckRoundRobin_corres refillBudgetCheck_corres]; 
+                            simp)
+                    apply wpsimp
+                   apply wpsimp
+                  apply (rule updateScPtr_corres)
+                     apply (clarsimp simp: sc_relation_def)
+                    apply (clarsimp simp: sc_relation_def)
+                   apply (clarsimp simp: objBits_def objBitsKO_def)
+                  apply (clarsimp simp: sc_relation_def)
+                 apply wpsimp
+                apply wpsimp
+               apply wpsimp
+              apply wpsimp
+             apply (rule corres_split [OF corres_when], simp add: num_domains_def numDomains_def)
+                apply (simp add: commit_domain_time_def)
+                apply (rule corres_split [OF getConsumedTime_corres], simp only:)
+                  apply (rule corres_split [OF domain_time_corres], simp only:)
+                    apply (rule setDomainTime_corres, simp)
+                   apply wpsimp
+                  apply wpsimp
+                 apply wpsimp
+                apply wpsimp
+               apply (rule setConsumedTime_corres, simp)
+              apply wpsimp
+             apply wpsimp
+            apply wpsimp
+           apply wpsimp
+          apply (rule_tac Q="\<lambda>_. sc_at' scPtr" in hoare_strengthen_post[rotated])
+           apply simp
+          apply wp
+  subgoal sorry
+        apply wpsimp
+  subgoal sorry
+      apply wpsimp        
+     apply wpsimp        
+    apply wpsimp        
+   apply auto
+  subgoal sorry (* boring fix later *)
+  done
+
+lemma setCurSc_corres:
+  "sc = sc' \<Longrightarrow> 
+   corres dc \<top> \<top> (modify (cur_sc_update (\<lambda>_. sc))) (setCurSc sc')"
+  apply (clarsimp simp: setCurSc_def, rule corres_modify)
+  apply (clarsimp simp: state_relation_def)
+  sorry (* boring fix later *)
+
 lemma switchSchedContext_corres:
-  "corres dc P Q switch_sched_context switchSchedContext"
+  "corres dc (\<lambda>s. tcb_at (cur_thread s) s \<and>
+         sc_at (cur_sc s) s \<and>
+         pspace_aligned s \<and>
+         pspace_distinct s \<and> active_sc_tcb_at (cur_thread s) s \<and> active_sc_valid_refills s) 
+             valid_objs'
+             switch_sched_context switchSchedContext"
   unfolding switchSchedContext_def switch_sched_context_def
   apply (simp)
   apply (rule corres_guard_imp)
@@ -4013,9 +4176,52 @@ lemma switchSchedContext_corres:
           apply (rule corres_split [OF get_sc_corres])
             apply (rule corres_split [OF corres_when])
                 apply (clarsimp simp: sc_relation_def)
-               apply (rule corres_split [OF setReprogramTimer_corres])
-
-  oops (* need refill_unblock_check *)
+               apply (rule corres_split [OF setReprogramTimer_corres ])
+                 apply (simp, rule refillUnblockCheck_corres)
+                apply wpsimp
+               apply wpsimp
+              apply (rule corres_split [OF getReprogramTimer_corres ])
+                apply (rule corres_split [OF corres_when ], simp)
+                   apply (rule commitTime_corres)
+                  apply (rule setCurSc_corres, simp)
+                 apply wpsimp
+                apply wpsimp
+               apply wpsimp
+              apply wpsimp
+             apply (rule_tac Q="\<lambda>_. ((\<lambda>s. \<forall>scp. scp = cur_sc s \<longrightarrow> sc_at scp s) and pspace_aligned and
+                                            pspace_distinct)" in hoare_strengthen_post[rotated])
+              apply (clarsimp simp: )
+             apply (wpsimp wp: hoare_vcg_imp_lift' hoare_vcg_all_lift)
+            apply wpsimp
+           apply (rule_tac Q="\<lambda>_. (\<lambda>s. \<forall>scp. scp = cur_sc s \<longrightarrow> sc_at scp s) and pspace_aligned and
+                                          pspace_distinct
+         and (\<lambda>s. is_active_sc (the scOpt) s \<and> active_sc_valid_refills s)" in hoare_strengthen_post[rotated])
+            apply (clarsimp simp: )
+           apply wpsimp
+           apply (assumption)
+          apply wpsimp
+         apply (wpsimp wp: get_tcb_obj_ref_wp)
+        apply (wpsimp wp: threadGet_wp)
+       apply (rule_tac Q="\<lambda>x. tcb_at x and
+                  (\<lambda>b. (sc_at scPtr and
+                               (\<lambda>a. sc_at (cur_sc a) a \<and>
+                                     pspace_aligned a \<and>
+                                     pspace_distinct a \<and>
+                                     active_sc_tcb_at x a \<and>
+                                     active_sc_valid_refills a))
+                               b)" in hoare_strengthen_post[rotated])
+        apply (clarsimp simp: obj_at_def pred_map_def vs_all_heap_simps)
+       apply wpsimp
+       apply (assumption)
+      apply wpsimp
+     apply wpsimp
+    apply wpsimp
+   apply clarsimp
+  apply (subgoal_tac "tcb_at' (ksCurThread s) s \<and> sc_at' (ksCurSc s) s")  
+   apply clarsimp
+  subgoal sorry (* boring fix later *)
+  subgoal sorry (* boring fix later *)
+  done
 
 (* note: not safe *)
 lemma tcb_sched_enqueue_in_ready_q3:
@@ -4038,6 +4244,92 @@ lemma sdkfjh:
   "scheduler_action s = switch_thread t \<Longrightarrow>
    valid_blocked_except t s = valid_blocked s"
   by (fastforce simp: valid_blocked_defs)
+(*
+lemma setDeadline_corres:
+  "corres_underlying Id False True dc (\<lambda>_. True) (\<lambda>_. True)
+             (setDeadline (rvc - MachineExports.timerPrecision))
+             (setDeadline (rvc - MachineExports.timerPrecision))"
+  unfolding setDeadline_def
+  apply (clarsimp simp: machine_op_lift_def machine_rest_lift_def)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split [OF corres_gets_trivial], simp)
+    apply (rule corres_split_eqr [OF _ corres_select_f])
+    apply (clarsimp)
+    apply (rule corres_modify)
+    apply simp
+  apply (clarsimp simp: ignore_failure_def)
+  apply (clarsimp simp: ignore_failure_def)
+  apply wpsimp+
+  done
+
+lemma setDeadline_corres:
+  "corres_underlying Id False True dc (\<lambda>_. True) (\<lambda>_. True)
+             (setDeadline (rvc - MachineExports.timerPrecision))
+             (setDeadline (rvc - MachineExports.timerPrecision))"
+  unfolding setDeadline_def
+  apply (clarsimp simp: machine_op_lift_def machine_rest_lift_def)
+  apply (rule corres_guard_imp)
+    apply (rule corres_split [OF corres_gets_trivial], simp)
+    apply (rule corres_split_eqr [OF _ corres_select_f])
+    apply (clarsimp)
+    apply (rule corres_modify)
+    apply simp
+  apply (clarsimp simp: ignore_failure_def)
+  apply (clarsimp simp: ignore_failure_def)
+  apply wpsimp+
+  done
+
+lemma setNextInterrupt_corres:
+  "corres dc (cur_tcb and valid_release_q) \<top> set_next_interrupt setNextInterrupt"
+  unfolding setNextInterrupt_def set_next_interrupt_def
+  apply (rule corres_guard_imp)
+    apply (rule corres_split [OF getCurTime_corres])
+      apply (rule corres_split [OF gct_corres], simp)
+        apply (rule corres_split_eqr [OF _ get_tcb_obj_ref_corres])
+         apply (rule corres_assert_opt_assume_l)
+          apply (rule corres_split [OF get_sc_corres])
+            apply (rule corres_split [OF corres_if])
+   apply (clarsimp simp: num_domains_def numDomains_def)
+            apply (rule corres_split [OF domain_time_corres])
+  apply (simp only: fun_app_def)
+                 apply (rule corres_return_eq_same)
+  apply (clarsimp simp: sc_relation_def)
+  subgoal sorry (* boring *)
+  apply wpsimp
+  apply wpsimp
+                 apply (rule corres_return_eq_same)
+  apply (clarsimp simp: sc_relation_def)
+  subgoal sorry (* boring *)
+                apply (rule corres_split [OF getReleaseQueue_corres])
+                apply (rule corres_split [OF corres_if], simp)
+                 apply (rule corres_return_eq_same)
+  apply simp
+
+        apply (rule corres_split_eqr)
+         apply (rule corres_assert_opt_assume_l)
+ apply (simp)
+          apply (rule corres_split [OF get_sc_corres])
+                 apply (rule corres_return_eq_same)
+  apply (clarsimp simp: sc_relation_def)
+  subgoal sorry (* boring *)
+ apply wpsimp
+ apply wpsimp
+  apply (simp, rule get_tcb_obj_ref_corres)
+  apply (clarsimp simp: tcb_relation_def)
+  apply (wpsimp wp: get_tcb_obj_ref_wp)
+  apply (wpsimp wp: threadGet_wp)
+   apply (rule corres_machine_op)
+  apply (simp only:)
+  apply (rule setDeadline_corres)
+  apply wpsimp+
+  apply (clarsimp simp: tcb_relation_def)
+  apply (wpsimp wp: get_tcb_obj_ref_wp)
+  apply (wpsimp wp: threadGet_wp)
+  apply wpsimp+
+  apply (clarsimp simp: cur_tcb_def)
+  subgoal sorry (* boring, fix later *)
+
+  sorry (* setNextInterrupt_corres *)
 
 lemma schedule_corres:
   "corres dc (invs and valid_sched and valid_list) invs' (Schedule_A.schedule) ThreadDecls_H.schedule"
@@ -4119,35 +4411,12 @@ lemma schedule_corres:
                 apply wpsimp
                apply (wpsimp wp: tcbSchedEnqueue_invs')
               apply (simp only: sc_and_timer_def)
-   apply (rule corres_split)
-
-
-
-find_theorems switchSchedContext corres_underlying
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+              apply (rule corres_split [OF switchSchedContext_corres])
+                apply (simp only: K_bind_def fun_app_def)
+                apply (rule corres_split [OF getReprogramTimer_corres])
+                  apply (rule corres_when, simp)
+                  apply (rule corres_split [OF setNextInterrupt_corres setReprogramTimer_corres], simp)
+  (* only wp proofs remaining *)
 
   sorry (* schedule_corres *) (*
   apply (subst thread_get_test)
