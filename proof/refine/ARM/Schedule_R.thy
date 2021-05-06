@@ -4041,16 +4041,20 @@ lemma refillUnblockCheck_corres:
   apply (wpsimp wp: scActive_wp)
   sorry (* unfinished *)
 
+(* 
+          (\<lambda>s. pspace_aligned s \<and> pspace_distinct s \<and> active_sc_valid_refills s \<and> cur_sc_active s
+               \<and> valid_objs s)
+          valid_objs' *)
 lemma refillBudgetCheckRoundRobin_corres:
-  "consumed = consumed' \<Longrightarrow> 
-   corres dc \<top> \<top> (refill_budget_check_round_robin consumed)
-                  (refillBudgetCheckRoundRobin consumed')"
-  sorry (* leave for now *)
+  "corres dc \<top> \<top> 
+          (refill_budget_check_round_robin usage) (refillBudgetCheckRoundRobin usage)"
+ sorry (* refillBudgetCheckRoundRobin_corres: exists in Michael's work *)
 
 lemma refillBudgetCheck_corres:
   "consumed = consumed' \<Longrightarrow> 
    corres dc \<top> \<top> (refill_budget_check consumed)
                  (refillBudgetCheck consumed')"
+  unfolding refill_budget_check_def refillBudgetCheck_def
   sorry (* leave for now *)
 
 lemma getReprogramTimer_corres:
@@ -4244,11 +4248,12 @@ lemma sdkfjh:
   "scheduler_action s = switch_thread t \<Longrightarrow>
    valid_blocked_except t s = valid_blocked s"
   by (fastforce simp: valid_blocked_defs)
-(*
-lemma setDeadline_corres:
-  "corres_underlying Id False True dc (\<lambda>_. True) (\<lambda>_. True)
-             (setDeadline (rvc - MachineExports.timerPrecision))
-             (setDeadline (rvc - MachineExports.timerPrecision))"
+
+lemma machine_op_liftcorres__trivial:
+  "f = f' \<Longrightarrow>
+   corres_underlying Id False True dc (\<lambda>_. True) (\<lambda>_. True)
+             (machine_op_lift f)
+             (machine_op_lift f')"
   unfolding setDeadline_def
   apply (clarsimp simp: machine_op_lift_def machine_rest_lift_def)
   apply (rule corres_guard_imp)
@@ -4263,21 +4268,12 @@ lemma setDeadline_corres:
   done
 
 lemma setDeadline_corres:
-  "corres_underlying Id False True dc (\<lambda>_. True) (\<lambda>_. True)
-             (setDeadline (rvc - MachineExports.timerPrecision))
-             (setDeadline (rvc - MachineExports.timerPrecision))"
+  "dl = dl' \<Longrightarrow>
+   corres_underlying Id False True dc (\<lambda>_. True) (\<lambda>_. True)
+             (setDeadline dl)
+             (setDeadline dl')"
   unfolding setDeadline_def
-  apply (clarsimp simp: machine_op_lift_def machine_rest_lift_def)
-  apply (rule corres_guard_imp)
-    apply (rule corres_split [OF corres_gets_trivial], simp)
-    apply (rule corres_split_eqr [OF _ corres_select_f])
-    apply (clarsimp)
-    apply (rule corres_modify)
-    apply simp
-  apply (clarsimp simp: ignore_failure_def)
-  apply (clarsimp simp: ignore_failure_def)
-  apply wpsimp+
-  done
+  by (rule machine_op_liftcorres__trivial, simp)
 
 lemma setNextInterrupt_corres:
   "corres dc (cur_tcb and valid_release_q) \<top> set_next_interrupt setNextInterrupt"
@@ -4286,50 +4282,49 @@ lemma setNextInterrupt_corres:
     apply (rule corres_split [OF getCurTime_corres])
       apply (rule corres_split [OF gct_corres], simp)
         apply (rule corres_split_eqr [OF _ get_tcb_obj_ref_corres])
-         apply (rule corres_assert_opt_assume_l)
-          apply (rule corres_split [OF get_sc_corres])
-            apply (rule corres_split [OF corres_if])
-   apply (clarsimp simp: num_domains_def numDomains_def)
-            apply (rule corres_split [OF domain_time_corres])
-  apply (simp only: fun_app_def)
-                 apply (rule corres_return_eq_same)
-  apply (clarsimp simp: sc_relation_def)
+           apply (rule corres_assert_opt_assume_l)
+           apply (rule corres_split [OF get_sc_corres])
+             apply (rule corres_split [OF corres_if])
+                  apply (clarsimp simp: num_domains_def numDomains_def)
+                 apply (rule corres_split [OF domain_time_corres])
+                   apply (simp only: fun_app_def)
+                   apply (rule corres_return_eq_same)
+                   apply (clarsimp simp: sc_relation_def)
   subgoal sorry (* boring *)
-  apply wpsimp
-  apply wpsimp
-                 apply (rule corres_return_eq_same)
-  apply (clarsimp simp: sc_relation_def)
+                  apply wpsimp
+                 apply wpsimp
+                apply (rule corres_return_eq_same)
+                apply (clarsimp simp: sc_relation_def)
   subgoal sorry (* boring *)
-                apply (rule corres_split [OF getReleaseQueue_corres])
-                apply (rule corres_split [OF corres_if], simp)
-                 apply (rule corres_return_eq_same)
-  apply simp
-
-        apply (rule corres_split_eqr)
-         apply (rule corres_assert_opt_assume_l)
- apply (simp)
-          apply (rule corres_split [OF get_sc_corres])
-                 apply (rule corres_return_eq_same)
-  apply (clarsimp simp: sc_relation_def)
+               apply (rule corres_split [OF getReleaseQueue_corres])
+                 apply (rule corres_split [OF corres_if], simp)
+                     apply (rule corres_return_eq_same)
+                     apply simp
+                    apply (rule corres_split_eqr)
+                       apply (rule corres_assert_opt_assume_l)
+                       apply (simp)
+                       apply (rule corres_split [OF get_sc_corres])
+                         apply (rule corres_return_eq_same)
+                         apply (clarsimp simp: sc_relation_def)
   subgoal sorry (* boring *)
- apply wpsimp
- apply wpsimp
-  apply (simp, rule get_tcb_obj_ref_corres)
-  apply (clarsimp simp: tcb_relation_def)
-  apply (wpsimp wp: get_tcb_obj_ref_wp)
-  apply (wpsimp wp: threadGet_wp)
-   apply (rule corres_machine_op)
-  apply (simp only:)
-  apply (rule setDeadline_corres)
-  apply wpsimp+
-  apply (clarsimp simp: tcb_relation_def)
-  apply (wpsimp wp: get_tcb_obj_ref_wp)
-  apply (wpsimp wp: threadGet_wp)
-  apply wpsimp+
-  apply (clarsimp simp: cur_tcb_def)
+                        apply wpsimp
+                       apply wpsimp
+                      apply (simp, rule get_tcb_obj_ref_corres)
+                      apply (clarsimp simp: tcb_relation_def)
+                     apply (wpsimp wp: get_tcb_obj_ref_wp)
+                    apply (wpsimp wp: threadGet_wp)
+                   apply (rule corres_machine_op)
+                   apply (simp only:)
+                   apply (rule setDeadline_corres)
+                   apply wpsimp+
+          apply (clarsimp simp: tcb_relation_def)
+         apply (wpsimp wp: get_tcb_obj_ref_wp)
+        apply (wpsimp wp: threadGet_wp)
+       apply wpsimp+
+   apply (clarsimp simp: cur_tcb_def)
   subgoal sorry (* boring, fix later *)
-
-  sorry (* setNextInterrupt_corres *)
+  subgoal sorry (* boring, fix later *)
+  done
 
 lemma schedule_corres:
   "corres dc (invs and valid_sched and valid_list) invs' (Schedule_A.schedule) ThreadDecls_H.schedule"
