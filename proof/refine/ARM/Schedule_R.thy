@@ -3986,6 +3986,11 @@ lemma mergeRefills_no_fail[wp]:
   unfolding mergeRefills_def
   sorry (* unclear to me because of reader monad *)
 
+lemma refillHdInsufficient_def2:
+  "refillHdInsufficient scPtr s = Some (obj_at' (\<lambda>sc. rAmount (refillHd sc) < minBudget) scPtr s)"
+  unfolding refillHdInsufficient_def
+  sorry (* refillHdInsufficient_def2 *)
+
 lemma refillHeadOverlappingLoop_corres:
   "corres dc (sc_at scp and is_active_sc scp)
           (valid_objs' and active_sc_at' scp)
@@ -4014,6 +4019,26 @@ lemma refillHeadOverlappingLoop_corres:
   apply (clarsimp simp: rHOLoop_measure_def)
   done
 
+lemma nonOverlappingMergeRefills_terminates:
+  "whileLoop_terminates
+     (\<lambda>_ s. the (refillHdInsufficient scPtr s))
+     (\<lambda>_. nonOverlappingMergeRefills scPtr) r' s'"
+  apply (rule whileLoop_terminates_inv[where R="measure (\<lambda>(r,s). scRefillCount_of scPtr s)" and I="\<lambda>r s. True"])
+    apply simp
+   apply (clarsimp simp: nonOverlappingMergeRefills_def)
+   apply (wpsimp simp: refillPopHead_def updateRefillHd_def setSchedContext_def
+                       updateScPtr_def getRefillNext_def getMapScPtr_def
+                   wp: set_sc'.setObject_wp)
+   apply (clarsimp simp: scRefillCount_of_def obj_at'_real_def ko_wp_at'_def projectKOs
+                         refillHdInsufficient_def2)
+  subgoal sorry (* Some non-trivial arguments needed here.
+    Invariant: scRefillCount ko is never 0
+    Maintained because additionally: sum of refill amounts is \<le> minBudget
+       and the loop condition is true
+ *)
+  apply simp
+  done
+
 lemma set_refill_hd_is_active_sc[wp]:
   "set_refill_hd a b \<lbrace>is_active_sc scp\<rbrace>"
   unfolding set_refill_hd_def
@@ -4026,7 +4051,8 @@ lemma no_fail_scActive[wp]:
   by (wpsimp)
 
 lemma refillUnblockCheck_corres:
-  "corres dc (pspace_aligned and pspace_distinct and is_active_sc scp and active_sc_valid_refills)
+  "corres dc (pspace_aligned and pspace_distinct and is_active_sc scp and active_sc_valid_refills
+              and sc_at scp)
              (valid_objs')
              (refill_unblock_check scp)
              (refillUnblockCheck scp)"
@@ -4055,8 +4081,7 @@ lemma refillUnblockCheck_corres:
       apply (wpsimp wp: scActive_wp)
      apply wpsimp
     apply wpsimp
-   apply (subgoal_tac "sc_at scp s"; simp)
-  subgoal sorry (* boring *)
+   apply simp
   apply (subgoal_tac "active_sc_at' scp s' \<and> sc_at' scp s'"; clarsimp)
    apply (clarsimp simp: obj_at'_def projectKOs active_sc_at'_def)
    apply (subgoal_tac "valid_sched_context' ko s' \<and> valid_sched_context_size' ko")
@@ -4081,17 +4106,39 @@ lemma head_time_buffer_equiv:
   " the (head_time_buffer r s) = the (headTimeBuffer r' s')"
   sorry
 
+lemma sdflkj:
+  "\<lbrakk>0 < scRefillCount sca; scRefillMax sca \<le> length (scRefills sca);
+     scRefillHead sca < scRefillMax sca;
+     scRefillCount sca \<le> scRefillMax sca\<rbrakk> \<Longrightarrow>
+   (length
+             (refills_map (scRefillHead sca) (scRefillCount sca)
+               (scRefillMax sca) (scRefills sca)) =
+            Suc 0) =
+           (scRefillHead sca = refillTailIndex sca)"
+  apply (clarsimp simp: valid_sched_context'_def refillTailIndex_def refills_map_def)
+  apply (case_tac "scRefillCount sca = Suc 0"; simp)
+  apply (auto simp: Let_def)
+  done
+
 lemma refillSingle_corres:
-  "r =r' \<Longrightarrow>
-   corres (=) (sc_at r) (sc_at' r') (refill_single r)
-        (refillSingle r')"
+  "scp = scp' \<Longrightarrow>
+   corres (=) (sc_at scp) (sc_at' scp' and
+    (\<lambda>s. \<forall>ko. ko_at' ko scp' s \<longrightarrow> 0 < scRefillCount ko \<and>
+           scRefillMax ko \<le> length (scRefills ko) \<and>
+           scRefillHead ko < scRefillMax ko \<and>
+           scRefillCount ko \<le> scRefillMax ko))
+    (refill_single scp) (refillSingle scp')"
   unfolding refill_single_def refillSingle_def
   apply (simp add: refill_size_def get_refills_def)
   apply (rule stronger_corres_guard_imp)
-       apply (rule corres_split [OF get_sc_corres corres_return_eq_same])
-    apply (clarsimp simp: sc_relation_def)
-  subgoal sorry (* boring *)
-    by wpsimp+
+    apply (rule_tac R'="\<lambda>sca s. 0 < scRefillCount sca \<and> scRefillMax sca \<le> length (scRefills sca) \<and>
+  scRefillHead sca < scRefillMax sca \<and>
+  scRefillCount sca \<le> scRefillMax sca" and R="\<lambda>_ _ . True" in corres_split)
+       apply (rule get_sc_corres)
+      apply (clarsimp simp: sc_relation_def)
+      apply (rule sdflkj; simp)
+     apply wpsimp+
+  done
 
 lemma updateRefillHd_corres3:
   "corres dc \<top> \<top> (set_refill_hd sc_ptr f)
@@ -4122,13 +4169,21 @@ lemma scheduleUsed_corres:
 
 lemma handleOverrunLoopBody_corres:
   "r = r' \<Longrightarrow>
-   corres (=) P Q (handle_overrun_loop_body r) (handleOverrunLoopBody r')"
+   corres (=) (\<lambda>s. sc_at (cur_sc s) s \<and> cur_sc_active s
+                   \<and> sc_refills_sc_at (\<lambda>refills. refills \<noteq> []) (cur_sc s) s)
+              valid_objs'
+ (handle_overrun_loop_body r) (handleOverrunLoopBody r')"
   unfolding handle_overrun_loop_body_def handleOverrunLoopBody_def
   apply simp
   apply (rule stronger_corres_guard_imp)
     apply (rule corres_split [OF getCurSc_corres])
       apply (rule corres_split [OF refillSingle_corres], simp)
         apply (simp, rule corres_split [OF get_sc_corres])
+          apply (rule_tac F=" (sc_refills sc \<noteq> [])"
+          in corres_gen_asm)
+          apply (rule_tac F="(MIN_REFILLS \<le> length (scRefills sca)
+            \<and> scRefillMax sca \<le> length (scRefills sca)
+            \<and> scRefillHead sca < scRefillMax sca \<and> scRefillCount sca \<le> scRefillMax sca \<and> 0 < scRefillMax sca \<and> 0 < scRefillCount sca)" in corres_gen_asm2)
           apply (rule corres_split [OF corres_if corres_return_eq_same])
                apply simp
               apply (rule updateRefillHd_corres3)
@@ -4138,8 +4193,9 @@ lemma handleOverrunLoopBody_corres:
                apply (rule scheduleUsed_corres)
               apply wpsimp
              apply wpsimp
-            apply (clarsimp simp: sc_relation_def)
-  subgoal sorry (* refills details *)
+            apply (clarsimp simp: sc_relation_def refills_map_def hd_map_simp valid_sched_context'_def)
+            apply (subst hd_wrap_slice, simp, simp, simp)
+            apply (clarsimp simp: refill_map_def refillHd_def)
            apply wpsimp
           apply wpsimp
          apply wpsimp
@@ -4148,7 +4204,13 @@ lemma handleOverrunLoopBody_corres:
       apply (wpsimp simp: refillSingle_def)
      apply wpsimp
     apply wpsimp
-  sorry (* handleOverrunLoopBody: sketched proof here *)
+   apply (auto simp: sc_at_pred_n_def obj_at_def)[1]
+   apply (case_tac "sc_refills sca"; simp)
+  apply (subgoal_tac "sc_at' (ksCurSc s') s' \<and> (\<forall>ko. ko_at' ko (ksCurSc s') s' \<longrightarrow> valid_sched_context' ko s' \<and> 0 < scRefillMax ko
+         \<and> 0 < scRefillCount ko)")
+   apply (auto simp: valid_sched_context'_def)[1]
+  subgoal sorry (* handleOverrunLoopBody: only final parts to fix now *)
+  done
 
 lemma headTimeBuffer_equiv:
   "headTimeBuffer r s = Some (obj_at' (\<lambda>sc. rAmount (refillHd sc) \<le> r \<and>
@@ -4191,6 +4253,50 @@ lemma handleOverrunLoop_corres:
       apply simp
       apply (rule handleOverrunLoopBody_terminates)
   sorry (* handleOverrunLoop_corres: proof only started *)
+
+lemma nonOverlappingMergeRefills_corres:
+  "sc_ptr = scPtr \<Longrightarrow>
+    corres dc (\<lambda>s. sc_at sc_ptr s \<and>
+             is_active_sc sc_ptr s \<and>
+             sc_refills_sc_at (\<lambda>refills. Suc 0 < length refills) sc_ptr s) (\<lambda>s. valid_objs' s \<and> sc_at' scPtr s)
+    (non_overlapping_merge_refills sc_ptr)
+    (nonOverlappingMergeRefills scPtr)"
+  unfolding nonOverlappingMergeRefills_def non_overlapping_merge_refills_def
+  apply (rule corres_guard_imp)
+    apply (rule corres_split [OF refillPopHead_corres ], simp)
+      apply (simp, rule updateRefillHd_corres2)
+     apply wpsimp+
+  done
+
+lemma nonOverlappingMergeRefills_terminates:
+  "whileLoop_terminates
+     (\<lambda>_ s. the (refillHdInsufficient scPtr s))
+     (\<lambda>_. nonOverlappingMergeRefills scPtr) r' s'"
+  apply (rule whileLoop_terminates_inv[where R="measure (\<lambda>(r,s). scRefillCount_of scPtr s)" and I="\<lambda>r s. True"])
+    apply simp
+   apply (clarsimp simp: nonOverlappingMergeRefills_def)
+  subgoal sorry
+  apply simp
+  done
+
+lemma headInsufficientLoop_corres:
+  "sc_ptr = scPtr \<Longrightarrow>
+   corres dc (\<lambda>s. sc_at sc_ptr s \<and>
+             is_active_sc sc_ptr s \<and>
+             sc_refills_sc_at (\<lambda>refills. Suc 0 < length refills) sc_ptr s) (\<lambda>s. valid_objs' s \<and> sc_at' scPtr s)
+   (head_insufficient_loop sc_ptr) (headInsufficientLoop scPtr)"
+  unfolding head_insufficient_loop_def headInsufficientLoop_def runReaderT_def
+  apply (rule corres_whileLoop)
+  subgoal sorry
+       apply simp
+       apply (rule corres_guard_imp)
+         apply (rule nonOverlappingMergeRefills_corres, simp, simp, simp)
+  subgoal sorry
+  subgoal sorry
+    apply simp
+  subgoal sorry
+  apply (simp add: nonOverlappingMergeRefills_terminates)
+  done
 
 lemma refillBudgetCheck_corres:
   "consumed = consumed' \<Longrightarrow>
