@@ -3934,7 +3934,7 @@ lemma refillSingle_equiv:
 lemma refillSingle_corres:
   "scp = scp' \<Longrightarrow>
    corres (=) (sc_at scp) (sc_at' scp' and (\<lambda>s. obj_at' standard_sc scp' s))
-     (refill_single scp) 
+     (refill_single scp)
      (refillSingle scp')"
   unfolding refill_single_def refillSingle_def
   apply (simp add: refill_size_def get_refills_def)
@@ -3958,7 +3958,7 @@ lemma sc_relation_refill_hd_equiv:
   done
 
 lemma pspace_relation_sc_relation:
-  "pspace_relation h h' \<Longrightarrow> 
+  "pspace_relation h h' \<Longrightarrow>
    h x = Some (kernel_object.SchedContext sc n) \<Longrightarrow>
    h' x = Some (KOSchedContext sc') \<Longrightarrow>
    valid_sched_context_size n \<Longrightarrow>
@@ -3968,7 +3968,7 @@ lemma pspace_relation_sc_relation:
   by (clarsimp)
 
 lemma pspace_relation_tcb_relation:
-  "pspace_relation h h' \<Longrightarrow> 
+  "pspace_relation h h' \<Longrightarrow>
    h x = Some (kernel_object.TCB tcb) \<Longrightarrow>
    h' x = Some (KOTCB tcb') \<Longrightarrow>
    tcb_relation tcb tcb'"
@@ -4009,9 +4009,9 @@ lemma setNextInterrupt_corres_helper:
 
 lemma setNextInterrupt_corres:
   "corres dc ((\<lambda>s. active_sc_tcb_at (cur_thread s) s) and valid_release_q and valid_objs
-              and active_sc_valid_refills and pspace_aligned and pspace_distinct) 
+              and active_sc_valid_refills and pspace_aligned and pspace_distinct)
              valid_objs'
-             set_next_interrupt 
+             set_next_interrupt
              setNextInterrupt"
   unfolding setNextInterrupt_def set_next_interrupt_def
   apply (rule stronger_corres_guard_imp)
