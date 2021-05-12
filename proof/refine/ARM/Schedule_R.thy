@@ -4022,25 +4022,70 @@ lemma refillHdInsufficient_def2:
 definition hILoop_measure where
   "hILoop_measure scp \<equiv> measure (\<lambda>(r, s). scRefillCount_of scp s)"
 
-definition scRefillsSum_of where
-  "scRefillsSum_of scp s \<equiv> 0"
+definition scRefillsSum where
+  "scRefillsSum sc \<equiv> refills_sum (refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc) (scRefills sc))"
 
-lemma temp[wp]:
-  "nonOverlappingMergeRefills scPtr \<lbrace>\<lambda>s. P (scRefillsSum_of scPtr s)\<rbrace>"
+crunches nonOverlappingMergeRefills
+  for sc_at'[wp]: "sc_at' scPtr"
+
+lemma temp2[wp]:
+  "nonOverlappingMergeRefills scPtr
+   \<lbrace>\<lambda>s'. obj_at' (\<lambda>sc. scRefillCount sc \<noteq> 0) scPtr s' \<longrightarrow>
+         obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s'\<rbrace>"
+  unfolding nonOverlappingMergeRefills_def
+  apply (wpsimp simp: refillPopHead_def updateRefillHd_def setSchedContext_def
+                      updateScPtr_def getRefillNext_def getMapScPtr_def
+                  wp: set_sc'.setObject_wp)
+  apply (clarsimp simp: scRefillCount_of_def obj_at'_real_def ko_wp_at'_def projectKOs)
   sorry
 
-(* It's slightly unclear how to prove this. More work required. *)
+lemma take_1:
+  "h \<noteq> [] \<Longrightarrow> (take (Suc 0) h) = [hd h]"
+  apply (case_tac h; simp only:)
+  apply (subst take_Suc_Cons)
+  apply auto
+  done
+
+lemma wrap_slice_1:
+  "a < c \<Longrightarrow> a < length h \<Longrightarrow>
+  wrap_slice a (Suc 0) c h = [h ! a]"
+  by (clarsimp simp: wrap_slice_def take_1 hd_drop_conv_nth)
+
+lemma scRefillsSum_eq_HeadAmount:
+  "scRefillCount sc = 1 \<Longrightarrow> scRefillMax sc \<noteq> 0 \<Longrightarrow>
+   scRefillHead sc < scRefillMax sc \<Longrightarrow>
+   scRefillMax sc \<le> length (scRefills sc) \<Longrightarrow>
+   scRefillsSum sc = rAmount (refillHd sc)"
+  apply (clarsimp simp: scRefillsSum_def refills_map_def wrap_slice_1)
+  apply (simp add: refill_map_def refillHd_def)
+  done
+
+(* This is essentiall done. only annoying details to fix *)
 lemma nonOverlappingMergeRefills_terminates:
   assumes bound: "\<And>s. scRefillsSum_of scPtr s = scRefillsSum_of scPtr s' \<Longrightarrow> the (refillHdInsufficient scPtr s) \<Longrightarrow> 0 < scRefillCount_of scPtr s"
+  assumes A: "obj_at' (\<lambda>sc. scRefillCount sc \<noteq> 0) scPtr s'"
+  assumes B: "obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s' \<and> sc_at' scPtr s'"
   shows
-  "whileLoop_terminates
+    "whileLoop_terminates
      (\<lambda>_ s. the (refillHdInsufficient scPtr s))
      (\<lambda>_. nonOverlappingMergeRefills scPtr) r' s'"
-  apply (rule_tac I="\<lambda>_ s. scRefillsSum_of scPtr s = scRefillsSum_of scPtr s'"
+  supply if_split [split del]
+  apply (rule_tac I="\<lambda>_ s. scRefillCount_of scPtr s \<noteq> 0
+                           \<and> (obj_at' (\<lambda>sc. scRefillCount sc \<noteq> 0) scPtr s \<longrightarrow> obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s)
+                           \<and> sc_at' scPtr s"
          in whileLoop_terminates_inv[where R="hILoop_measure scPtr"])
+    apply (simp add: A B)
+  subgoal sorry (* boring fix later *)
+   apply (wpsimp simp: hILoop_measure_def)
+   apply (subgoal_tac "obj_at' (\<lambda>sc. scRefillCount sc = 1) scPtr s")
+    apply (clarsimp simp: refillHdInsufficient_def2 obj_at'_def projectKOs scRefillCount_of_def)
+    apply (subst (asm) scRefillsSum_eq_HeadAmount, simp)
+       apply simp
+  subgoal sorry
+  subgoal sorry
+  subgoal sorry
     apply simp
-   apply (wpsimp simp: hILoop_measure_def wp: hoare_vcg_imp_lift')
-  using bound apply fastforce
+   apply (clarsimp simp: refillHdInsufficient_def2 obj_at'_def projectKOs scRefillCount_of_def)
   apply (simp add: hILoop_measure_def)
   done
 
