@@ -280,27 +280,6 @@ lemma perform_asid_control_invocation_pred_map_sc_refill_cfgs_of:
 crunches perform_asid_control_invocation
   for valid_machine_time[wp]: "valid_machine_time"
 
-lemma perform_asid_control_invocation_valid_sched:
-  "\<lbrace>ct_active and (\<lambda>s. scheduler_action s = resume_cur_thread) and invs and valid_aci aci and
-    valid_sched and valid_machine_time and valid_idle\<rbrace>
-     perform_asid_control_invocation aci
-   \<lbrace>\<lambda>_. valid_sched\<rbrace>"
-  apply (rule hoare_pre)
-   apply (rule_tac I="invs and ct_active and
-                      (\<lambda>s. scheduler_action s = resume_cur_thread) and valid_aci aci"
-          in valid_sched_tcb_state_preservation_gen)
-                 apply simp
-                 apply (wpsimp wp: perform_asid_control_invocation_st_tcb_at
-                                   perform_asid_control_invocation_pred_tcb_at_live
-                                   perform_asid_control_invocation_sc_at_pred_n_live[where Q="Not"]
-                                   perform_asid_control_etcb_at
-                                   perform_asid_control_invocation_sc_at_pred_n
-                                   perform_asid_control_invocation_valid_idle
-                                   perform_asid_control_invocation_pred_map_sc_refill_cfgs_of
-                                   hoare_vcg_all_lift
-                             simp: ipc_queued_thread_state_live live_sc_def)+
-  done
-
 lemma kernelWCET_us_non_zero:
   "kernelWCET_us \<noteq> 0"
   using kernelWCET_us_pos by fastforce

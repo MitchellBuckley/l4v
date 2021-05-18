@@ -157,6 +157,27 @@ lemma activate_thread_valid_sched:
   by (wpsimp wp: set_thread_state_cur_thread_runnable_valid_sched gts_wp hoare_vcg_all_lift
                  get_tcb_obj_ref_wp hoare_drop_imps)
 
+lemma perform_asid_control_invocation_valid_sched:
+  "\<lbrace>ct_active and (\<lambda>s. scheduler_action s = resume_cur_thread) and invs and valid_aci aci and
+    valid_sched and valid_machine_time and valid_idle\<rbrace>
+     perform_asid_control_invocation aci
+   \<lbrace>\<lambda>_. valid_sched\<rbrace>"
+  apply (rule hoare_pre)
+   apply (rule_tac I="invs and ct_active and
+                      (\<lambda>s. scheduler_action s = resume_cur_thread) and valid_aci aci"
+          in valid_sched_tcb_state_preservation_gen)
+                 apply simp
+                 apply (wpsimp wp: perform_asid_control_invocation_st_tcb_at
+                                   perform_asid_control_invocation_pred_tcb_at_live
+                                   perform_asid_control_invocation_sc_at_pred_n_live[where Q="Not"]
+                                   perform_asid_control_etcb_at
+                                   perform_asid_control_invocation_sc_at_pred_n
+                                   perform_asid_control_invocation_valid_idle
+                                   perform_asid_control_invocation_pred_map_sc_refill_cfgs_of
+                                   hoare_vcg_all_lift
+                             simp: ipc_queued_thread_state_live live_sc_def)+
+  done
+
 lemma arch_perform_invocation_valid_sched [wp, DetSchedSchedule_AI_assms]:
   "\<lbrace>invs and valid_sched and valid_machine_time and ct_active and (\<lambda>s. scheduler_action s = resume_cur_thread) and
     valid_arch_inv a\<rbrace>

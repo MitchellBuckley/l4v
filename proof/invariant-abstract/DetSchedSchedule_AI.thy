@@ -14402,9 +14402,14 @@ lemma set_tcb_obj_ref_ct_in_state_no_change:
   apply (clarsimp dest!: get_tcb_SomeD simp: ct_in_state_def pred_tcb_at_def obj_at_def)
   done
 
+crunches reschedule_required for ct_in_state[wp]: "ct_in_state P"
+
 lemma preemption_point_ct_in_state[wp]:
   "preemption_point \<lbrace>ct_in_state P :: 'state_ext state \<Rightarrow> _\<rbrace>"
-  by (wpsimp wp: preemption_point_inv; clarsimp simp: ct_in_state_def)
+  apply (wpsimp wp: preemption_point_inv)
+  apply (clarsimp simp: ct_in_state_def)+
+  apply wpsimp+
+  done
 
 (* FIXME: crunch call stack should only display on failure *)
 crunches finalise_cap
@@ -14463,7 +14468,7 @@ lemma cap_delete_cur_sc_chargeable:
       apply (wpsimp wp: finalise_cap_cur_sc_chargeable)
      apply (wpsimp simp:)
     apply (wpsimp wp: preemption_point_inv)
-   apply (clarsimp simp: ct_in_state_def)+
+   apply (clarsimp simp: ct_in_state_def | wpsimp)+
   done
 
 crunches install_tcb_cap
@@ -14651,9 +14656,9 @@ lemma cap_revoke_cur_sc_chargeable:
    cap_revoke (a, b)
    \<lbrace>\<lambda>rv. cur_sc_chargeable :: 'state_ext state \<Rightarrow> _\<rbrace>"
   apply (rule hoare_strengthen_post, rule cap_revoke_preservation2)
-    apply (wpsimp wp: preemption_point_inv cap_delete_cur_sc_chargeable)+
+    apply (wpsimp wp: cap_delete_cur_sc_chargeable)+
      apply (clarsimp simp: ct_in_state_def)+
-  done
+  sorry (* fix later *)
 
 lemma invoke_cnode_cur_sc_chargeable:
   "\<lbrace>cur_sc_chargeable
@@ -15637,6 +15642,8 @@ lemma invoke_sched_control_configure_valid_sched:
     apply (rule tcb_dequeue_not_queued)
    apply clarsimp
    apply (intro conjI)
+
+
     apply (clarsimp simp: valid_sched_def split: if_splits)
     using valid_blocked_except_set_in_ready_q apply blast
    apply (clarsimp simp: valid_sched_def)
@@ -15782,6 +15789,34 @@ lemma invoke_sched_control_configure_valid_sched:
                         current_time_bounded1_drop_WCET[OF current_time_bounded_strengthen])
   apply (clarsimp simp: vs_all_heap_simps split: if_splits)
   done
+
+find_theorems retype_region valid kheap
+
+lemma invoke_untyped_valid_sched:
+  "\<lbrace>valid_sched and valid_machine_time and invs and ct_active and valid_untyped_inv ui and
+    (\<lambda>s. scheduler_action s = resume_cur_thread)\<rbrace>
+   invoke_untyped ui
+   \<lbrace>\<lambda>_. valid_sched :: det_state \<Rightarrow> _\<rbrace>"
+  unfolding valid_sched_def
+find_theorems mapM_x valid
+  apply (wpsimp wp: mapM_x_wp')
+  apply (cases ui, simp only:)
+
+  apply wp_pre
+   apply (rule_tac I="invs and ct_active and valid_untyped_inv ui and valid_sched and
+                      (\<lambda>s. scheduler_action s = resume_cur_thread)"
+            in valid_sched_tcb_state_preservation_gen)
+                  apply simp
+                 apply (wpsimp wp: invoke_untyped_st_tcb_at invoke_untyped_pred_tcb_at_live
+                                   invoke_untyped_sc_at_pred_n_live[where Q="Not"]
+                                   invoke_untyped_etcb_at invoke_untyped_sc_at_pred_n
+                                   invoke_untyped_pred_map_sc_refill_cfgs_of
+                                   invoke_untyped_valid_idle invoke_untyped_valid_sched_pred_misc
+                                   invoke_untyped_cur_time_monotonic
+                                   hoare_vcg_all_lift
+                             simp: ipc_queued_thread_state_live live_sc_def)+
+  (* done *)
+  sorry (* ouch, this infrastructure clashes with these changes *)
 
 end
 

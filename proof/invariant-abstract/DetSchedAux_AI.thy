@@ -81,7 +81,7 @@ locale DetSchedAux_AI =
   assumes update_time_stamp_valid_machine_time[wp]:
     "update_time_stamp \<lbrace>valid_machine_time::'state_ext state \<Rightarrow> _\<rbrace>"
   assumes dmo_getCurrentTime_vmt_sp:
-    "\<lbrace>valid_machine_time :: 'state_ext state \<Rightarrow> _\<rbrace>
+    "\<lbrace>\<top> :: 'state_ext state \<Rightarrow> _\<rbrace>
      do_machine_op getCurrentTime
      \<lbrace>\<lambda>rv s. (cur_time s \<le> rv) \<and> (rv \<le> - getCurrentTime_buffer - 1)\<rbrace>"
 
@@ -500,10 +500,6 @@ lemma delete_objects_valid_blocked[wp]:
   by (fastforce simp: valid_blocked_defs pred_map_simps opt_map_simps map_join_simps vs_heap_simps
                split: option.splits)
 
-crunch valid_blocked[wp]: reset_untyped_cap "valid_blocked::'z::state_ext state \<Rightarrow> _"
-  (wp: preemption_point_inv mapME_x_inv_wp crunch_wps simp: unless_def)
-  (* annoying, fix later *)
-
 crunches retype_region, delete_objects
   for cur_sc[wp]: "\<lambda>(s). P (cur_sc s)"
   (simp: detype_def)
@@ -543,13 +539,6 @@ lemma cur_sc_chargeable_invoke_untypedE_R:
   apply clarsimp
   apply (simp only: cur_sc_tcb_only_sym_bound_def tcb_at_kh_simps[symmetric])
   done
-
-context DetSchedAux_AI begin
-lemma invoke_untyped_valid_blocked[wp]:
-  "invoke_untyped ui \<lbrace>valid_blocked::'state_ext state \<Rightarrow> _\<rbrace>"
-  unfolding invoke_untyped_def
-  by (wpsimp wp: crunch_wps mapME_x_inv_wp simp: mapM_x_defsym crunch_simps unless_def)
-end
 
 lemma etcb_at_tcb_at_pred_map:
   "\<lbrakk> etcb_at P ref s; tcb_at ref s \<rbrakk> \<Longrightarrow> pred_map P (etcbs_of s) ref"
@@ -647,41 +636,28 @@ lemma valid_sched_tcb_state_preservation_gen:
     "\<And>val. \<lbrace>\<lambda>s. cur_time s = val \<and> valid_machine_time s\<rbrace> f \<lbrace>\<lambda>_ s. val \<le> cur_time s\<rbrace>"
   assumes cur_thread: "\<And>P. \<lbrace>\<lambda>s. P (cur_thread s)\<rbrace> f \<lbrace>\<lambda>r s. P (cur_thread s)\<rbrace>"
   assumes idle_thread: "\<And>P. \<lbrace>\<lambda>s. P (idle_thread s)\<rbrace> f \<lbrace>\<lambda>r s. P (idle_thread s)\<rbrace>"
+  assumes not_rct: "f \<lbrace>\<lambda>s. scheduler_action s \<noteq> resume_cur_thread\<rbrace>"
+  assumes ct_nqd: "\<lbrace>I\<rbrace> f \<lbrace>\<lambda>_ s. not_queued (cur_thread s) s\<rbrace>"
   assumes valid_blocked: "\<lbrace>valid_blocked\<rbrace> f \<lbrace>\<lambda>_. valid_blocked\<rbrace>"
+  assumes valid_ready_qs: "\<lbrace>valid_ready_qs\<rbrace> f \<lbrace>\<lambda>_. valid_ready_qs\<rbrace>"
+  assumes valid_sched_action: "\<lbrace>valid_sched_action\<rbrace> f \<lbrace>\<lambda>_. valid_sched_action\<rbrace>"
   assumes valid_idle: "\<lbrace>I\<rbrace> f \<lbrace>\<lambda>_. valid_idle\<rbrace>"
   assumes valid_others:
-    "\<And>P. \<lbrace>\<lambda>s. P (scheduler_action s) (ready_queues s) (cur_domain s) (release_queue s)\<rbrace>
-          f \<lbrace>\<lambda>r s. P (scheduler_action s) (ready_queues s) (cur_domain s) (release_queue s)\<rbrace>"
+    "\<And>P. \<lbrace>\<lambda>s. P (cur_domain s) (release_queue s)\<rbrace>
+          f \<lbrace>\<lambda>r s. P (cur_domain s) (release_queue s)\<rbrace>"
   shows "\<lbrace>valid_sched and valid_machine_time and I\<rbrace> f \<lbrace>\<lambda>_. valid_sched\<rbrace>"
   apply (rule validI, clarsimp simp: valid_sched_def)
   apply (frule I, elim conjE, frule invs_valid_idle, frule invs_iflive)
   apply (frule use_valid
-         , rule_tac P="\<lambda>act ready dom release. act = scheduler_action s \<and> ready = ready_queues s
-                                              \<and> dom = cur_domain s \<and> release = release_queue s"
+         , rule_tac P="\<lambda>dom release. dom = cur_domain s \<and> release = release_queue s"
            in valid_others
          , simp)
   apply (frule use_valid, rule_tac P="\<lambda>ct. ct = cur_thread s" in cur_thread, simp)
   apply (frule use_valid, rule_tac P="\<lambda>it. it = idle_thread s" in idle_thread, simp)
   apply (frule use_valid[OF _ valid_blocked], assumption)
+  apply (frule use_valid[OF _ valid_sched_action], assumption)
+  apply (frule use_valid[OF _ valid_ready_qs], assumption)
   apply (frule use_valid[OF _ valid_idle], assumption)
-  apply (prop_tac "valid_ready_qs s'")
-   subgoal for s rv s'
-   apply (clarsimp simp: valid_ready_qs_def
-                         pred_map2'_pred_maps obj_at_kh_kheap_simps[symmetric] pred_tcb_at_eq_commute)
-   apply (drule spec | elim conjE exE | drule (1) bspec)+
-   apply (rename_tac scp)
-   apply (frule (1) runnable_nonz_cap_to)
-   apply (frule use_valid[OF _ st_tcb], fastforce)
-   apply (frule pred_map_etcb_at, frule use_valid[OF _ etcb_at], fastforce)
-   apply (frule_tac s=s' and P'="Not \<circ> inactive" in st_tcb_weakenE, fastforce)
-   apply (frule use_valid[OF _ bound_sc], fastforce)
-   apply (clarsimp simp: pred_tcb_at_def obj_at_def etcb_at_pred_tcb_at_pred_map)
-   apply (frule (3) ex_nonz_cap_to_tcb_implies_ex_nonz_cap_to_sc)
-   apply (frule use_valid, rule_tac p=scp in sc_refill_cfg, simp)
-   apply (frule use_valid[OF _ valid_machine_time], simp)
-   apply (frule use_valid[OF _ cur_time_nondecreasing], simp)
-   apply (fastforce dest: released_sc_cur_time_increasing)
-   done
   apply (prop_tac "valid_release_q s'")
    subgoal for s rv s'
    apply (clarsimp simp: valid_release_q_def)
@@ -706,38 +682,6 @@ lemma valid_sched_tcb_state_preservation_gen:
            ; simp add: I bound_sc sc_refill_cfg), simp)
    apply (rule tcb_ready_times_of_eq_bound_sc_obj_tcb_at_lift)
    by (auto simp: vs_all_heap_simps)
-  apply (prop_tac "valid_sched_action s'")
-   subgoal for s rv s'
-   apply (clarsimp simp: valid_sched_action_def is_activatable_def weak_valid_sched_action_def
-                         switch_in_cur_domain_def in_cur_domain_def
-                         pred_map2'_pred_maps obj_at_kh_kheap_simps[symmetric] pred_tcb_at_eq_commute)
-   apply (case_tac "\<exists>t. scheduler_action s = switch_thread t"; clarsimp)
-    subgoal for t scp
-    apply (frule (1) runnable_nonz_cap_to)
-    apply (frule use_valid[OF _ st_tcb], fastforce)
-    apply (frule use_valid[OF _ etcb_at], fastforce)
-    apply (frule_tac s=s' and P'="Not \<circ> inactive" in st_tcb_weakenE, fastforce)
-    apply (frule use_valid[OF _ bound_sc], fastforce)
-    apply (clarsimp simp: pred_tcb_at_def[unfolded obj_at_def])
-    apply (frule (3) ex_nonz_cap_to_tcb_implies_ex_nonz_cap_to_sc)
-    apply (frule use_valid, rule_tac p=scp in sc_refill_cfg, simp)
-    apply (frule use_valid[OF _ valid_machine_time], simp)
-    apply (frule use_valid[OF _ cur_time_nondecreasing], simp)
-    apply (fastforce dest: released_sc_cur_time_increasing)
-    done
-   apply (simp add: ct_in_state_def)
-   apply (frule (1) runnable_nonz_cap_to[unfolded runnable_eq])
-   apply (frule use_valid[OF _ st_tcb], fastforce)
-   by (elim pred_tcb_weakenE disjE; fastforce)
-  apply (prop_tac "ct_in_cur_domain s'")
-   subgoal for s rv s'
-   apply (clarsimp simp: ct_in_cur_domain_def in_cur_domain_def)
-   apply (simp add: ct_in_state_def)
-   apply (frule (1) runnable_nonz_cap_to[unfolded runnable_eq])
-   apply (frule use_valid[OF _ st_tcb], fastforce)
-   apply (frule use_valid[OF _ etcb_at], fastforce)
-   apply (frule_tac s=s' and P'="Not \<circ> inactive" in st_tcb_weakenE, fastforce)
-   by simp
   apply (prop_tac "valid_idle_etcb s'")
    subgoal for s rv s'
    apply (clarsimp simp: valid_idle_etcb_def)
@@ -829,7 +773,8 @@ lemma valid_sched_tcb_state_preservation_gen:
    apply (frule (1) non_empty_sc_replies_nonz_cap)
    apply (rule use_valid, assumption, rule sc_refill_cfg)
    by (intro conjI; assumption)
-  by simp
+  apply simp
+  oops
 
 lemma invoke_untyped_valid_idle:
   "\<lbrace>invs and ct_active
@@ -1003,36 +948,25 @@ lemma invoke_untyped_valid_machine_time[wp]:
   done
 
 lemma dmo_getCurrentTime_sp[wp]:
-  "do_machine_op getCurrentTime \<lbrace>P\<rbrace> \<Longrightarrow>
-   \<lbrace>valid_machine_time and P :: 'state_ext state \<Rightarrow> _\<rbrace>
+  "\<lbrace>\<top> :: 'state_ext state \<Rightarrow> _\<rbrace>
    do_machine_op getCurrentTime
-   \<lbrace>\<lambda>rv s. (cur_time s \<le> rv) \<and> (rv \<le> - getCurrentTime_buffer - 1) \<and> P s\<rbrace>"
+   \<lbrace>\<lambda>rv s. (cur_time s \<le> rv) \<and> (rv \<le> - getCurrentTime_buffer - 1)\<rbrace>"
   apply (clarsimp simp: pred_conj_def)
-  apply (intro hoare_vcg_conj_lift_pre_fix)
-    apply (rule_tac Q="valid_machine_time" in hoare_weaken_pre)
-     apply (rule_tac Q="\<lambda>rv s. cur_time s \<le> rv \<and> rv \<le> - getCurrentTime_buffer - 1"
+apply (rule_tac Q="\<lambda>rv s. cur_time s \<le> rv \<and> rv \<le> - getCurrentTime_buffer - 1"
                   in hoare_strengthen_post)
       apply (wpsimp wp: dmo_getCurrentTime_vmt_sp)
      apply simp
-    apply simp
-   apply (rule_tac Q="valid_machine_time" in hoare_weaken_pre)
-    apply (rule_tac Q="\<lambda>rv s. cur_time s \<le> rv \<and> rv \<le> - getCurrentTime_buffer - 1"
-                 in hoare_strengthen_post)
-    apply (wpsimp wp: dmo_getCurrentTime_vmt_sp)
-    apply simp
-   apply simp
-  apply (fastforce simp: valid_def)
   done
 
 (* This is not strictly a weakest precondition rule, but it is quite close. *)
 lemma dmo_getCurrentTime_wp:
-  assumes str_post: "\<And>rv s. (cur_time s \<le> rv) \<and> (rv \<le> - getCurrentTime_buffer - 1)
+  assumes str_post: "\<And>rv s. ((cur_time s \<le> rv) \<and> (rv \<le> - getCurrentTime_buffer - 1))
                              \<and> P s
                              \<longrightarrow> Q rv s"
   assumes dmo_inv: "do_machine_op getCurrentTime \<lbrace>P\<rbrace>"
-  shows "\<lbrace>valid_machine_time and P :: 'state_ext state \<Rightarrow> _\<rbrace>
+  shows "\<lbrace>P :: 'state_ext state \<Rightarrow> _\<rbrace>
          do_machine_op getCurrentTime
-         \<lbrace>\<lambda>rv s. Q rv s\<rbrace>"
+         \<lbrace>Q\<rbrace>"
   apply (strengthen str_post)
   by (wpsimp wp: dmo_getCurrentTime_vmt_sp dmo_inv)
 
@@ -1041,14 +975,13 @@ crunches commit_domain_time
   (wp: crunch_wps)
 
 lemma update_time_stamp_is_refill_ready[wp]:
-  "\<lbrace>valid_machine_time and is_refill_ready scp :: 'state_ext state \<Rightarrow> _\<rbrace>
+  "\<lbrace>is_refill_ready scp :: 'state_ext state \<Rightarrow> _\<rbrace>
    update_time_stamp
    \<lbrace>\<lambda>_. is_refill_ready scp\<rbrace>"
   unfolding update_time_stamp_def
-  apply (wpsimp wp: dmo_getCurrentTime_wp)
-     prefer 2
-     apply (rule_tac Q="(is_refill_ready scp and (\<lambda>s. cur_time s = prev_time))"
-            in hoare_weaken_pre[rotated], assumption)
+ apply wpsimp
+  apply (rule_tac P="(is_refill_ready scp and (\<lambda>s. cur_time s = prev_time))"
+            in dmo_getCurrentTime_wp[rotated])
      apply wpsimp
     apply (clarsimp simp: vs_all_heap_simps refill_ready_def)
     apply (rule_tac b="cur_time s + kernelWCET_ticks" in order.trans, simp)
@@ -1062,78 +995,24 @@ lemma update_time_stamp_is_refill_ready[wp]:
   by simp
 
 lemma update_time_stamp_cur_time_monotonic:
-  "\<lbrace>\<lambda>s :: 'state_ext state. valid_machine_time s \<and> cur_time s = val\<rbrace>
+  "\<lbrace>\<lambda>s :: 'state_ext state. cur_time s = val\<rbrace>
    update_time_stamp
    \<lbrace>\<lambda>_ s. val \<le> cur_time s\<rbrace>"
   supply minus_add_distrib[simp del]
   apply (clarsimp simp: update_time_stamp_def)
   apply (rule hoare_seq_ext[OF _ gets_sp])
-  apply (rule_tac B="\<lambda>rv s. cur_time s \<le> rv \<and> rv \<le> - getCurrentTime_buffer - 1
-                            \<and> cur_time s = val \<and> cur_time s = prev_time"
-               in hoare_seq_ext[rotated])
+  apply (rule hoare_seq_ext)
+   apply wpsimp
+  apply (rule dmo_getCurrentTime_wp)
    apply (wpsimp wp: dmo_getCurrentTime_sp)+
   done
 
 lemma preemption_point_cur_time_monotonic:
-  "\<lbrace>\<lambda>s :: 'state_ext state. valid_machine_time s \<and> cur_time s = val\<rbrace>
+  "\<lbrace>\<lambda>s :: 'state_ext state. cur_time s = val\<rbrace>
    preemption_point
    \<lbrace>\<lambda>_ s. val \<le> cur_time s\<rbrace>"
   apply (wpsimp simp: preemption_point_def do_extended_op_def
                   wp: OR_choiceE_weak_wp update_time_stamp_cur_time_monotonic hoare_drop_imps)
-  done
-
-lemma reset_untyped_cap_cur_time_monotonic:
-  "\<lbrace>\<lambda>s :: 'state_ext state. valid_machine_time s \<and> cur_time s = val\<rbrace>
-   reset_untyped_cap slot
-   \<lbrace>\<lambda>_ s. val \<le> cur_time s\<rbrace>"
-  apply (clarsimp simp: reset_untyped_cap_def)
-  apply (rule validE_valid)
-  apply (rule hoare_seq_ext_skipE, wpsimp)
-  apply (rule valid_validE)
-  apply (rule hoare_if; (solves wpsimp)?)
-  apply (rule validE_valid)
-  apply (rule hoare_seq_ext_skipE, wpsimp)
-  apply (rule valid_validE)
-  apply (rule hoare_if; (solves wpsimp)?)
-  apply (rule hoare_weaken_pre)
-   apply (rule_tac Q="\<lambda>_ s. valid_machine_time s \<and> val \<le> cur_time s" in hoare_strengthen_post)
-    apply (rule mapME_x_wp_inv)
-    apply (intro hoare_vcg_conj_lift_pre_fix)
-     apply wpsimp
-    apply (rule validE_valid)
-    apply (rule hoare_seq_ext_skipE, wpsimp)+
-    apply (rule valid_validE)
-    apply (clarsimp simp: valid_def)
-    apply (frule_tac val1="cur_time s" in use_valid[OF _ preemption_point_cur_time_monotonic])
-     apply fastforce+
-  done
-
-lemma invoke_untyped_cur_time_monotonic:
-  "\<lbrace>\<lambda>s :: 'state_ext state. valid_machine_time s \<and> cur_time s = val\<rbrace>
-   invoke_untyped ui
-   \<lbrace>\<lambda>_ s. val \<le> cur_time s\<rbrace>"
-  apply (wpsimp simp: invoke_untyped_def
-                  wp: reset_untyped_cap_cur_time_monotonic mapM_x_wp_inv)
-  done
-
-lemma invoke_untyped_valid_sched:
-  "\<lbrace>valid_sched and valid_machine_time and invs and ct_active and valid_untyped_inv ui and
-    (\<lambda>s. scheduler_action s = resume_cur_thread)\<rbrace>
-   invoke_untyped ui
-   \<lbrace>\<lambda>_. valid_sched :: 'state_ext state \<Rightarrow> _\<rbrace>"
-  apply wp_pre
-   apply (rule_tac I="invs and ct_active and valid_untyped_inv ui and valid_sched and
-                      (\<lambda>s. scheduler_action s = resume_cur_thread)"
-            in valid_sched_tcb_state_preservation_gen)
-                  apply simp
-                 apply (wpsimp wp: invoke_untyped_st_tcb_at invoke_untyped_pred_tcb_at_live
-                                   invoke_untyped_sc_at_pred_n_live[where Q="Not"]
-                                   invoke_untyped_etcb_at invoke_untyped_sc_at_pred_n
-                                   invoke_untyped_pred_map_sc_refill_cfgs_of
-                                   invoke_untyped_valid_idle invoke_untyped_valid_sched_pred_misc
-                                   invoke_untyped_cur_time_monotonic
-                                   hoare_vcg_all_lift
-                             simp: ipc_queued_thread_state_live live_sc_def)+
   done
 
 end
