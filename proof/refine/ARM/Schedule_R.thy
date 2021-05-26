@@ -4668,7 +4668,10 @@ lemma headTimeBuffer_def2:
   headTimeBuffer usage s = Some (obj_at' (\<lambda>sc. rAmount (refillHd sc) \<le> usage \<and>
            5 * usToTicks maxPeriodUs \<le> maxBound - rTime (refillHd sc)) (ksCurSc s) s)"
   apply (clarsimp simp: headTimeBuffer_def obind_def readCurSc_def ogets_def readSchedContext_def)
-  sorry (* problems with readObject *)
+  apply (frule no_ofailD[OF no_ofail_obj_at'_readObject_sc], clarsimp)
+  apply (drule readObject_ko_at'_sc)
+  apply (clarsimp simp: obj_at'_def)
+  done
 
 lemma head_time_buffer_def2:
   "sc_at_pred \<top> (cur_sc s) s \<Longrightarrow>
