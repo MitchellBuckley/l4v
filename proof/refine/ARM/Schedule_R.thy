@@ -3976,7 +3976,7 @@ lemma refillHeadOverlapping_def2:
       pred_map (\<lambda>sc. Suc 0 < scRefillCount sc) (scs_of' s) scp \<and>
       pred_map (\<lambda>sc. rTime (refillIndex (scRefillNext sc (scRefillHead sc)) sc)
                      \<le> rTime (refillHd sc) + rAmount (refillHd sc)) (scs_of' s) scp)"
-  apply (clarsimp simp: refillHeadOverlapping_def obind_def obj_at'_def 
+  apply (clarsimp simp: refillHeadOverlapping_def obind_def obj_at'_def
   readSchedContext_def projectKOs readRefillSize_def readRefillNext_def
   pred_map_def vs_all_heap_simps opt_map_def scRefillNext_def
                  split: option.splits )
@@ -3988,7 +3988,7 @@ definition scRefillCount_of where
   "scRefillCount_of scp s \<equiv> case (ksPSpace s scp) of Some ko \<Rightarrow> (case ko of KOSchedContext sc \<Rightarrow> scRefillCount sc)"
 
 lemma sc_refills_length_relation:
-  "sc_relation sc n sc' \<Longrightarrow> scRefillMax  sc' \<le> length (scRefills  sc') \<and> scRefillHead  sc' < scRefillMax sc' \<Longrightarrow> scRefillCount sc' \<le> scRefillMax sc'  \<Longrightarrow> 
+  "sc_relation sc n sc' \<Longrightarrow> scRefillMax  sc' \<le> length (scRefills  sc') \<and> scRefillHead  sc' < scRefillMax sc' \<Longrightarrow> scRefillCount sc' \<le> scRefillMax sc'  \<Longrightarrow>
    length (sc_refills sc) = scRefillCount sc'"
   by (clarsimp simp: sc_relation_def refills_map_def)
 
@@ -4047,7 +4047,7 @@ lemma refillHdInsufficient_def2:
    refillHdInsufficient scp s = Some (obj_at' (\<lambda>sc :: sched_context. rAmount (refillHd sc) < minBudget) scp s)"
   unfolding refillHdInsufficient_def
   apply (clarsimp simp: obind_def readSchedContext_def split: option.splits)
-  apply (frule no_ofailD[OF no_ofail_sc_at'_readObject]) 
+  apply (frule no_ofailD[OF no_ofail_sc_at'_readObject])
   apply (clarsimp simp: obj_at'_def dest!: readObject_misc_ko_at')
   done
 
@@ -4110,8 +4110,8 @@ lemma sdfkjhsfkhskhf:
    apply (frule no_ofailD[OF no_ofail_readSchedContext], clarsimp)
   unfolding readSchedContext_def
    apply (frule readObject_ko_at'_sc)
-   apply (clarsimp simp: obj_at'_def) 
-  apply (clarsimp simp: obj_at'_def) 
+   apply (clarsimp simp: obj_at'_def)
+  apply (clarsimp simp: obj_at'_def)
   done
 
 lemma readRefillNextD:
@@ -4139,23 +4139,24 @@ lemma hhfhh:
   by metis
 
 lemma drop_wrap_slice:
-  "start < mx \<Longrightarrow> mx \<le> length xs \<Longrightarrow> n \<le> count \<Longrightarrow> count < mx \<Longrightarrow>
-  drop n (wrap_slice start count mx xs) = wrap_slice (if (start + n < mx) then start + n else start + n - mx) (count - n) mx xs"
+  "start < mx \<Longrightarrow> mx \<le> length xs \<Longrightarrow> n \<le> count \<Longrightarrow> count \<le> mx \<Longrightarrow>
+  drop n (wrap_slice start count mx xs) =
+   wrap_slice (if (start + n < mx) then start + n else start + n - mx) (count - n) mx xs"
   apply (clarsimp simp: wrap_slice_def)
   apply (auto simp: drop_take)
-  sorry (* what? *)
+  sorry (* This should be easy but I'm missing something. *)
 
 lemma take_wrap_slice:
-  "start < mx \<Longrightarrow> mx \<le> length xs \<Longrightarrow> n \<le> count \<Longrightarrow> count < mx \<Longrightarrow>
+  "start < mx \<Longrightarrow> mx \<le> length xs \<Longrightarrow> n \<le> count \<Longrightarrow> count \<le> mx \<Longrightarrow>
   take n (wrap_slice start count mx xs) = wrap_slice start n mx xs"
   apply (clarsimp simp: wrap_slice_def)
-  sorry (* what? *)
+  sorry (* This should be easy but I'm missing something. *)
 
 lemma asdfjkh:
   "y = (if scRefillHead obj = scRefillMax obj - 1 then 0 else scRefillHead obj + 1) \<Longrightarrow>
    (scRefillHead obj) < (scRefillMax obj) \<Longrightarrow>
    scRefillMax obj \<le> length (scRefills obj) \<Longrightarrow>
-   (scRefillCount obj) < (scRefillMax obj) \<Longrightarrow>
+   (scRefillCount obj) \<le> (scRefillMax obj) \<Longrightarrow>
    1 < scRefillCount obj \<Longrightarrow>
 refills_sum
             (refills_map (scRefillHead obj) (scRefillCount obj) (scRefillMax obj)
@@ -4214,10 +4215,10 @@ refills_sum
   done
 
 lemma temp2[wp]:
-  "\<lbrace>\<lambda>s'. obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s' \<and> 
+  "\<lbrace>\<lambda>s'. obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s' \<and>
          obj_at' (\<lambda>obj. scRefillHead obj < (scRefillMax obj) \<and>
                         scRefillMax obj \<le> length (scRefills obj) \<and>
-                        scRefillCount obj < (scRefillMax obj)) scPtr s' \<and>
+                        scRefillCount obj \<le> (scRefillMax obj)) scPtr s' \<and>
          obj_at' (\<lambda>obj. 1 < scRefillCount obj) scPtr s'\<rbrace>
     nonOverlappingMergeRefills scPtr
    \<lbrace>\<lambda>_ s'. obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s'\<rbrace>"
@@ -4243,12 +4244,13 @@ lemma temp2[wp]:
 
 lemma temp3[wp]:
   "nonOverlappingMergeRefills scPtr
-   \<lbrace>\<lambda>s'. obj_at' (\<lambda>sc. scRefillHead sc < scRefillMax sc \<and> scRefillMax sc \<le> length (scRefills sc) \<and> scRefillCount sc < scRefillMax sc) scPtr s'\<rbrace>"
+   \<lbrace>\<lambda>s'. obj_at' (\<lambda>sc. scRefillHead sc < scRefillMax sc \<and> scRefillMax sc \<le> length (scRefills sc) \<and>
+scRefillCount sc \<le> scRefillMax sc) scPtr s'\<rbrace>"
   unfolding nonOverlappingMergeRefills_def
   apply (rule_tac Q="\<lambda>_ s. sc_at' scPtr s \<and> (\<forall>sc. ko_at' sc scPtr s \<longrightarrow>
-scRefillHead sc < scRefillMax sc \<and> 
-scRefillMax sc \<le> length (scRefills sc) \<and> 
-scRefillCount sc < scRefillMax sc)" 
+scRefillHead sc < scRefillMax sc \<and>
+scRefillMax sc \<le> length (scRefills sc) \<and>
+scRefillCount sc \<le> scRefillMax sc)"
   in hoare_strengthen_post[rotated])
    apply (clarsimp simp: obj_at'_def)
   apply (wpsimp simp: refillPopHead_def updateRefillHd_def setSchedContext_def
@@ -4280,7 +4282,7 @@ lemma scRefillsSum_eq_HeadAmount:
 
 lemma sdfkjlh:
   "obj_at' (\<lambda>sc. minBudget \<le> scRefillsSum sc) scPtr s \<Longrightarrow>
-   the (refillHdInsufficient scPtr s)  \<Longrightarrow> 
+   the (refillHdInsufficient scPtr s)  \<Longrightarrow>
    obj_at' (\<lambda>obj. scRefillHead obj < scRefillMax obj \<and> scRefillMax obj \<le> length (scRefills obj)) scPtr s \<Longrightarrow>
    obj_at' (\<lambda>obj. Suc 0 < scRefillCount obj) scPtr s"
   apply (subgoal_tac "sc_at' scPtr s")
@@ -4317,7 +4319,7 @@ lemma nonOverlappingMergeRefills_terminates:
   assumes A: "obj_at' (\<lambda>sc. 0 < scRefillCount sc) scPtr s'"
   assumes B: "obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s'"
   assumes C: "obj_at' (\<lambda>sc. scRefillHead sc < scRefillMax sc \<and> scRefillMax sc \<le> length (scRefills sc)
-                            \<and> scRefillCount sc < scRefillMax sc) scPtr s'"
+                            \<and> scRefillCount sc \<le> scRefillMax sc) scPtr s'"
   shows
     "whileLoop_terminates
      (\<lambda>_ s. the (refillHdInsufficient scPtr s))
@@ -4326,7 +4328,7 @@ lemma nonOverlappingMergeRefills_terminates:
   apply (rule_tac I="\<lambda>_ s. (obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s) \<and> obj_at' (\<lambda>sc. 0 < scRefillCount sc) scPtr s
                            \<and> obj_at'
               (\<lambda>sc. scRefillHead sc < scRefillMax sc \<and>
-                    scRefillMax sc \<le> length (scRefills sc) \<and> scRefillCount sc < scRefillMax sc)
+                    scRefillMax sc \<le> length (scRefills sc) \<and> scRefillCount sc \<le> scRefillMax sc)
               scPtr s"
          in whileLoop_terminates_inv[where R="hILoop_measure scPtr"])
     apply (simp add: A B C)
@@ -4375,7 +4377,7 @@ lemma no_fail_refillPopHead[wp]:
   done
 
 lemma sdfkjh:
-  "\<lbrace>obj_at' (P \<circ> f) scPtr\<rbrace> updateSchedContext scPtr f 
+  "\<lbrace>obj_at' (P \<circ> f) scPtr\<rbrace> updateSchedContext scPtr f
    \<lbrace>\<lambda>_. obj_at' (P :: sched_context \<Rightarrow> bool) scPtr\<rbrace>"
   unfolding updateSchedContext_def
   apply (wpsimp wp: set_sc'.obj_at')
@@ -4566,7 +4568,7 @@ lemma corres_whileLoop2:
     apply (erule (2) termin)
    apply (simp add: weakener)
   apply clarsimp
-  apply (frule_tac C=C and C'=C' and P=P and P'=P' and B=B and rrel=rrel and srel=srel and 
+  apply (frule_tac C=C and C'=C' and P=P and P'=P' and B=B and rrel=rrel and srel=srel and
                    Q=Q and Q'=Q'
          in corres_whileLoop_results_helper2[rotated 5])
        apply (erule (1) cond)
@@ -4592,28 +4594,26 @@ lemma corres_whileLoop_test:
   shows "corres_underlying srel False nf' rrel P P' (whileLoop C B r) (whileLoop C' B' r')"
   apply (rule corres_whileLoop2[where P=P and P'=P' and I'=P'])
   using assms by simp+
-  
-(* end experimental *)
 
-find_theorems scRefillsSum scRefillCount
+(* end experimental *)
 
 lemma headInsufficientLoop_corres:
   "sc_ptr = scPtr \<Longrightarrow>
    corres dc (\<lambda>s. sc_at sc_ptr s \<and>
-             is_active_sc sc_ptr s) (\<lambda>s. valid_objs' s)
-   (head_insufficient_loop sc_ptr) (headInsufficientLoop scPtr)" 
-(is "_ \<Longrightarrow> corres _ ?Q ?Q' _ _")
+             is_active_sc sc_ptr s ) (\<lambda>s. valid_objs' s \<and> sc_at' scPtr s \<and> obj_at' (\<lambda>sc. minBudget \<le> scRefillsSum sc) scPtr s)
+   (head_insufficient_loop sc_ptr) (headInsufficientLoop scPtr)"
+  (is "_ \<Longrightarrow> corres _ ?Q ?Q' _ _")
   unfolding head_insufficient_loop_def headInsufficientLoop_def runReaderT_def
   apply (rule_tac P="?Q" and P'="?Q' and sc_at' scPtr and active_sc_at' scPtr
                                      and obj_at' (\<lambda>sc. minBudget \<le> scRefillsSum sc) scPtr  and obj_at'
               (\<lambda>sc. scRefillHead sc < scRefillMax sc \<and>
                       scRefillMax sc \<le> length (scRefills sc) \<and>
-                      scRefillCount sc < scRefillMax sc)
-              scPtr" 
+                      scRefillCount sc \<le> scRefillMax sc)
+              scPtr"
   and I'="obj_at' (\<lambda>sc. minBudget \<le> scRefillsSum sc) scPtr and sc_at' scPtr and obj_at'
               (\<lambda>sc. scRefillHead sc < scRefillMax sc \<and>
                      scRefillMax sc \<le> length (scRefills sc) \<and>
-                     scRefillCount sc < scRefillMax sc)
+                     scRefillCount sc \<le> scRefillMax sc)
               scPtr" in corres_whileLoop2)
            apply (subst sdfjkh, erule state_relation_pspace_relation, clarsimp)
               apply (simp)
@@ -4627,27 +4627,36 @@ lemma headInsufficientLoop_corres:
           apply (rule stronger_corres_guard_imp)
             apply (rule nonOverlappingMergeRefills_corres; simp)
            apply (clarsimp simp: active_sc_at'_def head_insufficient_def2)
- subgoal sorry (* use state relation *)
+           apply (frule (1) sdfkjlh, clarsimp simp: obj_at'_def)
+           apply (clarsimp simp: obj_at'_def projectKOs sc_at_pred_n_def obj_at_def is_sc_obj)
+           apply (drule (1) pspace_relation_absD[OF _ state_relation_pspace_relation], clarsimp)
+           apply (clarsimp simp: sc_relation_def refills_map_def)
           apply (clarsimp)
          apply wpsimp
         apply (wpsimp wp: nonOverlappingMergeRefills_valid_objs')
+        apply (erule (1) sdfkjlh, clarsimp simp: obj_at'_def)
        apply simp
-     apply wpsimp
-     apply (erule (1) sdfkjlh)
-     apply (clarsimp simp: obj_at'_def)
-    apply simp
-    apply (rule nonOverlappingMergeRefills_terminates)
-      apply (clarsimp)
-      apply (frule (1) sdfkjlh)
-       apply (clarsimp simp: obj_at'_def)
-      apply (clarsimp simp: obj_at'_def)
+      apply wpsimp
+      apply (erule (1) sdfkjlh, clarsimp simp: obj_at'_def)
      apply simp
-    apply simp
-   apply wpsimp
-   apply (erule (1) sdfkjlh)
-   apply (clarsimp simp: obj_at'_def)
-  apply simp
-  subgoal sorry (* boring, dependent on others do last *)
+     apply (rule nonOverlappingMergeRefills_terminates)
+       apply (clarsimp)
+       apply (frule (1) sdfkjlh)
+        apply (clarsimp simp: obj_at'_def)
+       apply (clarsimp simp: obj_at'_def)
+      apply simp
+     apply simp
+    apply wpsimp
+    apply (erule (1) sdfkjlh, clarsimp simp: obj_at'_def)
+   apply simp
+   apply (subgoal_tac "active_sc_at' scPtr s'", clarsimp)
+    apply (clarsimp simp: obj_at'_def obj_at_def projectKOs is_sc_obj active_sc_at'_def sc_at_pred_n_def)
+    apply (erule (1) valid_objsE')
+    apply (clarsimp simp: valid_obj'_def valid_sched_context'_def)
+   apply (clarsimp simp: obj_at'_def obj_at_def projectKOs is_sc_obj active_sc_at'_def is_active_sc_def
+   sc_at_pred_n_def)
+   apply (drule (1) pspace_relation_absD[OF _ state_relation_pspace_relation], clarsimp)
+   apply (clarsimp simp: sc_relation_def active_sc_def)
   apply simp
   done
 
