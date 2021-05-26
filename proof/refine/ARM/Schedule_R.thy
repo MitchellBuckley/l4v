@@ -4077,8 +4077,6 @@ lemma wrap_slice_prepend:
   apply clarsimp
   done
 
-find_theorems take Suc
-
 lemma wrap_slice_1:
   "start < mx \<Longrightarrow> start < length xs \<Longrightarrow> wrap_slice start (Suc 0) mx xs = [(xs ! start)]"
   by (clarsimp simp: wrap_slice_def take_Suc hd_drop_conv_nth)
@@ -4298,8 +4296,6 @@ lemma sdfkjlh:
    apply (fastforce simp: refill_map_def refillHd_def)
   apply (clarsimp simp: obj_at'_def)
   done
-
-find_theorems minBudget -valid
 
 lemma sdfkjlh2:
   "obj_at' (\<lambda>sc. minBudget \<le> scRefillsSum sc) scPtr s \<Longrightarrow>
