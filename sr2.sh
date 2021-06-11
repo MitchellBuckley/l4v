@@ -14,10 +14,8 @@ fi
 }
 
 
+echo "READING: " $1
 
-echo "read file >" $1
-
-msg="Make the following replacements:"
 cat $1 | while read line
 do
 	if [[ $line =~ (rename )([^ ]*)( to )([^ ]*) ]]
@@ -25,8 +23,10 @@ do
 	old=${BASH_REMATCH[2]}
 	new=${BASH_REMATCH[4]}
 	do_replace $old $new
+	echo "SUCCESS: $line"
 	else
-	echo "no match found: $line"
+	echo "FAIL: $line"
+	echo "MATCH NOT FOUND"
 	fi
 done
 
