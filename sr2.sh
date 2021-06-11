@@ -30,7 +30,6 @@ do
 	fi
 done
 
-git commit -am "$msg"
 echo "DONE"
 
 
