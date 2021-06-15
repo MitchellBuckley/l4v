@@ -4078,8 +4078,6 @@ lemma wrap_slice_prepend:
   apply clarsimp
   done
 
-find_theorems take Suc
-
 lemma wrap_slice_1:
   "start < mx \<Longrightarrow> start < length xs \<Longrightarrow> wrap_slice start (Suc 0) mx xs = [(xs ! start)]"
   by (clarsimp simp: wrap_slice_def take_Suc hd_drop_conv_nth)
@@ -4144,14 +4142,12 @@ lemma drop_wrap_slice:
   drop n (wrap_slice start count mx xs) =
    wrap_slice (if (start + n < mx) then start + n else start + n - mx) (count - n) mx xs"
   apply (clarsimp simp: wrap_slice_def)
-  apply (auto simp: drop_take)
-  sorry (* This should be easy but I'm missing something. *)
+  by (auto simp: drop_take field_simps)
 
 lemma take_wrap_slice:
   "start < mx \<Longrightarrow> mx \<le> length xs \<Longrightarrow> n \<le> count \<Longrightarrow> count \<le> mx \<Longrightarrow>
   take n (wrap_slice start count mx xs) = wrap_slice start n mx xs"
-  apply (clarsimp simp: wrap_slice_def)
-  sorry (* This should be easy but I'm missing something. *)
+  by (clarsimp simp: wrap_slice_def field_simps)
 
 lemma asdfjkh:
   "y = (if scRefillHead obj = scRefillMax obj - 1 then 0 else scRefillHead obj + 1) \<Longrightarrow>
@@ -4159,7 +4155,7 @@ lemma asdfjkh:
    scRefillMax obj \<le> length (scRefills obj) \<Longrightarrow>
    (scRefillCount obj) \<le> (scRefillMax obj) \<Longrightarrow>
    1 < scRefillCount obj \<Longrightarrow>
-refills_sum
+           refills_sum
             (refills_map (scRefillHead obj) (scRefillCount obj) (scRefillMax obj)
               (scRefills obj)) =
            refills_sum
@@ -4315,7 +4311,6 @@ lemma sdfkjlh2:
   apply (clarsimp simp: obj_at'_def)
   done
 
-(* This is essentially done. only annoying details to fix *)
 lemma nonOverlappingMergeRefills_terminates:
   assumes A: "obj_at' (\<lambda>sc. 0 < scRefillCount sc) scPtr s'"
   assumes B: "obj_at' (\<lambda>sc. scRefillsSum sc \<ge> minBudget) scPtr s'"
@@ -4770,7 +4765,7 @@ lemma refillAddTail_corres:
   apply (clarsimp simp: obj_at'_def projectKOs)
   done
 
-lemma sdfkjhh:
+lemma refill_add_tail_equiv:
   "monadic_rewrite False True D (set_refills sc_ptr xs) (refill_add_tail sc_ptr x)"
  apply (clarsimp simp: refill_add_tail_def)
   sorry (* fix later, this is annoying. Better to change spec. *)
@@ -4788,15 +4783,21 @@ lemma refillFull_sp:
   done
 
 lemma setRefillTl_corres:
-  "corres dc (sc_at sc_ptr) (sc_at' sc_ptr) (set_refills sc_ptr X) (setRefillTl sc_ptr Y)"
+  "corres dc (sc_at sc_ptr) (obj_at' (\<lambda>sc. X =
+           refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
+            (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr) (set_refills sc_ptr X) (setRefillTl sc_ptr Y)"
   unfolding set_refills_def setRefillTl_def updateRefillTl_def
   apply (clarsimp)
   apply (rule corres_guard2_imp)
    apply (rule corres_symb_exec_r'[OF _ get_sc_sp', rotated], wpsimp, wpsimp)
+
+   apply (rule_tac F="X =
+           refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
+            (replaceAt (refillTailIndex sc) (scRefills sc) Y)" in corres_req)
+ subgoal sorry
    apply (rule corres_guard_imp)
      apply (rule_tac sc'=sc in update_sc_no_reply_stack_update_ko_at'_corres)
-        apply (clarsimp simp: sc_relation_def)
-  subgoal sorry (* hmmm, fix later *)
+        apply (clarsimp simp: sc_relation_def length_replaceAt)
        apply (clarsimp)
       apply (clarsimp simp: objBits_def objBitsKO_def length_replaceAt)
      apply (clarsimp)+
@@ -4821,7 +4822,7 @@ lemma scheduleUsed_corres:
     apply (clarsimp simp: obj_at'_def)
    apply (rule corres_guard_imp)
      apply (rule corres_if, simp)
-      apply (rule monadic_rewrite_corres[OF _ sdfkjhh])
+      apply (rule monadic_rewrite_corres[OF _ refill_add_tail_equiv])
       apply (rule refillAddTail_corres[where r=X], simp)
      apply (rule corres_symb_exec_r[OF _ refillFull_sp, rotated])
        apply (wpsimp simp: refillFull_def)
@@ -4839,7 +4840,7 @@ lemma scheduleUsed_corres:
       apply (rule_tac F="full = fulla" in corres_req)
   subgoal sorry
       apply (rule corres_if, simp)
-       apply (rule monadic_rewrite_corres[OF _ sdfkjhh])
+       apply (rule monadic_rewrite_corres[OF _ refill_add_tail_equiv])
        apply (rule refillAddTail_corres[where r=X], simp)
       apply clarsimp
       apply (rule setRefillTl_corres)
