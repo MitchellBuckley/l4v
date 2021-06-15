@@ -3976,13 +3976,14 @@ lemma refillHeadOverlapping_def2:
       pred_map (\<lambda>sc. Suc 0 < scRefillCount sc) (scs_of' s) scp \<and>
       pred_map (\<lambda>sc. rTime (refillIndex (scRefillNext sc (scRefillHead sc)) sc)
                      \<le> rTime (refillHd sc) + rAmount (refillHd sc)) (scs_of' s) scp)"
-  apply (clarsimp simp: refillHeadOverlapping_def obind_def obj_at'_def
-  readSchedContext_def projectKOs readRefillSize_def readRefillNext_def
-  pred_map_def vs_all_heap_simps opt_map_def scRefillNext_def
-                 split: option.splits )
-  apply safe
-                  apply (auto simp: obj_at'_def projectKOs)
-  sorry (* unclear to me because of reader monad *)
+  apply (frule no_ofailD[OF no_ofail_readSchedContext])
+  apply (clarsimp simp: refillHeadOverlapping_def obind_def oliftM_def readRefillNext_def
+                        readRefillSize_def
+                 split: option.splits)
+  apply (clarsimp simp: readSchedContext_def)
+  apply (drule readObject_ko_at'_sc)
+  apply (clarsimp simp: obj_at'_def projectKOs pred_map_def opt_map_def scRefillNext_def)
+  done
 
 definition scRefillCount_of where
   "scRefillCount_of scp s \<equiv> case (ksPSpace s scp) of Some ko \<Rightarrow> (case ko of KOSchedContext sc \<Rightarrow> scRefillCount sc)"
