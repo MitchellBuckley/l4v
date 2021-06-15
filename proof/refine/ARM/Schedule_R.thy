@@ -4802,7 +4802,7 @@ lemma setRefillTl_corres:
   apply fastforce
   done
 
-lemma handleOverrunLoopBody_corres:
+lemma scheduleUsed_corres:
   "\<lbrakk>usage = usage'; r_time X = rTime Y \<and> r_amount X = rAmount Y\<rbrakk> \<Longrightarrow>
     corres dc \<top> (sc_at' sc_ptr and obj_at' (\<lambda>ko. (scRefillCount ko = 0) = (refills' = [])) sc_ptr)
     (set_refills sc_ptr $ schedule_used full refills' X)
