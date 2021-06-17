@@ -4898,7 +4898,7 @@ lemma tl_wrap_slice:
 lemma sdfsfkhfkhkhfkh:
   "\<lbrakk>count \<le> mx; start < mx; mx \<le> length xs; 0 < count\<rbrakk>
    \<Longrightarrow> refills_map start count mx (replaceAt start xs X)
-   = refill_map X # tl (refills_map start count mx xs)"
+       = refill_map X # tl (refills_map start count mx xs)"
   supply if_split [split del]
   apply (clarsimp simp: refills_map_def)
   apply (subst wrap_slice_prepend)
@@ -4912,7 +4912,7 @@ lemma sdfsfkhfkhkhfkh:
   done
 
 lemma updateRefillHd_corres3:
-  "     corres dc (sc_at scp) (sc_at' scp)
+  "     corres dc (sc_at scp) (sc_at' scp and obj_at' (\<lambda>sc'. X = refill_map (f (refillHd sc'))) scp)
         (do refills' <- get_refills scp;
             set_refills scp (X # tl refills')
          od)
@@ -4920,10 +4920,9 @@ lemma updateRefillHd_corres3:
   apply (clarsimp simp: updateRefillHd_def get_refills_def)
 apply (rule corres_guard_imp)
         apply (rule corres_split[OF get_sc_corres])
-   
-
-find_theorems 
-
+   apply (rule_tac F="X = refill_map (f (refillHd sca))" in corres_req)
+defer
+apply (rule corres_guard_imp)
         apply (rule set_refills_corres)
   apply (subst sdfsfkhfkhkhfkh)
   subgoal sorry
@@ -4932,7 +4931,6 @@ find_theorems
   subgoal sorry
 
         apply (clarsimp simp: sc_relation_def)
-  subgoal sorry
   apply (clarsimp simp: length_replaceAt)
   apply wpsimp+
   done
