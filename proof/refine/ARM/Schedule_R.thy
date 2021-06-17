@@ -4767,7 +4767,12 @@ lemma refillAddTail_corres:
 
 lemma refill_add_tail_equiv:
   "monadic_rewrite False True D (set_refills sc_ptr xs) (refill_add_tail sc_ptr x)"
- apply (clarsimp simp: refill_add_tail_def)
+ apply (clarsimp simp: refill_add_tail_def set_refills_def update_sched_context_def get_refills_def
+          get_sched_context_def bind_assoc)
+ apply (rule_tac monadic_rewrite_bind_tail[OF _ get_object_sp])
+  apply (case_tac obj; simp)
+  apply (clarsimp simp: get_object_def)
+
   sorry (* fix later, this is annoying. Better to change spec. *)
 
 lemma refillEmpty_sp:
@@ -4785,18 +4790,21 @@ lemma refillFull_sp:
 lemma setRefillTl_corres:
   "corres dc (sc_at sc_ptr) (obj_at' (\<lambda>sc. X =
            refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
-            (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr) (set_refills sc_ptr X) (setRefillTl sc_ptr Y)"
+            (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr) 
+    (set_refills sc_ptr X) (setRefillTl sc_ptr Y)"
   unfolding set_refills_def setRefillTl_def updateRefillTl_def
   apply (clarsimp)
   apply (rule corres_guard2_imp)
-   apply (rule corres_symb_exec_r'[OF _ get_sc_sp', rotated], wpsimp, wpsimp)
-
+   apply (rule_tac P'="obj_at'
+          (\<lambda>sc. X = refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
+                 (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr" 
+          in corres_symb_exec_r'[OF _ get_sc_sp', rotated], wpsimp, wpsimp)
    apply (rule_tac F="X =
-           refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
-            (replaceAt (refillTailIndex sc) (scRefills sc) Y)" in corres_req)
- subgoal sorry
+           refills_map (scRefillHead rv) (scRefillCount rv) (scRefillMax rv)
+            (replaceAt (refillTailIndex rv) (scRefills rv) Y)" in corres_req)
+    apply (clarsimp simp: obj_at'_def)
    apply (rule corres_guard_imp)
-     apply (rule_tac sc'=sc in update_sc_no_reply_stack_update_ko_at'_corres)
+     apply (rule_tac sc'=rv in update_sc_no_reply_stack_update_ko_at'_corres)
         apply (clarsimp simp: sc_relation_def length_replaceAt)
        apply (clarsimp)
       apply (clarsimp simp: objBits_def objBitsKO_def length_replaceAt)
@@ -4807,10 +4815,13 @@ lemma setRefillTl_corres:
 lemma scheduleUsed_corres:
   "\<lbrakk>usage = usage'; r_time X = rTime Y \<and> r_amount X = rAmount Y\<rbrakk> \<Longrightarrow>
     corres dc \<top> (sc_at' sc_ptr and obj_at' (\<lambda>ko. (scRefillCount ko = 0) = (refills' = [])) sc_ptr)
-    (set_refills sc_ptr $ schedule_used full refills' X)
+    (do full <- refill_full sc_ptr;
+        refills' <- get_refills sc_ptr;
+        set_refills sc_ptr (schedule_used full refills' X)
+     od)
     (scheduleUsed sc_ptr Y)"
   supply if_split [split del] dc_simp [simp del]
-  unfolding scheduleUsed_def schedule_used_def haskell_assert_def
+  unfolding scheduleUsed_def schedule_used_def haskell_assert_def(* 
   apply (rule corres_symb_exec_r[OF _ get_sc_sp', rotated], wpsimp, wpsimp)
   apply (rule corres_assert_assume)
    apply (simp only: K_bind_def)
@@ -4852,6 +4863,89 @@ lemma scheduleUsed_corres:
   subgoal sorry
   apply (clarsimp split: if_split)
   subgoal sorry
+  done *)
+  sorry
+
+lemma refillSingle_corres:
+  "scp = scp' \<Longrightarrow>
+    corres (=) \<top> \<top>
+    (refill_single scp)
+    (refillSingle scp')"
+  sorry
+
+find_theorems setSchedContext corres_underlying
+
+lemma set_refills_corres:
+  assumes maps: "g = refills_map (scRefillHead sc') (scRefillCount sc') (scRefillMax sc') (f (scRefills sc'))"
+  assumes lens: "length (f (scRefills sc')) = length (scRefills sc')"
+
+  shows "corres dc (sc_at scp) (ko_at' (sc' :: Structures_H.sched_context) scp)
+    (set_refills scp g)
+    (setSchedContext scp (scRefills_update f sc'))"
+  unfolding set_refills_def
+apply (rule corres_guard_imp)
+  apply (rule update_sc_no_reply_stack_update_ko_at'_corres[where sc'=sc'])
+  apply (auto)
+  apply (clarsimp simp: sc_relation_def maps lens)
+  apply (clarsimp simp: objBits_def objBitsKO_def lens)
+  done
+
+lemma tl_wrap_slice:
+  "\<lbrakk>count \<le> mx; start < mx; mx \<le> length xs; 0 < count\<rbrakk>
+   \<Longrightarrow> tl (wrap_slice start count mx xs) = wrap_slice (next_index start mx) (count - 1) mx xs"
+   sorry
+
+lemma sdfsfkhfkhkhfkh:
+  "\<lbrakk>count \<le> mx; start < mx; mx \<le> length xs; 0 < count\<rbrakk>
+   \<Longrightarrow> refills_map start count mx (replaceAt start xs X)
+   = refill_map X # tl (refills_map start count mx xs)"
+  supply if_split [split del]
+  apply (clarsimp simp: refills_map_def)
+  apply (subst wrap_slice_prepend)
+      apply (simp add: length_replaceAt)+
+  apply auto
+   apply (subst replaceAt_index)
+     apply (clarsimp simp: length_replaceAt)+
+  apply (simp add: tl_map_simp tl_wrap_slice next_index_def)
+  apply (subst wrap_slice_replaceAt_eq[symmetric])
+        apply (auto split: if_split)
+  done
+
+lemma updateRefillHd_corres3:
+  "     corres dc (sc_at scp) (sc_at' scp)
+        (do refills' <- get_refills scp;
+            set_refills scp (X # tl refills')
+         od)
+        (updateRefillHd scp f)"
+  apply (clarsimp simp: updateRefillHd_def get_refills_def)
+apply (rule corres_guard_imp)
+        apply (rule corres_split[OF get_sc_corres])
+   
+
+find_theorems 
+
+        apply (rule set_refills_corres)
+  apply (subst sdfsfkhfkhkhfkh)
+  subgoal sorry
+  subgoal sorry
+  subgoal sorry
+  subgoal sorry
+
+        apply (clarsimp simp: sc_relation_def)
+  subgoal sorry
+  apply (clarsimp simp: length_replaceAt)
+  apply wpsimp+
+  done
+
+lemma updateRefillHd_corres:
+  "corres dc (sc_at scPtr) (sc_at' scPtr)
+            (set_refill_hd scPtr X)
+            (updateRefillHd scPtr Y)"
+  unfolding set_refill_hd_def
+  apply (clarsimp simp: update_refill_hd_def)
+apply (rule corres_guard_imp)
+  apply (rule updateRefillHd_corres3; simp)
+  apply simp+
   done
 
 lemma handleOverrunLoopBody_corres:
@@ -4860,8 +4954,21 @@ lemma handleOverrunLoopBody_corres:
     (handle_overrun_loop_body usage)
     (handleOverrunLoopBody usage')"
   unfolding handleOverrunLoopBody_def handle_overrun_loop_body_def
-  apply (rule corres_guard_imp)
-  apply (simp add: return_bind)
+  apply (rule corres_guard_imp, simp)
+    apply (rule corres_split[OF getCurSc_corres], simp)
+      apply (rule corres_split[OF refillSingle_corres], simp)
+        apply (rule corres_split[OF get_sc_corres])
+          apply (rule corres_split[where r'=dc])
+             apply (rule corres_if, simp)
+              apply (simp, rule updateRefillHd_corres)
+             apply (rule corres_split[OF refillPopHead_corres], simp)
+               apply simp
+               apply (rule scheduleUsed_corres, rule refl)
+  subgoal sorry
+  apply wpsimp
+
+
+
   sorry (* difficult, should spec change? *)
 
 
