@@ -4680,14 +4680,14 @@ lemma refillFull_sp:
 lemma setRefillTl_corres:
   "corres dc (sc_at sc_ptr) (obj_at' (\<lambda>sc. X =
            refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
-            (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr) 
+            (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr)
     (set_refills sc_ptr X) (setRefillTl sc_ptr Y)"
   unfolding set_refills_def setRefillTl_def updateRefillTl_def
   apply clarsimp
   apply (rule corres_guard2_imp)
    apply (rule_tac P'="obj_at'
           (\<lambda>sc. X = refills_map (scRefillHead sc) (scRefillCount sc) (scRefillMax sc)
-                 (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr" 
+                 (replaceAt (refillTailIndex sc) (scRefills sc) Y)) sc_ptr"
           in corres_symb_exec_r'[OF _ get_sc_sp', rotated], wpsimp, wpsimp)
    apply (rule_tac F="X =
            refills_map (scRefillHead rv) (scRefillCount rv) (scRefillMax rv)
@@ -4782,7 +4782,7 @@ lemma scRefills_update_corres:
 lemma updateRefillHd_headTimeUpdate_corres:
   "\<lbrakk>sc_ptr = scPtr; p = p'\<rbrakk>
    \<Longrightarrow> corres dc
-              (pspace_aligned and pspace_distinct and sc_at_pred ((=) sc) sc_ptr and 
+              (pspace_aligned and pspace_distinct and sc_at_pred ((=) sc) sc_ptr and
                sc_at sc_ptr and is_active_sc sc_ptr
                and sc_refills_sc_at (\<lambda>refills. refills \<noteq> []) sc_ptr)
               valid_objs'
@@ -4833,10 +4833,10 @@ lemma readRefillSizeD:
 
 lemma refillAddTail_corres1:
   "\<lbrakk>old_head = refill_map old_head'; sc_ptr = scPtr\<rbrakk> \<Longrightarrow>
-   corres dc (sc_at sc_ptr) (obj_at' (\<lambda>sc. scRefillCount sc < scRefillMax sc
+   corres dc (sc_at sc_ptr) (obj_at' (\<lambda>sc. scRefillCount sc \<le> scRefillMax sc
 \<and> scRefillCount sc = 0 \<and>
            scRefillMax sc \<le> length (scRefills sc) \<and>
-           scRefillHead sc < scRefillMax sc) scPtr) 
+           scRefillHead sc < scRefillMax sc) scPtr)
      (set_refills sc_ptr [old_head \<lparr>r_time := r_time old_head + p'\<rparr>])
      (refillAddTail scPtr (rTime_update (\<lambda>_. rTime old_head' + p') old_head'))"
   unfolding refillAddTail_def set_refills_def
@@ -4850,7 +4850,7 @@ lemma refillAddTail_corres1:
                     scRefillMax sc \<le> length (scRefills sc) \<and>
                     scRefillHead sc < scRefillMax sc)" in corres_assert_gen_asm2)
        apply (rule corres_symb_exec_r[OF _ getRefillNext_sp])
-         apply (rule_tac Q'="ko_at' sc scPtr and K (sz = 0 \<and> newTail = scRefillHead sc \<and> 
+         apply (rule_tac Q'="ko_at' sc scPtr and K (sz = 0 \<and> newTail = scRefillHead sc \<and>
        scRefillMax sc \<le> length (scRefills sc) \<and> scRefillHead sc < scRefillMax sc)" in corres_guard2_imp)
           apply (rule corres_gen_asm2')
           apply (rule_tac corres_guard2_imp)
@@ -4869,7 +4869,7 @@ lemma refillAddTail_corres1:
           apply fastforce
   subgoal sorry (* DEFER *)
   (* There seems to be a problem here. We know that scRefillHead points to the beginning of our ring
-     buffer, and that scRefillCount tells us how many items are in the ring buffer. And 
+     buffer, and that scRefillCount tells us how many items are in the ring buffer. And
      refillTailIndex is set to be scRefillHead + scRefillCount - 1. This formula for refillTailIndex
      suggests that when scRefillCount=0 the tail pointer should sit in front of the head pointer.
      This is a perfectly good model, except that it fails when scRefillHead=0: these variables are
@@ -4892,24 +4892,87 @@ lemma refillAddTail_corres1:
    apply wpsimp+
   done
 
+lemma refillAddTail_corres2:
+  "\<lbrakk>old_head = refill_map old_head'; sc_ptr = scPtr\<rbrakk> \<Longrightarrow>
+   corres dc (sc_at sc_ptr) (obj_at' (\<lambda>sc. scRefillCount sc < scRefillMax sc
+\<and> 0 < scRefillCount sc \<and>
+           scRefillMax sc \<le> length (scRefills sc) \<and>
+           scRefillHead sc < scRefillMax sc) scPtr)
+     (set_refills sc_ptr (refills @ [old_head \<lparr>r_time := r_time old_head + p'\<rparr>]))
+     (refillAddTail scPtr (rTime_update (\<lambda>_. rTime old_head' + p') old_head'))"
+  supply if_split [split del]
+  unfolding refillAddTail_def set_refills_def
+  apply clarsimp
+  apply (rule corres_symb_exec_r[OF _ get_sc_sp'])
+    apply (rule corres_symb_exec_r[OF _ getRefillSize_sp])
+      apply (rule corres_guard2_imp)
+       apply (rule_tac Q="ko_at' sc scPtr and
+                 K (scRefillCount sc = sz \<and> 0 < sz \<and>
+                    scRefillMax sc \<le> length (scRefills sc) \<and>
+                    scRefillHead sc < scRefillMax sc)" in corres_assert_gen_asm2)
+       apply (rule corres_symb_exec_r[OF _ getRefillNext_sp])
+         apply (rule_tac Q'="ko_at' sc scPtr and K ( newTail = (if refillTailIndex sc = scRefillMax sc - 1 then 0
+                  else refillTailIndex sc + 1) \<and> (sz = scRefillCount sc) \<and> (0 < sz) \<and>
+       scRefillMax sc \<le> length (scRefills sc) \<and> scRefillHead sc < scRefillMax sc)" in corres_guard2_imp)
+          apply (rule corres_gen_asm2')
+          apply (rule_tac corres_guard2_imp)
+           apply (rule_tac sc'=sc in update_sc_no_reply_stack_update_ko_at'_corres)
+              apply (clarsimp simp: sc_relation_def refills_map_def wrap_slice_1)
+              apply (clarsimp simp: wrap_slice_1 length_replaceAt replaceAt_index refill_map_def)
+              apply (subst wrap_slice_append)
+                 apply clarsimp+
+               apply (clarsimp simp: wrap_slice_1 length_replaceAt replaceAt_index refill_map_def)
+              apply (clarsimp, intro conjI)
+               apply (subst wrap_slice_replaceAt_eq[symmetric]; (clarsimp simp: refillTailIndex_def)?)
+                 apply (auto simp: refillTailIndex_def Let_def split: if_split)[1]
+                apply (auto simp: refillTailIndex_def Let_def split: if_split)[1]
+  subgoal sorry (* annoying to get this into context, probably can't use
+                 update_sc_no_reply_stack_update_ko_at'_corres because it doesn't reference sc on abstract side *)
+              apply (auto simp: refillTailIndex_def Let_def replaceAt_index split: if_split)[1]
+                apply (subst replaceAt_index; (clarsimp split: if_split)?)
+                  apply fastforce
+                 apply fastforce
+                apply (clarsimp simp: refill_map_def)
+               apply (subst replaceAt_index; (clarsimp split: if_split)?)
+               apply (clarsimp simp: refill_map_def)
+              apply (subst replaceAt_index; (clarsimp split: if_split)?)
+              apply (clarsimp simp: refill_map_def)
+             apply clarsimp
+            apply (clarsimp simp: objBits_def objBitsKO_def length_replaceAt)
+           apply clarsimp
+          apply clarsimp
+         apply clarsimp
+         apply (drule readRefillNextD, clarsimp simp: obj_at'_def)
+        apply (wpsimp simp: getRefillNext_def)+
+       apply (clarsimp simp: readRefillNext_def obind_def)
+       apply (subgoal_tac "sc_at' scPtr s")
+        apply (frule no_ofailD[OF no_ofail_readSchedContext], clarsimp)
+       apply clarsimp
+      apply clarsimp
+      apply (drule readRefillSizeD, clarsimp simp: obj_at'_def projectKOs)
+     apply (wpsimp simp: getRefillSize_def)+
+    apply (clarsimp simp: readRefillSize_def oliftM_def obind_def)
+    apply (subgoal_tac "sc_at' scPtr s")
+     apply (frule no_ofailD[OF no_ofail_readSchedContext], clarsimp)
+    apply clarsimp
+   apply wpsimp+
+  done
+
 lemma scheduleUsed_corres:
   "\<lbrakk>sc_ptr = scPtr; old_head = refill_map old_heada; p = p'\<rbrakk> \<Longrightarrow>
-    corres dc \<top> (sc_at' sc_ptr)
+    corres dc (sc_at sc_ptr)
+              (obj_at' (\<lambda>sc. scRefillCount sc < scRefillMax sc \<and>
+                             scRefillMax sc \<le> length (scRefills sc) \<and>
+                             scRefillHead sc < scRefillMax sc) scPtr)
     (do full <- refill_full sc_ptr;
-                refills' <- get_refills sc_ptr;
-                set_refills sc_ptr
-                 (schedule_used full refills'
-                   (old_head\<lparr>r_time :=
-                       r_time old_head + p\<rparr>))
-             od)
-            (scheduleUsed scPtr
-              (rTime_update (\<lambda>_. rTime old_heada + p')
-                old_heada))"
+        refills' <- get_refills sc_ptr;
+        set_refills sc_ptr (schedule_used full refills' (old_head\<lparr>r_time := r_time old_head + p\<rparr>))
+     od)
+    (scheduleUsed scPtr (rTime_update (\<lambda>_. rTime old_heada + p') old_heada))"
   supply if_split [split del] dc_simp [simp del]
   unfolding scheduleUsed_def schedule_used_def haskell_assert_def
   apply (simp)
-  apply (rule corres_symb_exec_r[OF _ get_sc_sp', rotated])
-    apply (wpsimp, wpsimp)
+  apply (rule corres_symb_exec_r[OF _ get_sc_sp', rotated], wpsimp, wpsimp)
   apply (rule corres_assert_assume)
    apply (rule corres_symb_exec_r[OF _ refillEmpty_sp, rotated])
      apply (wpsimp simp: refillEmpty_def)
@@ -4919,44 +4982,75 @@ lemma scheduleUsed_corres:
        apply (clarsimp simp: if_distrib[where f="set_refills scPtr"])
        apply (rule_tac F="empty = (refills' = [])" in corres_req)
         apply (clarsimp simp: obj_at'_def obj_at_def projectKOs)
-       apply (subgoal_tac "\<exists>n. sc_relation sca n sc")
-       apply (clarsimp simp: sc_relation_def)
-  subgoal sorry (* boring *)
-  subgoal sorry (* use sc_relation *)
+        apply (subgoal_tac "\<exists>n. sc_relation sca n sc")
+         apply (subgoal_tac "scRefillCount sc = length (sc_refills sca)")
+          apply (clarsimp simp: sc_relation_def)
+         apply (clarsimp simp: sc_relation_def refills_map_def)
+        apply (drule (1) pspace_relation_absD[OF _ state_relation_pspace_relation])
+        apply (fastforce simp: is_sc_obj)
        apply (rule corres_guard_imp)
-         apply (rule corres_if, simp)
-find_theorems refillAddTail corres_underlying
-  subgoal sorry (* leaf corres *)
+         apply (rule_tac Q'="obj_at' (\<lambda>sc. scRefillCount sc \<le> scRefillMax sc \<and> std_sc' sc)
+            scPtr and ko_at' sc scPtr and QQ" in corres_if, simp)
+          apply (rule refillAddTail_corres1, simp, simp)
          apply (rule corres_symb_exec_r[OF _ refillFull_sp, rotated])
            apply (wpsimp simp: refillFull_def)
           apply (wpsimp simp: refillFull_def)
          apply (clarsimp simp: if_distrib[where f="set_refills scPtr"])
-         apply (rule_tac F="last refills' = refill_map (refillTl sc)" in corres_req)
+         apply (rule_tac P="sc_refills_sc_at ((=) refills') scPtr"
+    and P'="ko_at' sc scPtr" and Q="sc_at scPtr and sc_refills_sc_at ((=) refills') scPtr and VV" in corres_add_guard)
+     apply clarsimp
+          apply (rule_tac F="last refills' = refill_map (refillTl sc)" in corres_req)
+               apply (clarsimp simp: obj_at'_def projectKOs sc_at_pred_n_def obj_at_def)
+               apply (subgoal_tac "\<exists>n. sc_relation sca n sc")
+                apply (clarsimp simp: sc_relation_def refills_map_def last_map)
+     apply (subst last_map)
+subgoal sorry (* boring *)
+subgoal sorry (* fun! *)
+
+               apply (drule (1) pspace_relation_absD[OF _ state_relation_pspace_relation])
+               apply (fastforce simp: is_sc_obj)
+           apply (rule corres_guard_imp)
+             apply (rule_tac Q'="obj_at'
+                     (\<lambda>sc. scRefillCount sc \<le> scRefillMax sc \<and> std_sc' sc)
+                     scPtr and obj_at' (\<lambda>ko. fulla = (scRefillCount ko = scRefillMax ko))
+            scPtr and WW" and Q="sc_at scPtr and sc_at_pred (\<lambda>sc. full = (length (sc_refills sc) = sc_refill_max sc)) scPtr
+and UU" in corres_if)
+               apply (clarsimp simp: can_merge_refill_def refill_map_def)
+              apply (clarsimp, rule setRefillTl_corres)
+             apply (clarsimp simp: if_distrib[where f="set_refills scPtr"])
+             apply (rule_tac P="sc_at_pred (\<lambda>sc. full = (length (sc_refills sc) = sc_refill_max sc)) scPtr"
+        and P'="obj_at' (\<lambda>ko. fulla = (scRefillCount ko = scRefillMax ko)) scPtr" in corres_add_guard)
+apply simp
+              apply (rule_tac F="full = fulla" in corres_req)
+               apply (clarsimp simp: obj_at'_def projectKOs sc_at_pred_n_def obj_at_def)
+               apply (subgoal_tac "\<exists>n. sc_relation sca n obj")
+                apply (clarsimp simp: sc_relation_def refills_map_def)
+               apply (drule (1) pspace_relation_absD[OF _ state_relation_pspace_relation])
+               apply (fastforce simp: is_sc_obj)
+              apply (rule_tac corres_guard_imp)
+                apply (rule corres_if, simp)
+                 apply (rule refillAddTail_corres2, simp, simp)
+                apply (clarsimp, rule setRefillTl_corres)
+               apply clarsimp
+
+               \<comment>\<open>corres reasoning complete\<close>
+              apply clarsimp
   subgoal sorry
-         apply (rule corres_guard2_imp)
-          apply (rule corres_if)
-            apply (clarsimp simp: can_merge_refill_def)
-            apply (clarsimp simp: refill_map_def)
-           apply_trace (clarsimp)
-           apply (rule setRefillTl_corres)
-          apply (clarsimp simp: if_distrib[where f="set_refills scPtr"])
-          apply (rule_tac F="full = fulla" in corres_req)
+             apply (clarsimp split: if_split)
   subgoal sorry
-          apply (rule corres_if, simp)
-  subgoal sorry (* leaf corres *)
-          apply clarsimp
-          apply (rule setRefillTl_corres)
-   \<comment>\<open>corres reasoning complete\<close>
-         apply (clarsimp split: if_split)
+             apply (clarsimp split: if_split)
   subgoal sorry
-        apply (clarsimp split: if_split)
+             apply (clarsimp split: if_split)
   subgoal sorry
-       apply (clarsimp split: if_split)
+             apply (clarsimp split: if_split)
   subgoal sorry
-      apply (clarsimp split: if_split)
-  subgoal sorry
-  done *)
-  sorry
+         apply (wpsimp wp: get_sched_context_exs_valid simp: get_refills_def)
+    (* FIXME RT: get_sched_context_no_fail should be in wp *)
+        apply (wpsimp wp: get_sched_context_no_fail simp: get_refills_def)
+       apply (wpsimp wp: get_sched_context_exs_valid simp: obj_at_def is_sc_obj refill_full_def)
+      apply (wpsimp wp: get_sched_context_no_fail simp: refill_full_def)
+     apply (clarsimp simp: obj_at'_def)
+  done
 
 lemma handleOverrunLoopBody_corres:
   "usage = usage' \<Longrightarrow>
@@ -4978,8 +5072,11 @@ lemma handleOverrunLoopBody_corres:
                apply simp
                apply (rule scheduleUsed_corres, rule refl)
                apply (clarsimp simp: refill_map_def sc_relation_def)
+               apply (clarsimp simp: refill_map_def sc_relation_def)
               apply wpsimp
-  sorry
+prefer 2
+   apply (rule corres_return[where P=\<top> and P'=\<top>, THEN iffD2], clarsimp)
+  sorry (* handleOverrunLoopBody_corres *)
 
 lemma handleOverrunLoopBody_terminates:
   "whileLoop_terminates (\<lambda>r s. the (headTimeBuffer r s)) handleOverrunLoopBody r' s'"
