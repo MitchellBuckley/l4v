@@ -2709,11 +2709,6 @@ lemma insertNewCap_valid_mdb:
   apply (simp add:Int_ac)
   done
 
-(* FIXME: move *)
-lemma no_default_zombie:
-  "cap_relation (default_cap tp p sz d) cap \<Longrightarrow> \<not>isZombie cap"
-  by (cases tp, auto simp: isCap_simps)
-
 crunch typ_at'[wp]: updateNewFreeIndex "\<lambda>s. P (typ_at' T p s)"
 lemmas updateNewFreeIndex_typ_ats[wp] = typ_at_lifts[OF updateNewFreeIndex_typ_at']
 

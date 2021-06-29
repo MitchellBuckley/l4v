@@ -1945,14 +1945,7 @@ lemma doFlush_underlying_memory[wp]:
    \<lbrace> \<lambda>_ m'. underlying_memory m' p = um \<rbrace>"
   unfolding doFlush_def by(cases flush_type; wpsimp)
 
-(* FIXME: move *)
-lemma dmo_invs'_simple:
-  "no_irq f \<Longrightarrow>
-   (\<And>p um. \<lbrace>\<lambda>m'. underlying_memory m' p = um\<rbrace> f \<lbrace>\<lambda>_ m'. underlying_memory m' p = um\<rbrace>) \<Longrightarrow>
-   \<lbrace> invs' \<rbrace> doMachineOp f \<lbrace> \<lambda>y. invs' \<rbrace>"
-  by (rule hoare_pre, rule dmo_invs', wp no_irq, simp_all add:valid_def split_def)
-
-(* FIXME: move *)
+(* FIXME: move -- where should this move to?*)
 lemma doFlush_invs[wp]:
   "\<lbrace> invs' \<rbrace> doMachineOp (doFlush flush_type vstart vend pstart) \<lbrace> \<lambda>y. invs' \<rbrace>"
   by(wp dmo_invs'_simple)

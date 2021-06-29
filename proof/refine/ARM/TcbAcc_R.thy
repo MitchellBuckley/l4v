@@ -165,6 +165,13 @@ lemma dmo_invs':
   apply assumption
   done
 
+(* FIXME: move -- can move higher if we move dmo_invs' also*)
+lemma dmo_invs'_simple:
+  "no_irq f \<Longrightarrow>
+   (\<And>p um. \<lbrace>\<lambda>m'. underlying_memory m' p = um\<rbrace> f \<lbrace>\<lambda>_ m'. underlying_memory m' p = um\<rbrace>) \<Longrightarrow>
+   \<lbrace> invs' \<rbrace> doMachineOp f \<lbrace> \<lambda>y. invs' \<rbrace>"
+  by (rule hoare_pre, rule dmo_invs', wp no_irq, simp_all add:valid_def split_def)
+
 lemma dmo_invs_no_cicd':
   assumes masks: "\<And>P. \<lbrace>\<lambda>s. P (irq_masks s)\<rbrace> f \<lbrace>\<lambda>_ s. P (irq_masks s)\<rbrace>"
   shows "\<lbrace>(\<lambda>s. \<forall>m. \<forall>(r,m')\<in>fst (f m). \<forall>p.
@@ -1821,11 +1828,6 @@ proof -
                              projectKO_eq project_inject)
      done
 qed
-
-definition
-  weak_sch_act_wf :: "scheduler_action \<Rightarrow> kernel_state \<Rightarrow> bool"
-where
- "weak_sch_act_wf sa = (\<lambda>s. \<forall>t. sa = SwitchToThread t \<longrightarrow> st_tcb_at' runnable' t s \<and> tcb_in_cur_domain' t s)"
 
 lemma weak_sch_act_wf_updateDomainTime[simp]:
   "weak_sch_act_wf m (ksDomainTime_update f s) = weak_sch_act_wf m s"
@@ -4538,6 +4540,14 @@ lemmas ethread_set_corres =
 
 lemma archTcbUpdate_aux2: "(\<lambda>tcb. tcb\<lparr> tcbArch := f (tcbArch tcb)\<rparr>) = tcbArch_update f"
   by (rule ext, case_tac tcb, simp)
+
+lemma threadSet_qsL1[wp]:
+  "\<lbrace>\<lambda>s. P (ksReadyQueuesL1Bitmap s)\<rbrace> threadSet f t \<lbrace>\<lambda>rv s. P (ksReadyQueuesL1Bitmap s)\<rbrace>"
+  by (simp add: threadSet_def | wp updateObject_default_inv)+
+
+lemma threadSet_qsL2[wp]:
+  "\<lbrace>\<lambda>s. P (ksReadyQueuesL2Bitmap s)\<rbrace> threadSet f t \<lbrace>\<lambda>rv s. P (ksReadyQueuesL2Bitmap s)\<rbrace>"
+  by (simp add: threadSet_def | wp updateObject_default_inv)+
 
 end
 end

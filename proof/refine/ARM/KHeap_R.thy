@@ -2150,5 +2150,76 @@ lemma setEndpoint_ct':
 lemmas setEndpoint_valid_globals[wp]
     = valid_global_refs_lift' [OF set_ep_ctes_of set_ep_arch'
                                   setEndpoint_it setEndpoint_ksInterruptState]
+
+(* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *)
+(*  STAGING BEFORE MOVING HIGHER                       *)
+(* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *)
+
+lemma whenE_throwError_corres':
+  assumes P: "frel f f'"
+  assumes Q: "\<And>s s'. \<lbrakk>(s, s') \<in> state_relation; R s; R' s'\<rbrakk> \<Longrightarrow> P = P'"
+  assumes R: "\<not> P \<Longrightarrow> corres (frel \<oplus> rvr) Q Q' m m'"
+  shows      "corres (frel \<oplus> rvr) (R and Q) (R' and Q')
+                     (whenE P  (throwError f ) >>=E (\<lambda>_. m ))
+                     (whenE P' (throwError f') >>=E (\<lambda>_. m'))"
+  unfolding whenE_def
+  apply (rule corres_req)
+   apply (erule Q)
+    apply simp
+   apply simp
+  apply (cases P)
+   apply (simp add: P)
+  apply simp
+  apply (erule corres_guard_imp [OF R])
+   apply simp
+  apply simp
+  done
+
+lemma corres_split_liftM2:
+  assumes    corr: "corres (\<lambda>x y. r' x (f y)) P P' a c"
+  and r1: "\<And>rv rv'. r' rv rv' \<Longrightarrow> corres r (R rv) (R' rv') (b rv) (d rv')"
+  and h1: "\<lbrace>Q\<rbrace> a \<lbrace>R\<rbrace>" and h2: "\<lbrace>Q'\<rbrace> c \<lbrace>\<lambda>x. R' (f x)\<rbrace>"
+  shows "corres r (P and Q) (P' and Q') (a >>= b) (liftM f c >>= d)"
+  apply (rule corres_guard_imp)
+  apply (rule corres_split_deprecated [OF _ _ h1])
+       prefer 2
+       apply (simp add: o_def)
+       apply (rule corr)
+      apply (erule r1)
+     apply wp
+    apply (simp add: o_def)
+    apply (rule h2)
+   apply simp
+  apply simp
+  done
+
+definition
+  weak_sch_act_wf :: "scheduler_action \<Rightarrow> kernel_state \<Rightarrow> bool"
+where
+ "weak_sch_act_wf sa = (\<lambda>s. \<forall>t. sa = SwitchToThread t \<longrightarrow> st_tcb_at' runnable' t s \<and> tcb_in_cur_domain' t s)"
+
+lemma rct_sch_act_simple[simp]:
+  "ksSchedulerAction s = ResumeCurrentThread \<Longrightarrow> sch_act_simple s"
+  by (simp add: sch_act_simple_def)
+
+lemma rct_sch_act_sane[simp]:
+  "ksSchedulerAction s = ResumeCurrentThread \<Longrightarrow> sch_act_sane s"
+  by (simp add: sch_act_sane_def)
+
+lemma unaligned_helper:
+  "\<lbrakk>is_aligned x n; y\<noteq>0; y < 2 ^ n\<rbrakk> \<Longrightarrow> \<not> is_aligned (x + y) n"
+  apply (simp (no_asm_simp) add: is_aligned_mask)
+  apply (simp add: mask_add_aligned)
+  apply (cut_tac mask_eq_iff_w2p[of n y], simp_all add: word_size)
+  apply (rule ccontr)
+  apply (simp add: not_less power_overflow word_bits_conv)
+  done
+
+lemma no_default_zombie:
+  "cap_relation (default_cap tp p sz d) cap \<Longrightarrow> \<not>isZombie cap"
+  by (cases tp, auto simp: isCap_simps)
+
+(* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ *)
+
 end
 end

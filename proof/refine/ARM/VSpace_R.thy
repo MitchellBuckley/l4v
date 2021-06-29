@@ -3343,7 +3343,7 @@ lemma dmo_ccr_PoU_invs'[wp]:
                           machine_rest_lift_def split_def | wp)+
   done
 
-(* FIXME: Move *)
+(* FIXME: Move -- move where, and why? *)
 lemma dmo_invalidateLocalTLB_ASID_invs'[wp]:
   "\<lbrace>invs'\<rbrace> doMachineOp (invalidateLocalTLB_ASID a) \<lbrace>\<lambda>_. invs'\<rbrace>"
   apply (wp dmo_invs' no_irq_invalidateLocalTLB_ASID no_irq)

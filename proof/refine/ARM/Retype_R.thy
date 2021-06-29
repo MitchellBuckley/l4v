@@ -3811,15 +3811,6 @@ lemma createObjects'_qsL2[wp]:
   "\<lbrace>\<lambda>s. P (ksReadyQueuesL2Bitmap s)\<rbrace> createObjects' ptr n val gbits \<lbrace>\<lambda>rv s. P (ksReadyQueuesL2Bitmap s)\<rbrace>"
   by (rule createObjects_pspace_only, simp)
 
-(* FIXME move these 2 to TcbAcc_R *)
-lemma threadSet_qsL1[wp]:
-  "\<lbrace>\<lambda>s. P (ksReadyQueuesL1Bitmap s)\<rbrace> threadSet f t \<lbrace>\<lambda>rv s. P (ksReadyQueuesL1Bitmap s)\<rbrace>"
-  by (simp add: threadSet_def | wp updateObject_default_inv)+
-
-lemma threadSet_qsL2[wp]:
-  "\<lbrace>\<lambda>s. P (ksReadyQueuesL2Bitmap s)\<rbrace> threadSet f t \<lbrace>\<lambda>rv s. P (ksReadyQueuesL2Bitmap s)\<rbrace>"
-  by (simp add: threadSet_def | wp updateObject_default_inv)+
-
 crunches createObjects, createNewCaps
   for qs[wp]: "\<lambda>s. P (ksReadyQueues s)"
   and qsL1[wp]: "\<lambda>s. P (ksReadyQueuesL1Bitmap s)"
