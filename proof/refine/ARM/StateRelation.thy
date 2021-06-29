@@ -723,5 +723,14 @@ lemma pspace_relation_None:
    done
   done
 
+lemma state_relation_schact[elim!]:
+  "(s,s') \<in> state_relation \<Longrightarrow> sched_act_relation (scheduler_action s) (ksSchedulerAction s')"
+  apply (simp add: state_relation_def)
+  done
+
+lemma state_relation_queues[elim!]: "(s,s') \<in> state_relation \<Longrightarrow> ready_queues_relation (ready_queues s) (ksReadyQueues s')"
+  apply (simp add: state_relation_def)
+  done
+
 end
 end

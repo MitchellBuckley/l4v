@@ -4032,6 +4032,9 @@ lemma objSize_eq_capBits:
     split : apiobject_type.splits)+
  done
 
+(* FIXME: remove *)
+lemmas APIType_capBits = objSize_eq_capBits
+
 lemma createNewCaps_ret_len:
   "\<lbrace>K (n < 2 ^ word_bits \<and> n \<noteq> 0)\<rbrace>
    createNewCaps ty ptr n us d

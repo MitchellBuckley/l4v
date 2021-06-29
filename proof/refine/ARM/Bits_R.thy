@@ -69,9 +69,6 @@ lemma isCap_simps:
   "isArchPageCap cap = (\<exists>d ref rghts sz data. cap = ArchObjectCap (PageCap d ref rghts sz data))"
   by (auto simp: isCap_defs split: capability.splits arch_capability.splits)
 
-lemma untyped_not_null [simp]:
-  "\<not> isUntypedCap NullCap" by (simp add: isCap_simps)
-
 text \<open>Miscellaneous facts about low level constructs\<close>
 
 lemma projectKO_tcb:
