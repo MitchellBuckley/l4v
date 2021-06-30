@@ -510,11 +510,6 @@ declare if_split [split]
 
 text \<open>Proving desired properties about rec_del/cap_delete\<close>
 
-declare of_nat_power [simp del]
-
-(* FIXME: pull up *)
-declare word_unat_power [symmetric, simp del]
-
 text \<open>Proving desired properties about recursiveDelete/cteDelete\<close>
 
 text \<open>Proving the termination of finaliseSlot\<close>
@@ -6205,7 +6200,6 @@ proof (induct arbitrary: P p rule: finalise_spec_induct2)
     apply (clarsimp simp: cte_wp_at_ctes_of)
     apply (rule conjI, clarsimp simp: removeable'_def)
     apply (clarsimp simp: conj_comms)
-    apply (rule conjI, erule ctes_of_valid', clarsimp)
     apply (rule conjI, clarsimp)
     apply fastforce
     done

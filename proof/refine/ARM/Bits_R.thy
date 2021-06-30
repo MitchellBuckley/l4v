@@ -481,6 +481,166 @@ lemma constOnFailure_wp :
   apply (wp|simp)+
   done
 
+lemma whenE_throwError_corres':
+  assumes P: "frel f f'"
+  assumes Q: "\<And>s s'. \<lbrakk>(s, s') \<in> state_relation; R s; R' s'\<rbrakk> \<Longrightarrow> P = P'"
+  assumes R: "\<not> P \<Longrightarrow> corres (frel \<oplus> rvr) Q Q' m m'"
+  shows      "corres (frel \<oplus> rvr) (R and Q) (R' and Q')
+                     (whenE P  (throwError f ) >>=E (\<lambda>_. m ))
+                     (whenE P' (throwError f') >>=E (\<lambda>_. m'))"
+  unfolding whenE_def
+  apply (rule corres_req)
+   apply (erule Q)
+    apply simp
+   apply simp
+  apply (cases P)
+   apply (simp add: P)
+  apply simp
+  apply (erule corres_guard_imp [OF R])
+   apply simp
+  apply simp
+  done
+
+lemma corres_split_liftM2:
+  assumes    corr: "corres (\<lambda>x y. r' x (f y)) P P' a c"
+  and r1: "\<And>rv rv'. r' rv rv' \<Longrightarrow> corres r (R rv) (R' rv') (b rv) (d rv')"
+  and h1: "\<lbrace>Q\<rbrace> a \<lbrace>R\<rbrace>" and h2: "\<lbrace>Q'\<rbrace> c \<lbrace>\<lambda>x. R' (f x)\<rbrace>"
+  shows "corres r (P and Q) (P' and Q') (a >>= b) (liftM f c >>= d)"
+  apply (rule corres_guard_imp)
+  apply (rule corres_split_deprecated [OF _ _ h1])
+       prefer 2
+       apply (simp add: o_def)
+       apply (rule corr)
+      apply (erule r1)
+     apply wp
+    apply (simp add: o_def)
+    apply (rule h2)
+   apply simp
+  apply simp
+  done
+
+definition
+  weak_sch_act_wf :: "scheduler_action \<Rightarrow> kernel_state \<Rightarrow> bool"
+where
+ "weak_sch_act_wf sa = (\<lambda>s. \<forall>t. sa = SwitchToThread t \<longrightarrow> st_tcb_at' runnable' t s \<and> tcb_in_cur_domain' t s)"
+
+lemma rct_sch_act_simple[simp]:
+  "ksSchedulerAction s = ResumeCurrentThread \<Longrightarrow> sch_act_simple s"
+  by (simp add: sch_act_simple_def)
+
+lemma rct_sch_act_sane[simp]:
+  "ksSchedulerAction s = ResumeCurrentThread \<Longrightarrow> sch_act_sane s"
+  by (simp add: sch_act_sane_def)
+
+lemma unaligned_helper:
+  "\<lbrakk>is_aligned x n; y\<noteq>0; y < 2 ^ n\<rbrakk> \<Longrightarrow> \<not> is_aligned (x + y) n"
+  apply (simp (no_asm_simp) add: is_aligned_mask)
+  apply (simp add: mask_add_aligned)
+  apply (cut_tac mask_eq_iff_w2p[of n y], simp_all add: word_size)
+  apply (rule ccontr)
+  apply (simp add: not_less power_overflow word_bits_conv)
+  done
+
+lemma no_default_zombie:
+  "cap_relation (default_cap tp p sz d) cap \<Longrightarrow> \<not>isZombie cap"
+  by (cases tp, auto simp: isCap_simps)
+
+lemma isUntypedCap_simps[simp]:
+  "isUntypedCap (capability.UntypedCap uu uv uw ux) = True"
+  "isUntypedCap (capability.NullCap) = False"
+  "isUntypedCap (capability.EndpointCap v va vb vc vd ve) = False"
+  "isUntypedCap (capability.NotificationCap v va vb vc) = False"
+  "isUntypedCap (capability.ReplyCap v1 v2 v3) = False"
+  "isUntypedCap (capability.CNodeCap x1 x2 x3 x4) = False"
+  "isUntypedCap (capability.ThreadCap v) = False"
+  "isUntypedCap (capability.DomainCap) = False"
+  "isUntypedCap (capability.IRQControlCap) = False"
+  "isUntypedCap (capability.IRQHandlerCap y1) = False"
+  "isUntypedCap (capability.Zombie v va1 vb1) = False"
+  "isUntypedCap (capability.ArchObjectCap z) = False"
+  by (simp_all add: isUntypedCap_def split: capability.splits)
+
+lemma zobj_refs'_capFreeIndex_update[simp]:
+  "isUntypedCap ctecap \<Longrightarrow>
+   zobj_refs' (capFreeIndex_update f (ctecap)) = zobj_refs' ctecap"
+  by (case_tac ctecap,auto simp:isCap_simps)
+
+lemma corres_whenE_throw_merge:
+  "corres r P P' f (doE _ \<leftarrow> whenE (A \<or> B) (throwError e); h odE)
+  \<Longrightarrow> corres r P P' f (doE _ \<leftarrow> whenE A (throwError e); _ \<leftarrow>  whenE B (throwError e); h odE)"
+  by (auto simp: whenE_def split: if_splits)
+
+lemma dmo_invs':
+  assumes masks: "\<And>P. \<lbrace>\<lambda>s. P (irq_masks s)\<rbrace> f \<lbrace>\<lambda>_ s. P (irq_masks s)\<rbrace>"
+  shows "\<lbrace>(\<lambda>s. \<forall>m. \<forall>(r,m')\<in>fst (f m). \<forall>p.
+             pointerInUserData p s \<or> pointerInDeviceData p s \<or>
+             underlying_memory m' p = underlying_memory m p) and
+          invs'\<rbrace> doMachineOp f \<lbrace>\<lambda>r. invs'\<rbrace>"
+  apply (simp add: doMachineOp_def split_def)
+  apply wp
+  apply clarsimp
+  apply (subst invs'_machine)
+    apply (drule use_valid)
+      apply (rule_tac P="\<lambda>m. m = irq_masks (ksMachineState s)" in masks, simp+)
+   apply (fastforce simp add: valid_machine_state'_def)
+  apply assumption
+  done
+
+lemma dmo_invs'_simple:
+  "no_irq f \<Longrightarrow>
+   (\<And>p um. \<lbrace>\<lambda>m'. underlying_memory m' p = um\<rbrace> f \<lbrace>\<lambda>_ m'. underlying_memory m' p = um\<rbrace>) \<Longrightarrow>
+   \<lbrace> invs' \<rbrace> doMachineOp f \<lbrace> \<lambda>y. invs' \<rbrace>"
+  by (rule hoare_pre, rule dmo_invs', wp no_irq, simp_all add:valid_def split_def)
+
+lemma tcb_at_typ_at':
+  "tcb_at' p s = typ_at' TCBT p s"
+  unfolding typ_at'_def
+  apply rule
+  apply (clarsimp simp add: obj_at'_def ko_wp_at'_def projectKOs)
+  apply (clarsimp simp add: obj_at'_def ko_wp_at'_def projectKOs)
+  apply (case_tac ko, simp_all)
+  done
+
+lemma not_obj_at':
+  "(\<not>obj_at' (\<lambda>tcb::tcb. P tcb) t s) = (\<not>typ_at' TCBT t s \<or> obj_at' (Not \<circ> P) t s)"
+  apply (simp add: obj_at'_real_def projectKOs
+                   typ_at'_def ko_wp_at'_def objBits_simps)
+  apply (rule iffI)
+   apply (clarsimp)
+   apply (case_tac ko)
+   apply (clarsimp)+
+  done
+
+lemma not_obj_at_elim':
+  assumes typat: "typ_at' TCBT t s"
+      and nobj: "\<not>obj_at' (\<lambda>tcb::tcb. P tcb) t s"
+    shows "obj_at' (Not \<circ> P) t s"
+  using assms
+  apply -
+  apply (drule not_obj_at' [THEN iffD1])
+  apply (clarsimp)
+  done
+
+lemmas tcb_at_not_obj_at_elim' = not_obj_at_elim' [OF tcb_at_typ_at' [THEN iffD1]]
+
+lemma lift_neg_pred_tcb_at':
+  assumes typat: "\<And>P T p. \<lbrace>\<lambda>s. P (typ_at' T p s)\<rbrace> f \<lbrace>\<lambda>_ s. P (typ_at' T p s)\<rbrace>"
+      and sttcb: "\<And>S p. \<lbrace>pred_tcb_at' proj S p\<rbrace> f \<lbrace>\<lambda>_. pred_tcb_at' proj S p\<rbrace>"
+    shows "\<lbrace>\<lambda>s. P (pred_tcb_at' proj S p s)\<rbrace> f \<lbrace>\<lambda>_ s. P (pred_tcb_at' proj S p s)\<rbrace>"
+  apply (rule_tac P=P in P_bool_lift)
+   apply (rule sttcb)
+  apply (simp add: pred_tcb_at'_def not_obj_at')
+  apply (wp hoare_convert_imp)
+    apply (rule typat)
+   prefer 2
+   apply assumption
+  apply (rule hoare_chain [OF sttcb])
+   apply (fastforce simp: pred_tcb_at'_def comp_def)
+  apply (clarsimp simp: pred_tcb_at'_def elim!: obj_at'_weakenE)
+  done
+
+declare word_unat_power [symmetric]
+
 end
 
 end
