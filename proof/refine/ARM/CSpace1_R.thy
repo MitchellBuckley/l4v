@@ -5408,7 +5408,7 @@ lemma cteInsert_corres:
               apply (subgoal_tac "cte_map (aa,bb) \<noteq> cte_map dest")
                subgoal by (clarsimp simp: modify_map_def split: if_split_asm)
               apply (erule (5) cte_map_inj)
-(* FIXME: messy proof? *)
+(* FIXME *)
 
              apply (rule setUntypedCapAsFull_corres)
                    apply simp+

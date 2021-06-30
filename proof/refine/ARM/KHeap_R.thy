@@ -2150,6 +2150,5 @@ lemma setEndpoint_ct':
 lemmas setEndpoint_valid_globals[wp]
     = valid_global_refs_lift' [OF set_ep_ctes_of set_ep_arch'
                                   setEndpoint_it setEndpoint_ksInterruptState]
-
 end
 end
