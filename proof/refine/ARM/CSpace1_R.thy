@@ -3788,22 +3788,6 @@ lemma setUntypedCapAsFull_corres:
   apply (case_tac src_cap,simp_all)
   done
 
-(* FIXME: SELFOUR-421 move *)
-lemma isUntypedCap_simps[simp]:
-  "isUntypedCap (capability.UntypedCap uu uv uw ux) = True"
-  "isUntypedCap (capability.NullCap) = False"
-  "isUntypedCap (capability.EndpointCap v va vb vc vd ve) = False"
-  "isUntypedCap (capability.NotificationCap v va vb vc) = False"
-  "isUntypedCap (capability.ReplyCap v1 v2 v3) = False"
-  "isUntypedCap (capability.CNodeCap x1 x2 x3 x4) = False"
-  "isUntypedCap (capability.ThreadCap v) = False"
-  "isUntypedCap (capability.DomainCap) = False"
-  "isUntypedCap (capability.IRQControlCap) = False"
-  "isUntypedCap (capability.IRQHandlerCap y1) = False"
-  "isUntypedCap (capability.Zombie v va1 vb1) = False"
-  "isUntypedCap (capability.ArchObjectCap z) = False"
-  by (simp_all add: isUntypedCap_def split: capability.splits)
-
 lemma cap_relation_masked_as_full:
   "\<lbrakk>cap_relation src_cap src_cap';cap_relation c c'\<rbrakk> \<Longrightarrow>
     cap_relation (masked_as_full src_cap c) (maskedAsFull src_cap' c')"

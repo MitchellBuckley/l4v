@@ -130,15 +130,6 @@ lemma is_frame_type_isFrameType_eq[simp]:
    (Types_H.isFrameType (toEnum (unat arg0)))"
   by (simp add: APIType_map2_def is_frame_type_defs split: apiobject_type.splits object_type.splits)+
 
-(* FIXME: remove *)
-lemmas APIType_capBits = objSize_eq_capBits
-
-(* FIXME: move *)
-lemma corres_whenE_throw_merge:
-  "corres r P P' f (doE _ \<leftarrow> whenE (A \<or> B) (throwError e); h odE)
-  \<Longrightarrow> corres r P P' f (doE _ \<leftarrow> whenE A (throwError e); _ \<leftarrow>  whenE B (throwError e); h odE)"
-  by (auto simp: whenE_def split: if_splits)
-
 lemma decodeUntypedInvocation_corres:
   assumes cap_rel: "list_all2 cap_relation cs cs'"
   shows "corres
@@ -1358,16 +1349,6 @@ crunches insertNewCap
   (simp: crunch_simps zipWithM_x_mapM wp: crunch_wps)
 
 crunch exst[wp]: set_cdt "\<lambda>s. P (exst s)"
-
-(*FIXME: Move to StateRelation*)
-lemma state_relation_schact[elim!]:
-  "(s,s') \<in> state_relation \<Longrightarrow> sched_act_relation (scheduler_action s) (ksSchedulerAction s')"
-  apply (simp add: state_relation_def)
-  done
-
-lemma state_relation_queues[elim!]: "(s,s') \<in> state_relation \<Longrightarrow> ready_queues_relation (ready_queues s) (ksReadyQueues s')"
-  apply (simp add: state_relation_def)
-  done
 
 lemma set_original_symb_exec_l:
   "corres_underlying {(s, s'). f (kheap s) (exst s) s'} nf nf' dc P P' (set_original p b) (return x)"
@@ -2708,11 +2689,6 @@ lemma insertNewCap_valid_mdb:
     apply simp
   apply (simp add:Int_ac)
   done
-
-(* FIXME: move *)
-lemma no_default_zombie:
-  "cap_relation (default_cap tp p sz d) cap \<Longrightarrow> \<not>isZombie cap"
-  by (cases tp, auto simp: isCap_simps)
 
 crunch typ_at'[wp]: updateNewFreeIndex "\<lambda>s. P (typ_at' T p s)"
 lemmas updateNewFreeIndex_typ_ats[wp] = typ_at_lifts[OF updateNewFreeIndex_typ_at']

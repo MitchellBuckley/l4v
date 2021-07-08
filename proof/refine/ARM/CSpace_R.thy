@@ -2610,12 +2610,6 @@ lemma setUntypedCapAsFull_ko_wp_at'[wp]:
   apply (wp setCTE_ko_wp_at_live setCTE_ko_wp_at_live)
   done
 
-(*FIXME:MOVE*)
-lemma zobj_refs'_capFreeIndex_update[simp]:
-  "isUntypedCap ctecap \<Longrightarrow>
-   zobj_refs' (capFreeIndex_update f (ctecap)) = zobj_refs' ctecap"
-  by (case_tac ctecap,auto simp:isCap_simps)
-
 lemma setUntypedCapAsFull_if_live_then_nonz_cap':
   "\<lbrace>\<lambda>s. if_live_then_nonz_cap' s \<and> cte_wp_at' ((=) srcCTE) src s\<rbrace>
    setUntypedCapAsFull (cteCap srcCTE) cap src

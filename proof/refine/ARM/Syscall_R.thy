@@ -1150,16 +1150,6 @@ lemma invs_weak_sch_act_wf_strg:
   "invs' s \<longrightarrow> weak_sch_act_wf (ksSchedulerAction s) s"
   by clarsimp
 
-(* FIXME: move *)
-lemma rct_sch_act_simple[simp]:
-  "ksSchedulerAction s = ResumeCurrentThread \<Longrightarrow> sch_act_simple s"
-  by (simp add: sch_act_simple_def)
-
-(* FIXME: move *)
-lemma rct_sch_act_sane[simp]:
-  "ksSchedulerAction s = ResumeCurrentThread \<Longrightarrow> sch_act_sane s"
-  by (simp add: sch_act_sane_def)
-
 lemma lookupCapAndSlot_real_cte_at'[wp]:
   "\<lbrace>valid_objs'\<rbrace> lookupCapAndSlot thread ptr \<lbrace>\<lambda>rv. real_cte_at' (snd rv)\<rbrace>, -"
 apply (simp add: lookupCapAndSlot_def lookupSlotForThread_def)

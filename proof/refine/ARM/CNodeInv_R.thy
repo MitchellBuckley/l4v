@@ -85,46 +85,6 @@ lemma cap_relation_NullCap:
   apply (clarsimp simp: ARM_H.updateCapData_def isCap_simps split del: if_split)
   done
 
-(* Sometimes I need something about the state. This is neater (IMHO) and req *)
-lemma whenE_throwError_corres':
-  assumes P: "frel f f'"
-  assumes Q: "\<And>s s'. \<lbrakk>(s, s') \<in> state_relation; R s; R' s'\<rbrakk> \<Longrightarrow> P = P'"
-  assumes R: "\<not> P \<Longrightarrow> corres (frel \<oplus> rvr) Q Q' m m'"
-  shows      "corres (frel \<oplus> rvr) (R and Q) (R' and Q')
-                     (whenE P  (throwError f ) >>=E (\<lambda>_. m ))
-                     (whenE P' (throwError f') >>=E (\<lambda>_. m'))"
-  unfolding whenE_def
-  apply (rule corres_req)
-   apply (erule Q)
-    apply simp
-   apply simp
-  apply (cases P)
-   apply (simp add: P)
-  apply simp
-  apply (erule corres_guard_imp [OF R])
-   apply simp
-  apply simp
-  done
-
-(* FIXME: move *)
-lemma corres_split_liftM2:
-  assumes    corr: "corres (\<lambda>x y. r' x (f y)) P P' a c"
-  and r1: "\<And>rv rv'. r' rv rv' \<Longrightarrow> corres r (R rv) (R' rv') (b rv) (d rv')"
-  and h1: "\<lbrace>Q\<rbrace> a \<lbrace>R\<rbrace>" and h2: "\<lbrace>Q'\<rbrace> c \<lbrace>\<lambda>x. R' (f x)\<rbrace>"
-  shows "corres r (P and Q) (P' and Q') (a >>= b) (liftM f c >>= d)"
-  apply (rule corres_guard_imp)
-  apply (rule corres_split_deprecated [OF _ _ h1])
-       prefer 2
-       apply (simp add: o_def)
-       apply (rule corr)
-      apply (erule r1)
-     apply wp
-    apply (simp add: o_def)
-    apply (rule h2)
-   apply simp
-  apply simp
-  done
-
 lemma cap_relation_NullCapI:
   "cap_relation c c' \<Longrightarrow> (c = cap.NullCap) = (c' = NullCap)"
   by (cases c, auto)
@@ -549,11 +509,6 @@ crunch typ_at[wp]: cancel_ipc "\<lambda>s. P (typ_at T p s)"
 declare if_split [split]
 
 text \<open>Proving desired properties about rec_del/cap_delete\<close>
-
-declare of_nat_power [simp del]
-
-(* FIXME: pull up *)
-declare word_unat_power [symmetric, simp del]
 
 text \<open>Proving desired properties about recursiveDelete/cteDelete\<close>
 
@@ -6245,7 +6200,6 @@ proof (induct arbitrary: P p rule: finalise_spec_induct2)
     apply (clarsimp simp: cte_wp_at_ctes_of)
     apply (rule conjI, clarsimp simp: removeable'_def)
     apply (clarsimp simp: conj_comms)
-    apply (rule conjI, erule ctes_of_valid', clarsimp)
     apply (rule conjI, clarsimp)
     apply fastforce
     done

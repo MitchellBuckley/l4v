@@ -696,5 +696,41 @@ lemma ghost_relation_typ_at:
    apply (intro conjI impI iffI allI; force)
    done
 
+lemma pspace_relation_None:
+  "\<lbrakk>pspace_relation p p'; p' ptr = None \<rbrakk> \<Longrightarrow> p ptr = None"
+  apply (rule not_Some_eq[THEN iffD1, OF allI, OF notI])
+  apply (drule(1) pspace_relation_absD)
+   apply (case_tac y; clarsimp simp: cte_map_def of_bl_def well_formed_cnode_n_def split: if_splits)
+   subgoal for n
+    apply (drule spec[of _ ptr])
+    apply (drule spec)
+    apply clarsimp
+    apply (drule spec[of _ "replicate n False"])
+    apply (drule mp[OF _ refl])
+     apply (drule mp)
+    subgoal premises by (induct n; simp)
+    apply clarsimp
+    done
+  subgoal for x
+     apply (cases x; clarsimp)
+   apply ((drule spec[of _ 0], fastforce)+)[2]
+   apply (drule spec[of _ ptr])
+   apply (drule spec)
+   apply clarsimp
+   apply (drule mp[OF _ refl])
+   apply (drule spec[of _ 0])
+   subgoal for _ sz by (cases sz; simp add: pageBits_def)
+   done
+  done
+
+lemma state_relation_schact[elim!]:
+  "(s,s') \<in> state_relation \<Longrightarrow> sched_act_relation (scheduler_action s) (ksSchedulerAction s')"
+  apply (simp add: state_relation_def)
+  done
+
+lemma state_relation_queues[elim!]: "(s,s') \<in> state_relation \<Longrightarrow> ready_queues_relation (ready_queues s) (ksReadyQueues s')"
+  apply (simp add: state_relation_def)
+  done
+
 end
 end

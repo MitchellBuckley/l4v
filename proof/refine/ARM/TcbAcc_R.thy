@@ -149,22 +149,6 @@ lemma doMachineOp_irq_states':
   apply simp
   done
 
-lemma dmo_invs':
-  assumes masks: "\<And>P. \<lbrace>\<lambda>s. P (irq_masks s)\<rbrace> f \<lbrace>\<lambda>_ s. P (irq_masks s)\<rbrace>"
-  shows "\<lbrace>(\<lambda>s. \<forall>m. \<forall>(r,m')\<in>fst (f m). \<forall>p.
-             pointerInUserData p s \<or> pointerInDeviceData p s \<or>
-             underlying_memory m' p = underlying_memory m p) and
-          invs'\<rbrace> doMachineOp f \<lbrace>\<lambda>r. invs'\<rbrace>"
-  apply (simp add: doMachineOp_def split_def)
-  apply wp
-  apply clarsimp
-  apply (subst invs'_machine)
-    apply (drule use_valid)
-      apply (rule_tac P="\<lambda>m. m = irq_masks (ksMachineState s)" in masks, simp+)
-   apply (fastforce simp add: valid_machine_state'_def)
-  apply assumption
-  done
-
 lemma dmo_invs_no_cicd':
   assumes masks: "\<And>P. \<lbrace>\<lambda>s. P (irq_masks s)\<rbrace> f \<lbrace>\<lambda>_ s. P (irq_masks s)\<rbrace>"
   shows "\<lbrace>(\<lambda>s. \<forall>m. \<forall>(r,m')\<in>fst (f m). \<forall>p.
@@ -1001,58 +985,6 @@ lemma threadSet_obj_at'_really_strongest:
   apply wp
   done
 
-(* FIXME: move *)
-lemma tcb_at_typ_at':
-  "tcb_at' p s = typ_at' TCBT p s"
-  unfolding typ_at'_def
-  apply rule
-  apply (clarsimp simp add: obj_at'_def ko_wp_at'_def projectKOs)
-  apply (clarsimp simp add: obj_at'_def ko_wp_at'_def projectKOs)
-  apply (case_tac ko, simp_all)
-  done
-
-(* FIXME: move *)
-lemma not_obj_at':
-  "(\<not>obj_at' (\<lambda>tcb::tcb. P tcb) t s) = (\<not>typ_at' TCBT t s \<or> obj_at' (Not \<circ> P) t s)"
-  apply (simp add: obj_at'_real_def projectKOs
-                   typ_at'_def ko_wp_at'_def objBits_simps)
-  apply (rule iffI)
-   apply (clarsimp)
-   apply (case_tac ko)
-   apply (clarsimp)+
-  done
-
-(* FIXME: move *)
-lemma not_obj_at_elim':
-  assumes typat: "typ_at' TCBT t s"
-      and nobj: "\<not>obj_at' (\<lambda>tcb::tcb. P tcb) t s"
-    shows "obj_at' (Not \<circ> P) t s"
-  using assms
-  apply -
-  apply (drule not_obj_at' [THEN iffD1])
-  apply (clarsimp)
-  done
-
-(* FIXME: move *)
-lemmas tcb_at_not_obj_at_elim' = not_obj_at_elim' [OF tcb_at_typ_at' [THEN iffD1]]
-
-(* FIXME: move *)
-lemma lift_neg_pred_tcb_at':
-  assumes typat: "\<And>P T p. \<lbrace>\<lambda>s. P (typ_at' T p s)\<rbrace> f \<lbrace>\<lambda>_ s. P (typ_at' T p s)\<rbrace>"
-      and sttcb: "\<And>S p. \<lbrace>pred_tcb_at' proj S p\<rbrace> f \<lbrace>\<lambda>_. pred_tcb_at' proj S p\<rbrace>"
-    shows "\<lbrace>\<lambda>s. P (pred_tcb_at' proj S p s)\<rbrace> f \<lbrace>\<lambda>_ s. P (pred_tcb_at' proj S p s)\<rbrace>"
-  apply (rule_tac P=P in P_bool_lift)
-   apply (rule sttcb)
-  apply (simp add: pred_tcb_at'_def not_obj_at')
-  apply (wp hoare_convert_imp)
-    apply (rule typat)
-   prefer 2
-   apply assumption
-  apply (rule hoare_chain [OF sttcb])
-   apply (fastforce simp: pred_tcb_at'_def comp_def)
-  apply (clarsimp simp: pred_tcb_at'_def elim!: obj_at'_weakenE)
-  done
-
 lemma threadSet_obj_at'_strongish[wp]:
   "\<lbrace>obj_at' (\<lambda>obj. if t = t' then P (f obj) else P obj) t'\<rbrace>
      threadSet f t \<lbrace>\<lambda>rv. obj_at' P t'\<rbrace>"
@@ -1821,11 +1753,6 @@ proof -
                              projectKO_eq project_inject)
      done
 qed
-
-definition
-  weak_sch_act_wf :: "scheduler_action \<Rightarrow> kernel_state \<Rightarrow> bool"
-where
- "weak_sch_act_wf sa = (\<lambda>s. \<forall>t. sa = SwitchToThread t \<longrightarrow> st_tcb_at' runnable' t s \<and> tcb_in_cur_domain' t s)"
 
 lemma weak_sch_act_wf_updateDomainTime[simp]:
   "weak_sch_act_wf m (ksDomainTime_update f s) = weak_sch_act_wf m s"
@@ -4538,6 +4465,14 @@ lemmas ethread_set_corres =
 
 lemma archTcbUpdate_aux2: "(\<lambda>tcb. tcb\<lparr> tcbArch := f (tcbArch tcb)\<rparr>) = tcbArch_update f"
   by (rule ext, case_tac tcb, simp)
+
+lemma threadSet_qsL1[wp]:
+  "\<lbrace>\<lambda>s. P (ksReadyQueuesL1Bitmap s)\<rbrace> threadSet f t \<lbrace>\<lambda>rv s. P (ksReadyQueuesL1Bitmap s)\<rbrace>"
+  by (simp add: threadSet_def | wp updateObject_default_inv)+
+
+lemma threadSet_qsL2[wp]:
+  "\<lbrace>\<lambda>s. P (ksReadyQueuesL2Bitmap s)\<rbrace> threadSet f t \<lbrace>\<lambda>rv s. P (ksReadyQueuesL2Bitmap s)\<rbrace>"
+  by (simp add: threadSet_def | wp updateObject_default_inv)+
 
 end
 end
