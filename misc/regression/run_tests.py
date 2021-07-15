@@ -47,9 +47,13 @@ ANSI_WHITE = "\033[37m"
 ANSI_BOLD = "\033[1m"
 
 
-def output_color(color, s):
+def running_on_github():
+    return os.environ.get("GITHUB_REPOSITORY") != None
+
+
+def output_color(color, s, github=running_on_github()):
     """Wrap the given string in the given color."""
-    if sys.stdout.isatty():
+    if sys.stdout.isatty() or github:
         return color + s + ANSI_RESET
     return s
 
@@ -176,6 +180,7 @@ def run_test(test, status_queue, kill_switch,
         else:
             path = ""
         print("    command: %s%s" % (test.command, path))
+        sys.stdout.flush()
 
     # Determine where stdout should go. We can't print it live to stdout and
     # also capture it, unfortunately.
@@ -194,6 +199,7 @@ def run_test(test, status_queue, kill_switch,
         output = "Exception while running test:\n\n%s" % (traceback.format_exc())
         if verbose:
             print(output)
+            sys.stdout.flush()
         status_queue.put({'name': test.name,
                           'status': ERROR,
                           'output': output,
@@ -320,6 +326,7 @@ def run_test(test, status_queue, kill_switch,
 
     if verbose and github:
         print("::endgroup::")
+        sys.stdout.flush()
 
     status_queue.put({'name': test.name,
                       'status': test_status[0],
@@ -471,7 +478,7 @@ def main():
     if args.scale_timeouts <= 0:
         parser.error("--scale-timeouts value must be greater than 0")
 
-    github = os.environ.get("GITHUB_REPOSITORY") != None
+    github = running_on_github()
 
     # Search for test files:
     test_xml = sorted(rglob(args.directory, "tests.xml"))
@@ -537,6 +544,7 @@ def main():
     if bad_names:
         sys.stderr.write("Warning: These tests are excluded/removed, but do not exist: %s\n" %
                          (", ".join(sorted(bad_names))))
+        sys.stderr.flush()
 
     if args.dry_run:
         if args.dot:
