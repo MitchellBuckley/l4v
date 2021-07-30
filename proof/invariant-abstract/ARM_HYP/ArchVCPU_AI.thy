@@ -1384,103 +1384,99 @@ crunches dissociate_vcpu_tcb for cur_thread[wp]: "\<lambda>s. P (cur_thread s)"
   (wp: crunch_wps)
 
 lemma helper:
-  "arch_vcpu_tcb_valid
-               (s\<lparr>arch_state :=
-                    arm_current_vcpu_update Map.empty
-                     (arch_state s)\<rparr>) = obj_at (\<lambda>obj. \<forall>t. obj = TCB t \<longrightarrow>
-           ARM_A.tcb_vcpu (tcb_arch t) = None) (cur_thread s) s"
-  by (clarsimp simp: arch_vcpu_tcb_valid_def obj_at_def arch_vcpu_tcb_valid_obj_def
-                        )
-lemma vcpu_disablesssssss_arch_vcpu_tcb_valid:
-  "vcpu_disable None \<lbrace>\<lambda>s. obj_at (\<lambda>obj. \<forall>t. obj = TCB t \<longrightarrow> tcb_vcpu (tcb_arch t) = None) (cur_thread s) s\<rbrace>"
-  apply (simp add: vcpu_disable_def)
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp simp: helper)
-  apply (wps)
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp simp: helper)
-  apply (wps)
-   apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp simp: helper)
-  apply simp
-  done
+  "arch_vcpu_tcb_valid (s\<lparr>arch_state := arm_current_vcpu_update Map.empty (arch_state s)\<rparr>)
+  = obj_at (\<lambda>obj. \<forall>t. obj = TCB t \<longrightarrow> ARM_A.tcb_vcpu (tcb_arch t) = None) (cur_thread s) s"
+  by (clarsimp simp: arch_vcpu_tcb_valid_def obj_at_def arch_vcpu_tcb_valid_obj_def)
+
 
 lemma vcpu_invalidate_activesdafa_sdf_wp[wp]:
   "\<lbrace>\<lambda>s. P None\<rbrace>
-          vcpu_invalidate_active
-          \<lbrace>\<lambda>y s. P (cur_vcpu_to_tcb_vcpu
-            (arm_current_vcpu (arch_state s)))\<rbrace>"
+   vcpu_invalidate_active
+   \<lbrace>\<lambda>y s. P (cur_vcpu_to_tcb_vcpu (arm_current_vcpu (arch_state s)))\<rbrace>"
   apply (simp add: vcpu_invalidate_active_def)
-  by (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp simp: helper
-                wp: vcpu_disablesssssss_arch_vcpu_tcb_valid)
+  by (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp simp: helper)
 
-lemma vcpu_invalidate_actsdfivesdafa_sdf_wp[wp]:
-  "\<lbrace>\<lambda>s. obj_at
-           (\<lambda>obj. \<forall>t. obj = TCB t \<longrightarrow>
-                      tcb_vcpu (tcb_arch t) = None)
-           (cur_thread s) s\<rbrace>
-          vcpu_invalidate_active
-          \<lbrace>\<lambda>y . arch_vcpu_tcb_valid\<rbrace>"
-  apply (simp add: vcpu_invalidate_active_def)
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp simp: helper
-                wp: vcpu_disablesssssss_arch_vcpu_tcb_valid)
-  done
-
-lemma dissociate_vcpu_tcbFFFFF:
-  "\<lbrace>\<lambda>s. if (\<exists>aa. arm_current_vcpu (arch_state s) = Some (a, aa)) then (False) else (cur_vcpu_to_tcb_vcpu
-             (arm_current_vcpu (arch_state s)) = Some asd)\<rbrace>
-          dissociate_vcpu_tcb a b
-          \<lbrace>\<lambda>y s. cur_vcpu_to_tcb_vcpu
-             (arm_current_vcpu (arch_state s)) = Some asd\<rbrace>"
-  apply (simp add: dissociate_vcpu_tcb_def)
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp get_vcpu_wp arch_thread_get_wp)
-  done
-
-lemma dissociate_vcpu_tcbGGGGG:
-  "\<lbrace>\<lambda>s. if (b = cur_thread s) then (cur_vcpu_to_tcb_vcpu
-            (arm_current_vcpu (arch_state s)) =
-           None) else (if (\<exists>aa. arm_current_vcpu (arch_state s) = Some (a, aa)) then
-  (obj_at
-            (\<lambda>obj. \<forall>t. obj = TCB t \<longrightarrow>
-                       tcb_vcpu (tcb_arch t) = None)
-            (cur_thread s) s) else (arch_vcpu_tcb_valid s))\<rbrace>
-          dissociate_vcpu_tcb a b
-          \<lbrace>\<lambda>y. arch_vcpu_tcb_valid\<rbrace>"
+lemma dissociate_vcpu_tcbsdfsdf[wp]:
+  "\<lbrace>\<lambda>s. if \<exists>a. arm_current_vcpu (arch_state s) = Some (v, a)
+            then P None
+            else (P (cur_vcpu_to_tcb_vcpu (arm_current_vcpu (arch_state s))))\<rbrace>
+   dissociate_vcpu_tcb v t
+   \<lbrace>\<lambda>y s. P (cur_vcpu_to_tcb_vcpu (arm_current_vcpu (arch_state s)))\<rbrace>"
   supply if_split [split del]
   apply (simp add: dissociate_vcpu_tcb_def)
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp get_vcpu_wp arch_thread_get_wp
-                    hoare_vcg_imp_lift' hoare_vcg_if_lift2)
+  apply (wpsimp wp: get_vcpu_wp arch_thread_get_wp)
+  by (simp split: if_split)
+
+lemma vcpu_invalidate_obj_at[wp]:
+  "\<lbrace>obj_at P t\<rbrace>
+    vcpu_invalidate_active \<lbrace>\<lambda>rv. obj_at P t\<rbrace>"
+  unfolding vcpu_invalidate_active_def vcpu_disable_def by wpsimp
+
+lemma sdfjsfsfsfkh:
+  "\<lbrace>obj_at (\<lambda>obj. \<exists>v. obj = ArchObj (VCPU v) \<and> (a \<noteq> x2 \<longrightarrow> vcpu_tcb v = None)) a\<rbrace>
+   dissociate_vcpu_tcb x2 b
+   \<lbrace>\<lambda>rv. obj_at (\<lambda>obj. \<exists>v. obj = ArchObj (VCPU v) \<and> vcpu_tcb v = None) a\<rbrace>"
+     supply if_split [split del]
+  apply (simp add: dissociate_vcpu_tcb_def)
+  apply (wpsimp wp: get_vcpu_wp arch_thread_get_wp as_user.aobj_at)
+  apply (clarsimp simp: arch_obj_pred_def non_arch_obj_def)
+  apply (wpsimp simp: set_vcpu_def wp: set_object_wp arch_thread_set_wp)
+  apply (wpsimp simp: set_vcpu_def wp: set_object_wp arch_thread_set_wp)
+    apply (rule_tac Q="\<lambda>_ s. vcpu_at a s \<and> tcb_at b s \<and> (if (a = x2) then True else (obj_at (\<lambda>obj. \<exists>v. obj = ArchObj (VCPU v) \<and> vcpu_tcb v = None) a s))" in hoare_strengthen_post[rotated])
+        apply (auto simp: obj_at_def is_tcb split: if_splits)[1]
+       apply (wpsimp wp: hoare_vcg_if_lift2 hoare_vcg_imp_lift')
+      apply (wpsimp wp: get_vcpu_wp arch_thread_get_wp)+
+  apply (auto split: if_splits simp: obj_at_def)
   done
 
-lemma arch_perform_invocation_arch_vcpu_tcb_valid:
-  "\<lbrace>invs and ct_active and valid_vcpu_invocation x6 and arch_vcpu_tcb_valid\<rbrace>
-     associate_vcpu_tcb a b
+(* NOTE: This precondition is complicated because it is very close to a weakest precondition and
+   covers an awkward case that may not have been considered during kernel design.
+
+   It actually makes sense! We will attempt to bind v and t.
+   If t is the current thread then
+    * v should be the current active vcpu
+    * the current active vcpu should not be bound to a tcb, otherwise it will be inactivated.
+    * the vcpu of the current thread should not be bound to v because that would cause v to be
+      made inactive.
+*)
+
+lemma associate_vcpu_tcb_arch_vcpu_tcb_valid:
+  "\<lbrace>\<lambda>s. if (t = cur_thread s)
+        then (cur_vcpu_to_tcb_vcpu (arm_current_vcpu (arch_state s)) = Some v \<and>
+              obj_at (\<lambda>obj. \<exists>v. obj = ArchObj (VCPU v) \<and> vcpu_tcb v = None) v s \<and>
+              obj_at (\<lambda>obj. \<forall>tcb. obj = (TCB tcb) \<longrightarrow> (\<forall>x. tcb_vcpu (tcb_arch tcb) = Some x \<longrightarrow>
+                            (\<forall>a. arm_current_vcpu (arch_state s) \<noteq> Some (x, a)))) t s)
+        else (arch_vcpu_tcb_valid s \<and> sym_refs (state_hyp_refs_of s))\<rbrace>
+     associate_vcpu_tcb v t
    \<lbrace>\<lambda>y. arch_vcpu_tcb_valid\<rbrace>"
+  supply if_split [split del]
   apply (simp add: associate_vcpu_tcb_def)
   apply wpsimp
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp dissociate_vcpu_tcbFFFFF
-                    dissociate_vcpu_tcbGGGGG
-                    hoare_vcg_imp_lift')
-  apply (wpsimp wp: set_object_wp arch_thread_set_tcb_vcpu_update_Some_wp dissociate_vcpu_tcbFFFFF
-                    dissociate_vcpu_tcbGGGGG
-                    hoare_vcg_imp_lift')
+       apply (wpsimp wp: arch_thread_set_tcb_vcpu_update_Some_wp)
+      apply (wpsimp wp: hoare_vcg_if_lift2 hoare_vcg_imp_lift')
      apply (wpsimp wp: get_vcpu_wp)
-  apply (wpsimp wp: hoare_vcg_imp_lift' hoare_vcg_all_lift)
-  oops
+    apply (rule_tac Q="\<lambda>_ s. if (t = cur_thread s) then ((cur_vcpu_to_tcb_vcpu
+                (arm_current_vcpu (arch_state s)) =
+               Some v) \<and> (obj_at (\<lambda>obj. \<exists>v. obj = ArchObj (VCPU v) \<and> vcpu_tcb v = None) v s)) else (arch_vcpu_tcb_valid s \<and> sym_refs (state_hyp_refs_of s))" in hoare_strengthen_post[rotated])
+     apply (clarsimp simp: obj_at_def split: if_splits)
+    apply (wpsimp wp: hoare_vcg_imp_lift' hoare_vcg_if_lift2 sdfjsfsfsfkh)
+   apply (wpsimp wp: arch_thread_get_wp)
+  apply (auto)[1]
+   prefer 2
+   apply (clarsimp simp: obj_at_def)
+  apply (clarsimp simp: obj_at_def split: if_split)
+  done
 
 crunches vgic_update_lr, read_vcpu_register, invoke_vcpu_write_register for arch_vcpu_tcb_valid[wp]: arch_vcpu_tcb_valid
   (wp: crunch_wps)
 
 lemma perform_vcpu_invocation_arch_vcpu_tcb_valid:
-  "\<lbrace>arch_vcpu_tcb_valid\<rbrace>
-     associate_vcpu_tcb v t
-   \<lbrace>\<lambda>y. arch_vcpu_tcb_valid\<rbrace>"
-  unfolding associate_vcpu_tcb_def
-  apply wpsimp
-
-lemma perform_vcpu_invocation_arch_vcpu_tcb_valid:
-  "\<lbrace>arch_vcpu_tcb_valid\<rbrace>
+  "\<lbrace>arch_vcpu_tcb_valid and valid_vcpu_invocation x6\<rbrace>
      perform_vcpu_invocation x6
    \<lbrace>\<lambda>y. arch_vcpu_tcb_valid\<rbrace>"
   apply (simp add: perform_vcpu_invocation_def valid_vcpu_invocation_def)
   apply (case_tac x6; simp)
+      apply (wpsimp wp: associate_vcpu_tcb_arch_vcpu_tcb_valid)
   subgoal sorry (* non-trivial, maybe impossible. See explanation below. *)
      apply (wpsimp simp: invoke_vcpu_inject_irq_def)
      apply (wpsimp wp: get_cap_wp simp: invoke_vcpu_read_register_def)
@@ -1488,18 +1484,8 @@ lemma perform_vcpu_invocation_arch_vcpu_tcb_valid:
    apply (wpsimp simp: invoke_vcpu_ack_vppi_def)
   done
 
-(* At first glance, it seems as though the invocation "VCPUSetTCB vcpu tcb" can
-   break the invariant. More investigation is required to confirm/deny this.
-
-   It appears that associate_vcpu_tcb will dissociate the indicated vcpu (resp. tcb) from its
-   existing bound tcb (resp. vcpu) before binding them together.
-   If it detects that the current vcpu exists, it will invalidate it using vcpu_invalidate_active.
-   This will set the current vcpu to None, and the remaining code in dissociate_vcpu_tcb
-   will set the vcpu of the associated thread to None. But there is no guarantee that the associated
-   thread is the current thread!
-
-   So it appears that the code needs more checks, or we need to strengthen the invariant. What we
-   have is cur_thread points to cur_vcpu, we might also need cur_vcpu points to cur_thread.
+(*
+   It appears impossible to bind any vcpu to the current thread and also maintain this invariant.
 *)
 
 lemma arch_perform_invocation_arch_vcpu_tcb_valid:
@@ -1517,7 +1503,7 @@ lemma arch_perform_invocation_arch_vcpu_tcb_valid:
   subgoal sorry (* annoying, but easy *)
    apply (simp add: perform_asid_pool_invocation_def)
    apply (wpsimp wp: get_cap_wp)
-  apply (wpsimp wp: perform_vcpu_invocation_arch_vcpu_tcb_valid)
+  apply (wpsimp wp: perform_vcpu_invocation_arch_vcpu_tcb_valid simp: valid_arch_inv_def)
   done
 
 lemma perform_invocation_arch_vcpu_tcb_valid:
