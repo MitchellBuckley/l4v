@@ -24,17 +24,15 @@ This module uses the C preprocessor to select a target architecture.
 >         tcbFaultHandler, tcbIPCBuffer, tcbTimeSlice,
 >         decodeTCBInvocation, invokeTCB,
 >         getExtraCPtrs, getExtraCPtr, lookupExtraCaps, setExtraBadge,
->         decodeDomainInvocation,
 >         archThreadSet, archThreadGet
 >     ) where
 
 \begin{impdetails}
 
 % {-# BOOT-IMPORTS: SEL4.API.Types SEL4.API.Failures SEL4.Machine SEL4.Model SEL4.Object.Structures SEL4.API.Invocation #-}
-% {-# BOOT-EXPORTS: threadGet threadSet asUser setMRs setMessageInfo getThreadCSpaceRoot getThreadVSpaceRoot decodeTCBInvocation invokeTCB setupCallerCap getThreadCallerSlot getThreadReplySlot getThreadBufferSlot decodeDomainInvocation archThreadSet archThreadGet sanitiseRegister #-}
+% {-# BOOT-EXPORTS: threadGet threadSet asUser setMRs setMessageInfo getThreadCSpaceRoot getThreadVSpaceRoot decodeTCBInvocation invokeTCB setupCallerCap getThreadCallerSlot getThreadReplySlot getThreadBufferSlot archThreadSet archThreadGet sanitiseRegister #-}
 
 > import Prelude hiding (Word)
-> import SEL4.Config (numDomains)
 > import SEL4.API.Types
 > import SEL4.API.Failures
 > import SEL4.API.Invocation
@@ -74,8 +72,8 @@ There are eleven types of invocation for a thread control block. All require wri
 >         TCBReadRegisters -> decodeReadRegisters args cap
 >         TCBWriteRegisters -> decodeWriteRegisters args cap
 >         TCBCopyRegisters -> decodeCopyRegisters args cap $ map fst extraCaps
->         TCBSuspend -> return $! Suspend (capTCBPtr cap)
->         TCBResume -> return $! Resume (capTCBPtr cap)
+>         TCBSuspend -> return $ Suspend (capTCBPtr cap)
+>         TCBResume -> return $ Resume (capTCBPtr cap)
 >         TCBConfigure -> decodeTCBConfigure args cap slot extraCaps
 >         TCBSetPriority -> decodeSetPriority args cap extraCaps
 >         TCBSetMCPriority -> decodeSetMCPriority args cap extraCaps
@@ -85,6 +83,7 @@ There are eleven types of invocation for a thread control block. All require wri
 >         TCBBindNotification -> decodeBindNotification cap extraCaps
 >         TCBUnbindNotification -> decodeUnbindNotification cap
 >         TCBSetTLSBase -> decodeSetTLSBase args cap
+>         TCBSetFlags -> decodeSetFlags args cap
 >         _ -> throw IllegalOperation
 
 \subsubsection{Reading, Writing and Copying Registers}
@@ -208,7 +207,7 @@ Setting the thread's priority is only allowed if the new priority is lower than 
 >         ThreadCap { capTCBPtr = tcbPtr } -> return tcbPtr
 >         _ -> throw $ InvalidCapability 1
 >     checkPrio newPrio authTCB
->     return $! ThreadControl {
+>     return $ ThreadControl {
 >         tcThread = capTCBPtr cap,
 >--       tcThreadCapSlot = error "tcThreadCapSlot unused", In theory tcThreadCapSlot should never been evaluated by lazy evaluation. However, it was evaluated when running sel4 haskell kernel. So it is wired. Thus I change this to 0. I hope this can be changed back once we find out why this is evaluated. (by Xin)
 >         tcThreadCapSlot = 0,
@@ -227,7 +226,7 @@ Setting the thread's priority is only allowed if the new priority is lower than 
 >         ThreadCap { capTCBPtr = tcbPtr } -> return tcbPtr
 >         _ -> throw $ InvalidCapability 1
 >     checkPrio newMCP authTCB
->     return $! ThreadControl {
+>     return $ ThreadControl {
 >         tcThread = capTCBPtr cap,
 >         tcThreadCapSlot = 0,
 >         tcNewFaultEP = Nothing,
@@ -248,7 +247,7 @@ The "SetSchedParams" call sets both the priority and the MCP in a single call.
 >         _ -> throw $ InvalidCapability 1
 >     checkPrio newMCP authTCB
 >     checkPrio newPrio authTCB
->     return $! ThreadControl {
+>     return $ ThreadControl {
 >         tcThread = capTCBPtr cap,
 >         tcThreadCapSlot = 0,
 >         tcNewFaultEP = Nothing,
@@ -377,6 +376,14 @@ This is to ensure that the source capability is not made invalid by the deletion
 >         setTLSBaseNewBase = tls_base }
 > decodeSetTLSBase _ _ = throw TruncatedMessage
 
+> decodeSetFlags :: [Word] -> Capability ->
+>         KernelF SyscallError TCBInvocation
+> decodeSetFlags (flagsClear:flagsSet:_) cap = do
+>     return $ SetFlags {
+>         setFlagsTCB = capTCBPtr cap,
+>         setFlagsClear = flagsClear,
+>         setFlagsSet = flagsSet }
+> decodeSetFlags _ _ = throw TruncatedMessage
 
 \subsection[invoke]{Performing TCB Invocations}
 
@@ -459,12 +466,16 @@ The source is suspended and the destination resumed, if requested.
 >     when suspendSource $ suspend src
 >     when resumeTarget $ restart dest
 
+Copied register values are sanitised with respect to the destination thread like in "WriteRegisters" below. Which values are legal depends on the destination thread, e.g. on whether it has a VCPU or not.
+
+>     sanitiseInfo <- getSanitiseRegisterInfo dest
+
 Transfer the frame registers.
 
 >     when transferFrame $ do
 >         mapM_ (\r -> do
 >                 v <- asUser src $ getRegister r
->                 asUser dest $ setRegister r v)
+>                 asUser dest $ setRegister r (sanitiseRegister sanitiseInfo r v))
 >             frameRegisters
 
 The target thread's program counter has been modified. Ensure that the thread will restart at that address.
@@ -477,7 +488,7 @@ Transfer the other integer registers.
 >     when transferInteger $ do
 >         mapM_ (\r -> do
 >                 v <- asUser src $ getRegister r
->                 asUser dest $ setRegister r v)
+>                 asUser dest $ setRegister r (sanitiseRegister sanitiseInfo r v))
 >             gpRegisters
 
 
@@ -540,29 +551,26 @@ Modifying the current thread may require rescheduling because modified registers
 
 > invokeTCB (SetTLSBase tcb tls_base) =
 >   withoutPreemption $ do
->     asUser tcb $ setRegister tlsBaseRegister tls_base
+>     sanitiseInfo <- getSanitiseRegisterInfo tcb
+>     asUser tcb $
+>         setRegister tlsBaseRegister (sanitiseRegister sanitiseInfo tlsBaseRegister tls_base)
 >     cur <- getCurThread
 >     when (tcb == cur) rescheduleRequired
 >     return []
 
-\subsection{Decoding Domain Invocations}
+> invokeTCB (SetFlags tcb flagsClear flagsSet) =
+>   withoutPreemption $ do
+>     newFlags <- invokeSetFlags tcb flagsClear flagsSet
+>     return [newFlags]
 
-The domain cap is invoked to set the domain of a given TCB object to a given value.
+> invokeSetFlags :: PPtr TCB -> Word -> Word -> Kernel Word
+> invokeSetFlags tcb flagsClear flagsSet = do
+>     flags <- threadGet tcbFlags tcb
+>     let newFlags = (flags .&. complement flagsClear) .|. (flagsSet .&. tcbFlagMask)
+>     setFlags tcb newFlags
+>     Arch.postSetFlags tcb newFlags
+>     return newFlags
 
-> decodeDomainInvocation :: Word -> [Word] -> [(Capability, PPtr CTE)] ->
->         KernelF SyscallError (PPtr TCB, Domain)
-> decodeDomainInvocation label args extraCaps = do
->     when (genInvocationType label /= DomainSetSet) $ throw IllegalOperation
->     domain <- case args of
->         (x:_) -> do
->                      when (fromIntegral x >= numDomains) $
->                          throw InvalidArgument { invalidArgumentNumber = 0 }
->                      return $ fromIntegral x
->         _ -> throw TruncatedMessage
->     when (null extraCaps) $ throw TruncatedMessage
->     case fst (head extraCaps) of
->         ThreadCap { capTCBPtr = ptr } -> return $ (ptr, domain)
->         _ -> throw InvalidArgument { invalidArgumentNumber = 1 }
 
 \subsection{Checks}
 

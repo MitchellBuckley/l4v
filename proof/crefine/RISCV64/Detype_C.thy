@@ -122,16 +122,6 @@ lemma h_t_valid_typ_region_bytes:
   by (simp add: valid_footprint_typ_region_bytes[OF neq_byte]
                 size_of_def)
 
-lemma proj_d_lift_state_hrs_htd_update [simp]:
-  "proj_d (lift_state (hrs_htd_update f hp)) = f (hrs_htd hp)"
-  by (cases hp) (simp add: hrs_htd_update_def proj_d_lift_state hrs_htd_def)
-
-lemma proj_d_lift_state_hrs_htd [simp]:
-  "proj_d (lift_state hp), g \<Turnstile>\<^sub>t x = hrs_htd hp, g \<Turnstile>\<^sub>t x"
-  apply (cases hp)
-  apply (simp add: proj_d_lift_state hrs_htd_def)
-  done
-
 lemma heap_list_s_heap_list':
   fixes p :: "'a :: c_type ptr"
   shows "hrs_htd hp,\<top> \<Turnstile>\<^sub>t p \<Longrightarrow>
@@ -327,7 +317,7 @@ proof -
   proof (rule disjoint_subset [rotated])
     have "objBits (undefined :: 'a) = objBitsKO ko" using po
       apply (simp add: objBits_def)
-      apply (rule objBits_type)
+      apply (rule koType_objBitsKO)
       apply (subst iffD1 [OF project_koType])
       apply (fastforce simp add: project_inject)
       apply (erule tp)
@@ -436,7 +426,8 @@ proof -
 
   ultimately show ?thesis
     unfolding tcb_ptr_to_ctcb_ptr_def
-    by (simp add: ctcb_offset_defs objBits_simps' field_simps word_plus_mono_right)
+    by (simp add: ctcb_offset_defs objBits_simps' add.commute)
+       (subst word_plus_mono_right; simp)
 qed
 
 lemma tcb_ptr_to_ctcb_ptr_in_range':
@@ -470,10 +461,10 @@ proof -
       apply simp
      apply simp
     apply (rule word_plus_mono_right)
-   apply (simp add: word_le_nat_alt unat_of_nat)
-  apply (erule is_aligned_no_wrap')
-  apply simp
-  done
+     apply (simp add: word_le_nat_alt unat_of_nat)
+    apply (erule is_aligned_no_wrap')
+    apply simp
+    done
 qed
 
 lemma valid_untyped_cap_ctcb_member:
@@ -1485,14 +1476,6 @@ lemma map_comp_restrict_map:
   "(f \<circ>\<^sub>m (restrict_map m S)) = (restrict_map (f \<circ>\<^sub>m m) S)"
   by (rule ext, simp add: restrict_map_def map_comp_def)
 
-lemma size_td_uinfo_array_tag_n_m[simp]:
-  "size_td (uinfo_array_tag_n_m (ta :: ('a :: c_type) itself) n m)
-    = size_of (TYPE('a)) * n"
-  apply (induct n)
-   apply (simp add: uinfo_array_tag_n_m_def)
-  apply (simp add: uinfo_array_tag_n_m_def size_of_def)
-  done
-
 lemma modify_machinestate_assert_cnodes_swap:
   "do x \<leftarrow> modify (ksMachineState_update f);
     y \<leftarrow> stateAssert (\<lambda>s. \<not> cNodePartialOverlap (gsCNodes s) S) []; g od
@@ -1561,14 +1544,14 @@ lemma deleteObjects_ccorres':
              doMachineOp_modify modify_modify o_def ksPSpace_ksMSu_comm
              bind_assoc modify_machinestate_assert_cnodes_swap
              modify_modify_bind)
-  apply (rule ccorres_stateAssert_fwd)
+  apply (rule ccorres_stateAssert_fwd)+
   apply (rule ccorres_stateAssert_after)
   apply (rule ccorres_from_vcg)
   apply (rule allI, rule conseqPre, vcg)
   apply (clarsimp simp: in_monad)
-  apply (rule bexI [rotated])
-   apply (rule iffD2 [OF in_monad(20)])
-   apply (rule conjI [OF refl refl])
+  apply (rule bexI[rotated])
+   apply (rule iffD2[OF in_modify])
+   apply (rule conjI[OF refl refl])
   apply (clarsimp simp: simpler_modify_def)
 proof -
   let ?mmu = "(\<lambda>h x. if ptr \<le> x \<and> x \<le> ptr + 2 ^ bits - 1 then 0 else h x)"
@@ -1697,35 +1680,11 @@ proof -
     done
 
   moreover
-  from invs have "valid_queues s" ..
-  hence "\<And>p. \<forall>t \<in> set (ksReadyQueues s p). tcb_at' t s \<and> ko_wp_at' live' t s"
-    apply (clarsimp simp: valid_queues_def valid_queues_no_bitmap_def)
-    apply (drule spec, drule spec)
-    apply clarsimp
-    apply (drule (1) bspec)
-    apply (rule conjI)
-    apply (erule obj_at'_weakenE)
-    apply simp
-    apply (simp add: obj_at'_real_def)
-    apply (erule ko_wp_at'_weakenE)
-    apply (clarsimp simp: inQ_def)
-    done
-  hence tat: "\<And>p. \<forall>t \<in> set (ksReadyQueues s p). tcb_at' t s"
-    and  tlive: "\<And>p. \<forall>t \<in> set (ksReadyQueues s p). ko_wp_at' live' t s"
-    by auto
   from sr have
-    "cready_queues_relation (clift ?th_s)
-        (ksReadyQueues_' (globals s')) (ksReadyQueues s)"
+    "cready_queues_relation (ksReadyQueues s) (ksReadyQueues_' (globals s'))"
     unfolding cready_queues_relation_def rf_sr_def cstate_relation_def
               cpspace_relation_def
     apply (clarsimp simp: Let_def all_conj_distrib)
-    apply (drule spec, drule spec, drule mp)
-    apply fastforce
-    apply ((subst lift_t_typ_region_bytes, rule cm_disj_tcb, assumption+,
-           simp_all add: objBits_simps pageBits_def)[1])+
-      \<comment> \<open>waiting ...\<close>
-    apply (simp add: tcb_queue_relation_live_restrict
-                     [OF D.valid_untyped tat tlive rl])
     done
 
   moreover
@@ -1761,8 +1720,7 @@ proof -
     apply (case_tac "pageBits \<le> bits")
      apply (simp add: objBitsKO_def split: kernel_object.splits)
      apply clarsimp
-     apply (rule aligned_range_offset_mem
-       [where 'a=machine_word_len, folded word_bits_def, simplified, OF _ _ al _ wb])
+     apply (rule aligned_range_offset_mem[simplified, OF _ _ al])
        apply assumption+
     apply (rule iffI[rotated], simp)
     apply (simp add: objBits_simps)
@@ -1815,8 +1773,7 @@ proof -
     apply (case_tac "pageBits \<le> bits")
      apply (simp add: objBitsKO_def split: kernel_object.splits)
      apply clarsimp
-     apply (rule aligned_range_offset_mem
-       [where 'a=machine_word_len, folded word_bits_def, simplified, OF _ _ al _ wb])
+     apply (rule aligned_range_offset_mem[simplified, OF _ _ al])
        apply assumption+
     apply (rule iffI[rotated], simp)
     apply (simp add: objBits_simps)

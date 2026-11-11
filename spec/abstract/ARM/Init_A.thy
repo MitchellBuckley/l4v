@@ -14,7 +14,7 @@ theory Init_A
 imports Retype_A
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   This is not a specification of true kernel
@@ -22,41 +22,52 @@ text \<open>
   show that the invariants and refinement relation are consistent.
 \<close>
 
+(* picked such that init_objs_base \<ge> kernel_base for all platforms, with sufficient alignment
+   for ARMSection *)
+definition
+  init_objs_base :: machine_word where
+  "init_objs_base = 0xf0000000"
+
+definition
+  idle_thread_ptr :: vspace_ref where
+  "idle_thread_ptr = init_objs_base + 0x1000"
+
 definition
   init_tcb_ptr :: word32 where
-  "init_tcb_ptr = kernel_base + 0x2000"
+  "init_tcb_ptr = init_objs_base + 0x2000"
 
 definition
   init_irq_node_ptr :: word32 where
-  "init_irq_node_ptr = kernel_base + 0x8000"
+  "init_irq_node_ptr = init_objs_base + 0x8000"
 
 (* It is easy to remove a memory slot here, but once if we want to reserve other slots of memory, we have to do the proof of disjoint for example state again.
    Comment is left here so that next time we need 4k memory, we don't need to fix example state and can simply change its name. *)
 definition
   init_globals_frame :: word32 where
-  "init_globals_frame = kernel_base + 0x5000"
+  "init_globals_frame = init_objs_base + 0x5000"
 
 definition
   init_global_pd :: word32 where
-  "init_global_pd = kernel_base + 0x60000"
+  "init_global_pd = init_objs_base + 0x60000"
 
 definition
   "init_arch_state \<equiv> \<lparr>
     arm_asid_table = Map.empty,
     arm_hwasid_table = Map.empty,
-    arm_next_asid = 0,
+    arm_next_asid = hw_asid_min,
     arm_asid_map = Map.empty,
     arm_global_pd = init_global_pd,
     arm_global_pts = [],
     arm_kernel_vspace = \<lambda>ref.
-      if ref \<in> {kernel_base .. kernel_base + mask 20}
+      if ref \<in> {init_objs_base .. init_objs_base + mask 20}
       then ArmVSpaceKernelWindow
       else ArmVSpaceInvalidRegion
   \<rparr>"
 
 definition
   [simp]:
-  "global_pd \<equiv> (\<lambda>_. InvalidPDE)( ucast (kernel_base >> 20) := SectionPDE (addrFromPPtr kernel_base) {} 0 {})"
+  "global_pd \<equiv> (\<lambda>_. InvalidPDE)(ucast (init_objs_base >> 20) :=
+                                  SectionPDE (addrFromPPtr init_objs_base) {} 0 {})"
 
 definition
   "init_kheap \<equiv>
@@ -74,6 +85,10 @@ definition
     tcb_fault = None,
     tcb_bound_notification = None,
     tcb_mcpriority = minBound,
+    tcb_priority = 0,
+    tcb_time_slice = timeSlice,
+    tcb_domain = default_domain,
+    tcb_flags = {},
     tcb_arch = init_arch_tcb
   \<rparr>,
   init_globals_frame \<mapsto> ArchObj (DataPage False ARMSmallPage), \<comment> \<open>same reason as why we kept the definition of @{term init_globals_frame}\<close>
@@ -95,6 +110,13 @@ definition
     is_original_cap = init_ioc,
     cur_thread = idle_thread_ptr,
     idle_thread = idle_thread_ptr,
+    scheduler_action = resume_cur_thread,
+    domain_list = [(0, -1), (0, 0)],
+    domain_index = 0,
+    domain_start_index = 0,
+    cur_domain = 0,
+    domain_time = 15,
+    ready_queues = const (const []),
     machine_state = init_machine_state,
     interrupt_irq_node = \<lambda>irq. init_irq_node_ptr + (ucast irq << cte_level_bits),
     interrupt_states = \<lambda>_. Structures_A.IRQInactive,
@@ -104,5 +126,6 @@ definition
 
 end
 
+arch_requalify_consts (A) idle_thread_ptr
 
 end

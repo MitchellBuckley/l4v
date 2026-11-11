@@ -11,7 +11,7 @@ imports
   "Lib.Simulation"
   Invariants_AI
 begin
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 subsection \<open>Constructing a virtual-memory view\<close>
 
@@ -120,6 +120,11 @@ definition ptable_lift :: "obj_ref \<Rightarrow> 'z::state_ext state \<Rightarro
 definition ptable_rights :: "obj_ref \<Rightarrow> 'z::state_ext state \<Rightarrow> machine_word \<Rightarrow> vm_rights" where
   "ptable_rights tcb s \<equiv> \<lambda>addr.
    case_option {} (snd o snd o snd)
+      (get_page_info (aobjs_of s) (get_vspace_of_thread (kheap s) (arch_state s) tcb) addr)"
+
+definition ptable_exec :: "obj_ref \<Rightarrow> 'z::state_ext state \<Rightarrow> machine_word \<Rightarrow> bool" where
+  "ptable_exec tcb s \<equiv> \<lambda>addr.
+   case_option False ((\<lambda>attrs. Execute \<in> attrs) o fst o snd o snd)
       (get_page_info (aobjs_of s) (get_vspace_of_thread (kheap s) (arch_state s) tcb) addr)"
 
 lemma ptable_lift_Some_canonical_addressD:

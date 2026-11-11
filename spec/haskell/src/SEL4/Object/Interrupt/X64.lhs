@@ -35,10 +35,6 @@ This module defines the machine-specific interrupt handling routines for x64.
 
 \end{impdetails}
 
-%FIXME: argument order, IRQ shouldn't be last. Fix in C.
-
-%FIXME: remove duplication with decodeIRQControl, move code to generic case. Do this on C first.
-
 > decodeIRQControlInvocation :: Word -> [Word] -> PPtr CTE -> [Capability] ->
 >         KernelF SyscallError ArchInv.IRQControlInvocation
 > decodeIRQControlInvocation label args srcSlot extraCaps =
@@ -59,14 +55,14 @@ This module defines the machine-specific interrupt handling routines for x64.
 >
 >             -- from ioapic_map_pin_to_vector
 >             numIOAPICs <- withoutFailure $ gets (x64KSNumIOAPICs . ksArchState)
+>             ioAPICnIRQs <- withoutFailure $ gets (x64KSIOAPICnIRQs . ksArchState)
 >             when (numIOAPICs == 0) $ throw IllegalOperation
 >             rangeCheck ioapic 0 (numIOAPICs - 1)
->             rangeCheck pin 0 (Arch.ioapicIRQLines - 1)
+>             rangeCheck pin 0 (ioAPICnIRQs ioapic - 1)
 >             rangeCheck level (0::Word) 1
 >             rangeCheck polarity (0::Word) 1
 >
->             -- FIXME check semantics against toEnum, we might want == 0 here
->             let vector = (fromIntegral $ fromEnum irq) + Arch.irqIntOffset
+>             let vector = fromIntegral (fromEnum irq) + Arch.irqIntOffset
 >             return $ ArchInv.IssueIRQHandlerIOAPIC irq destSlot srcSlot ioapic
 >                 pin level polarity vector
 >
@@ -131,14 +127,15 @@ updateIRQState sets the arch-specific IRQ state for an IRQ
 > maskIrqSignal :: IRQ -> Kernel ()
 > maskIrqSignal irq = doMachineOp $ maskInterrupt True irq
 
-%FIXME: separate ranges for ISA interrupts and user interrupts
-
 checkIRQ is only used for the legacy PIC interrupt so always fails with the IOAPIC of x86-64
 
 > checkIRQ :: Word -> KernelF SyscallError ()
 > checkIRQ irq = throw IllegalOperation
 
-%FIXME: handle VTD faults
+%FIXME x64-vtd: handle VTD faults
+
+> handleSpuriousIRQ :: Kernel ()
+> handleSpuriousIRQ = return ()
 
 > handleReservedIRQ :: IRQ -> Kernel ()
 > handleReservedIRQ _ = return ()

@@ -5,38 +5,36 @@
  *)
 
 theory PageTableDuplicates
-imports Syscall_R
+imports ArchSyscall_R
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context Arch begin arch_global_naming
 
 lemma set_ntfn_valid_duplicate' [wp]:
   "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s)\<rbrace>
   setNotification ep v  \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (simp add:setNotification_def)
   apply (clarsimp simp: setObject_def split_def valid_def in_monad
-                        projectKOs pspace_aligned'_def ps_clear_upd
+                        pspace_aligned'_def ps_clear_upd
                         objBits_def[symmetric] lookupAround2_char1
                  split: if_split_asm)
   apply (frule pspace_storable_class.updateObject_type[where v = v,simplified])
   apply (clarsimp simp:updateObject_default_def assert_def bind_def
     alignCheck_def in_monad when_def alignError_def magnitudeCheck_def
     assert_opt_def return_def fail_def split:if_splits option.splits)
-   apply (rule_tac ko = ba in valid_duplicates'_non_pd_pt_I)
+   apply (rule_tac ko="KONotification a" in valid_duplicates'_non_pd_pt_I)
        apply simp+
-  apply (rule_tac ko = ba in valid_duplicates'_non_pd_pt_I)
+  apply (rule_tac ko="KONotification a" in valid_duplicates'_non_pd_pt_I)
       apply simp+
   done
 
-crunch valid_duplicates' [wp]: cteInsert "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
+crunch cteInsert
+  for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
   (wp: crunch_wps)
 
-crunch valid_duplicates'[wp]: setupReplyMaster "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
+crunch setupReplyMaster
+  for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
   (wp: crunch_wps simp: crunch_simps)
-
-
-(* we need the following lemma in Syscall_R *)
-crunch inv[wp]: getRegister "P"
 
 lemma doMachineOp_ksPSpace_inv[wp]:
   "\<lbrace>\<lambda>s. P (ksPSpace s)\<rbrace> doMachineOp f \<lbrace>\<lambda>ya s. P (ksPSpace s)\<rbrace>"
@@ -47,7 +45,7 @@ lemma setEP_valid_duplicates'[wp]:
   setEndpoint a b \<lbrace>\<lambda>_ s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (simp add:setEndpoint_def)
   apply (clarsimp simp: setObject_def split_def valid_def in_monad
-                        projectKOs pspace_aligned'_def ps_clear_upd
+                        pspace_aligned'_def ps_clear_upd
                         objBits_def[symmetric] lookupAround2_char1
                  split: if_split_asm)
   apply (frule pspace_storable_class.updateObject_type[where v = b,simplified])
@@ -62,7 +60,7 @@ lemma setTCB_valid_duplicates'[wp]:
  "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s)\<rbrace>
   setObject a (tcb::tcb) \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (clarsimp simp: setObject_def split_def valid_def in_monad
-                        projectKOs pspace_aligned'_def ps_clear_upd
+                        pspace_aligned'_def ps_clear_upd
                         objBits_def[symmetric] lookupAround2_char1
                  split: if_split_asm)
   apply (frule pspace_storable_class.updateObject_type[where v = tcb,simplified])
@@ -73,16 +71,12 @@ lemma setTCB_valid_duplicates'[wp]:
      apply (erule valid_duplicates'_non_pd_pt_I[rotated 3],simp+)+
   done
 
-crunches threadSet, setBoundNotification
+crunch threadSet, setBoundNotification
   for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: setObject_ksInterrupt updateObject_default_inv)
 
-lemma tcbSchedEnqueue_valid_duplicates'[wp]:
- "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s)\<rbrace>
-  tcbSchedEnqueue a \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
-  by (simp add:tcbSchedEnqueue_def unless_def setQueue_def | wp | wpc)+
-
-crunch valid_duplicates'[wp]: rescheduleRequired "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch rescheduleRequired
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: setObject_ksInterrupt updateObject_default_inv)
 
 lemma getExtraCptrs_valid_duplicates'[wp]:
@@ -92,18 +86,9 @@ lemma getExtraCptrs_valid_duplicates'[wp]:
   apply (wpc|simp|wp mapM_wp')+
   done
 
-crunch valid_duplicates'[wp]: getExtraCPtrs "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
-  (wp: setObject_ksInterrupt asUser_inv updateObject_default_inv)
-
-crunch valid_duplicates'[wp]: lookupExtraCaps "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch setExtraBadge
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: setObject_ksInterrupt asUser_inv updateObject_default_inv mapME_wp)
-
-crunch valid_duplicates'[wp]: setExtraBadge "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
-  (wp: setObject_ksInterrupt asUser_inv updateObject_default_inv mapME_wp)
-
-crunch valid_duplicates'[wp]: getReceiveSlots "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
-  (simp: unless_def getReceiveSlots_def
-     wp: setObject_ksInterrupt asUser_inv updateObject_default_inv mapME_wp)
 
 lemma transferCapsToSlots_duplicates'[wp]:
  "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s)\<rbrace>
@@ -111,26 +96,31 @@ lemma transferCapsToSlots_duplicates'[wp]:
   \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   by (rule transferCapsToSlots_pres1; wp)
 
-crunch valid_duplicates'[wp]: transferCaps "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch transferCaps
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (simp: unless_def
      wp: setObject_ksInterrupt asUser_inv updateObject_default_inv mapME_wp)
 
-crunch valid_duplicates'[wp]: sendFaultIPC "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch sendFaultIPC
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (ignore: transferCapsToSlots
        wp: crunch_wps hoare_vcg_const_Ball_lift get_rs_cte_at'
      simp: zipWithM_x_mapM ball_conj_distrib)
 
-crunch valid_duplicates'[wp]: handleFault "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch handleFault
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (ignore: transferCapsToSlots
        wp: crunch_wps hoare_vcg_const_Ball_lift get_rs_cte_at'
      simp: zipWithM_x_mapM ball_conj_distrib)
 
-crunch valid_duplicates'[wp]: replyFromKernel "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch replyFromKernel
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (ignore: transferCapsToSlots
        wp: crunch_wps hoare_vcg_const_Ball_lift get_rs_cte_at'
      simp: zipWithM_x_mapM ball_conj_distrib)
 
-crunch valid_duplicates'[wp]: insertNewCap "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch insertNewCap
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (ignore: transferCapsToSlots
        wp: crunch_wps hoare_vcg_const_Ball_lift get_rs_cte_at'
      simp: zipWithM_x_mapM ball_conj_distrib)
@@ -152,14 +142,14 @@ lemma mapM_x_storePTE_updates:
   apply (induct xs)
    apply (simp add: mapM_x_Nil)
   apply (simp add: mapM_x_Cons)
-  apply (rule hoare_seq_ext, assumption)
+  apply (rule bind_wp, assumption)
   apply (thin_tac "valid P f Q" for P f Q)
   apply (simp add: storePTE_def setObject_def)
   apply (wp hoare_drop_imps | simp add:split_def updateObject_default_def)+
   apply clarsimp
   apply (intro conjI ballI)
    apply (drule(1) bspec)
-   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps archObjSize_def lookupAround2_known1
+   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps lookupAround2_known1
                   dest!:koTypeOf_pte)
    apply (simp add:ps_clear_def dom_fun_upd2[unfolded fun_upd_def])
   apply (erule rsubst[where P=Q])
@@ -237,7 +227,7 @@ lemma page_table_at_set_list:
     apply simp
    apply (simp add:shiftl_less_t2n word_shiftl_add_distrib
      word_bits_def mask_def shiftr_mask2)
-  apply (clarsimp simp:objBits_simps pageBits_def archObjSize_def
+  apply (clarsimp simp:objBits_simps pageBits_def
      split:Structures_H.kernel_object.splits arch_kernel_object.splits)
   apply (subst upto_enum_step_subtract)
    apply (rule is_aligned_no_wrap'[OF is_aligned_neg_mask])
@@ -257,7 +247,7 @@ lemma page_table_at_set_list:
       dest!: koTypeOf_pte)
     apply (drule pspace_alignedD')
      apply simp
-    apply (simp add:vspace_bits_defs objBits_simps archObjSize_def)
+    apply (simp add:vspace_bits_defs objBits_simps)
    apply simp
   apply clarsimp
   apply (rule le_shiftr)
@@ -275,8 +265,7 @@ lemma page_directory_at_set_list:
    apply (subst (asm) upto_enum_step_subtract)
     apply (simp add:field_simps mask_def)
     apply (erule is_aligned_no_overflow)
-   apply (clarsimp simp:set_upto_enum_step_8 vspace_bits_defs
-           image_def pageBits_def)
+   apply (clarsimp simp: set_upto_enum_step_8 vspace_bits_defs image_def)
    apply (drule_tac x= "((p && mask 14) >> 3) + xb" in spec)
    apply (erule impE)
     apply (rule is_aligned_plus_bound[where lz = 11 and sz = "sz - 3" ,simplified])
@@ -308,7 +297,7 @@ lemma page_directory_at_set_list:
     apply simp
    apply (simp add:shiftl_less_t2n word_shiftl_add_distrib
      word_bits_def mask_def shiftr_mask2)
-  apply (clarsimp simp:objBits_simps pageBits_def archObjSize_def
+  apply (clarsimp simp:objBits_simps pageBits_def
      split:Structures_H.kernel_object.splits arch_kernel_object.splits)
   apply (subst upto_enum_step_subtract)
    apply (rule is_aligned_no_wrap'[OF is_aligned_neg_mask])
@@ -328,7 +317,7 @@ lemma page_directory_at_set_list:
       dest!: koTypeOf_pde)
     apply (drule pspace_alignedD')
      apply simp
-    apply (simp add:objBits_simps archObjSize_def vspace_bits_defs)
+    apply (simp add:objBits_simps vspace_bits_defs)
    apply simp
   apply clarsimp
   apply (rule le_shiftr)
@@ -398,7 +387,7 @@ lemma mapM_x_storePTE_update_helper:
      apply (simp add: AND_NOT_mask_plus_AND_mask_eq)
     apply (subst aligned_shiftr_mask_shiftl)
      apply (drule (1) pspace_alignedD')
-     apply (simp add: objBits_simps archObjSize_def vspace_bits_defs)
+     apply (simp add: objBits_simps vspace_bits_defs)
     apply simp
    apply (clarsimp simp: vspace_bits_defs mask_lower_twice)
    apply (drule (1) bspec, clarsimp)
@@ -426,7 +415,7 @@ lemma mapM_x_storePTE_update_helper:
     apply (simp add: AND_NOT_mask_plus_AND_mask_eq)
    apply (subst aligned_shiftr_mask_shiftl)
     apply (drule (1) pspace_alignedD')
-    apply (simp add: objBits_simps archObjSize_def vspace_bits_defs)
+    apply (simp add: objBits_simps vspace_bits_defs)
    apply simp
   apply (clarsimp simp: vspace_bits_defs mask_lower_twice)
   apply (drule (1) bspec, clarsimp)
@@ -469,14 +458,14 @@ lemma mapM_x_storePDE_updates:
   apply (induct xs)
    apply (simp add: mapM_x_Nil)
   apply (simp add: mapM_x_Cons)
-  apply (rule hoare_seq_ext, assumption)
+  apply (rule bind_wp, assumption)
   apply (thin_tac "valid P f Q" for P f Q)
   apply (simp add: storePDE_def setObject_def)
   apply (wp hoare_drop_imps | simp add:split_def updateObject_default_def)+
   apply clarsimp
   apply (intro conjI ballI)
    apply (drule(1) bspec)
-   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps archObjSize_def lookupAround2_known1
+   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps lookupAround2_known1
                   dest!:koTypeOf_pde)
    apply (simp add:ps_clear_def dom_fun_upd2[unfolded fun_upd_def])
   apply (erule rsubst[where P=Q])
@@ -513,7 +502,7 @@ lemma mapM_x_storePDE_update_helper:
      apply (simp add: AND_NOT_mask_plus_AND_mask_eq)
     apply (subst aligned_shiftr_mask_shiftl)
      apply (drule (1) pspace_alignedD')
-     apply (simp add: objBits_simps archObjSize_def vspace_bits_defs)
+     apply (simp add: objBits_simps vspace_bits_defs)
     apply simp
    apply (clarsimp simp: vspace_bits_defs mask_lower_twice)
    apply (drule (1) bspec, clarsimp)
@@ -541,7 +530,7 @@ lemma mapM_x_storePDE_update_helper:
     apply (simp add: AND_NOT_mask_plus_AND_mask_eq)
    apply (subst aligned_shiftr_mask_shiftl)
     apply (drule (1) pspace_alignedD')
-    apply (simp add: objBits_simps archObjSize_def vspace_bits_defs)
+    apply (simp add: objBits_simps vspace_bits_defs)
    apply simp
   apply (clarsimp simp: vspace_bits_defs mask_lower_twice)
   apply (drule (1) bspec, clarsimp)
@@ -558,13 +547,6 @@ lemma mapM_x_storePDE_update_helper:
     apply (simp add: is_aligned_andI2 is_aligned_neg_mask)
    apply (simp add: superSectionPDEOffsets_bound)
   apply (simp add: mask_lower_twice)
-  done
-
-lemma foldr_data_map_insert[simp]:
- "foldr (\<lambda>addr map a. if a = addr then Some b else map a)
- = foldr (\<lambda>addr. data_map_insert addr b)"
-  apply (rule ext)+
-  apply (simp add:data_map_insert_def[abs_def] fun_upd_def)
   done
 
 definition
@@ -639,10 +621,10 @@ lemma createObject_valid_duplicates'[wp]:
   apply (simp add:createObject_def)
   apply (rule hoare_pre)
   apply (wpc | wp| simp add: ARM_HYP_H.createObject_def split del: if_split)+
-         apply (simp add: placeNewObject_def placeNewDataObject_def
+         apply (simp add: placeNewObject_def placeNewDataObject_def curDomain_def
                           placeNewObject'_def split_def copyGlobalMappings_def
                      split del: if_split
-           | wp hoare_unless_wp[where P="d"] hoare_unless_wp[where Q=\<top>]
+           | wp unless_wp[where P="d"] unless_wp[where P'=\<top>]
            | wpc | simp add: alignError_def split del: if_split)+
   apply (intro conjI impI)
              apply clarsimp+
@@ -686,29 +668,29 @@ lemma createObject_valid_duplicates'[wp]:
                         APIType_capBits_def objBits_simps pageBits_def)+
      apply (rule none_in_new_cap_addrs[where us =13,simplified]
       ,(simp add: objBits_simps pageBits_def word_bits_conv)+)[1]
-    apply (clarsimp simp: objBits_simps ptBits_def archObjSize_def pageBits_def)
+    apply (clarsimp simp: objBits_simps ptBits_def pageBits_def)
    apply (cut_tac ptr=ptr in new_cap_addrs_fold'[where n = "0x200" and ko = "(KOArch (KOPTE makeObject))"
       ,simplified objBits_simps])
     apply simp
    apply (clarsimp simp: archObjSize_def pt_bits_def pte_bits_def)
    apply (erule valid_duplicates'_insert_ko[where us = 9,simplified])
-      apply (simp add: toAPIType_def archObjSize_def nondup_obj_def makeObject_pte
+      apply (simp add: toAPIType_def nondup_obj_def makeObject_pte
                        APIType_capBits_def objBits_simps pageBits_def pte_bits_def
                 split: ARM_HYP_H.pte.splits)+
     apply (rule none_in_new_cap_addrs[where us =9,simplified]
-      ,(simp add: objBits_simps pageBits_def word_bits_conv archObjSize_def pte_bits_def)+)[1]
+      ,(simp add: objBits_simps pageBits_def word_bits_conv pte_bits_def)+)[1]
    apply (clarsimp simp: pd_bits_def pde_bits_def)
    apply (cut_tac ptr=ptr in new_cap_addrs_fold'[where n = "0x0800" and ko = "(KOArch (KOPDE makeObject))"
      ,simplified objBits_simps])
     apply simp
-   apply (clarsimp simp: objBits_simps archObjSize_def pdBits_def pageBits_def pde_bits_def)
+   apply (clarsimp simp: objBits_simps pdBits_def pageBits_def pde_bits_def)
    apply (frule(2) retype_aligned_distinct'[where n = "0x0800" and ko = "KOArch (KOPDE makeObject)"])
-    apply (simp add:objBits_simps archObjSize_def)
+    apply (simp add: objBits_simps)
     apply (rule range_cover_rel[OF range_cover_full])
        apply simp
       apply (simp add:APIType_capBits_def word_bits_def pde_bits_def)+
    apply (frule(2) retype_aligned_distinct'(2)[where n = "2048" and ko = "KOArch (KOPDE makeObject)"])
-    apply (simp add:objBits_simps archObjSize_def)
+    apply (simp add:objBits_simps)
     apply (rule range_cover_rel[OF range_cover_full])
        apply simp
       apply (simp add:APIType_capBits_def word_bits_def pde_bits_def)+
@@ -717,13 +699,13 @@ lemma createObject_valid_duplicates'[wp]:
                   (map (\<lambda>n. ptr + (n << 3)) [0.e.0x7FF]) (ksPSpace s))")
      apply (simp add:APIType_capBits_def pdBits_def pageBits_def pde_bits_def pd_bits_def
      data_map_insert_def[abs_def])
-    apply (clarsimp simp: archObjSize_def pdBits_def pageBits_def pdBits_def pd_bits_def pde_bits_def)
+    apply (clarsimp simp: pageBits_def pdBits_def pd_bits_def pde_bits_def)
     apply (rule valid_duplicates'_insert_ko[where us = 11,simplified])
-        apply (simp add: ARM_HYP_H.toAPIType_def archObjSize_def nondup_obj_def makeObject_pde
+        apply (simp add: ARM_HYP_H.toAPIType_def nondup_obj_def makeObject_pde
                        APIType_capBits_def objBits_simps pageBits_def pde_bits_def
                 split: ARM_HYP_H.pde.splits)+
     apply (rule none_in_new_cap_addrs[where us =11,simplified],
-           (simp add: objBits_simps pageBits_def word_bits_conv archObjSize_def pde_bits_def)+)[1]
+           (simp add: objBits_simps pageBits_def word_bits_conv pde_bits_def)+)[1]
 
    apply clarsimp
    apply (erule(2) valid_duplicates'_update)
@@ -756,12 +738,72 @@ lemma createObject_valid_duplicates'[wp]:
     apply (simp add: nondup_obj_def)
    apply simp
    apply (rule none_in_new_cap_addrs
-     ,(simp add: objBits_simps' pageBits_def APIType_capBits_def
-                 ARM_HYP_H.toAPIType_def word_bits_conv archObjSize_def is_aligned_mask
+     ,(simp add: objBits_simps' pageBits_def APIType_capBits_gen_def
+                 word_bits_conv is_aligned_mask
           split: ARM_HYP_H.object_type.splits)+)[1]
   apply (clarsimp simp: word_bits_def)
  done
 
+lemma createNewObjects_pspace_no_overlap':
+  "\<lbrace>pspace_no_overlap' ptr sz and pspace_aligned' and pspace_distinct'
+    and K (range_cover ptr sz (Types_H.getObjectSize ty us) (Suc (length dests)))
+    and K (ptr \<noteq> 0)
+    and K (ty = APIObjectType apiobject_type.CapTableObject \<longrightarrow> us < 28)\<rbrace>
+  createNewObjects ty src dests ptr us d
+  \<lbrace>\<lambda>rv s.  pspace_aligned' s \<and> pspace_distinct' s
+           \<and> pspace_no_overlap' ((of_nat (length dests) << APIType_capBits ty us) + ptr) sz s\<rbrace>"
+proof ((rule hoare_gen_asm)+, induct rule: rev_induct )
+    case Nil
+    show ?case
+      by (simp add:createNewObjects_def zipWithM_x_mapM mapM_Nil | wp)+
+   next
+   case (snoc dest dests)
+   have rc:"range_cover ptr sz (Types_H.getObjectSize ty us) (Suc (length dests))"
+      apply (rule range_cover_le)
+      apply (rule snoc)
+      apply simp
+      done
+   show ?case
+     using rc
+     apply (subst createNewObjects_Cons)
+      apply (drule range_cover.weak)
+      apply (simp add: word_bits_def)
+     apply (wp pspace_no_overlap'_lift)
+      apply (simp add: conj_comms)
+      apply (rule hoare_vcg_conj_lift)
+       apply (rule hoare_post_imp[OF _ createObject_pspace_aligned_distinct'])
+       apply simp
+      apply (rule hoare_vcg_conj_lift)
+       apply (rule hoare_post_imp[OF _ createObject_pspace_aligned_distinct'])
+       apply simp
+      apply (simp add:field_simps)
+      apply (wp createObject_pspace_no_overlap')
+     apply (clarsimp simp: conj_comms)
+     apply (rule hoare_pre)
+      apply (rule hoare_vcg_conj_lift)
+       apply (rule hoare_post_imp[OF _ snoc.hyps])
+       apply (simp add:snoc)+
+      apply (rule hoare_vcg_conj_lift)
+       apply (rule hoare_post_imp[OF _ snoc.hyps])
+       apply (simp add:snoc)+
+      apply wp
+     apply (simp add: conj_comms field_simps)
+     apply (rule hoare_post_imp)
+     apply (erule context_conjI)
+      apply (intro conjI)
+        apply (rule aligned_add_aligned[OF range_cover.aligned
+                                           is_aligned_shiftl_self])
+          apply simp
+         apply simp
+        apply simp
+       apply (erule pspace_no_overlap'_le)
+       apply (simp add: range_cover.sz[where 'a=32, folded word_bits_def])+
+     apply (rule hoare_post_imp[OF _ snoc.hyps])
+     apply (simp add:field_simps snoc)+
+    using snoc
+    apply simp
+  done
+qed
 
 lemma createNewObjects_valid_duplicates'[wp]:
  "\<lbrace> (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and pspace_no_overlap' ptr sz
@@ -819,38 +861,38 @@ qed
 
 lemma valid_duplicates_deleteObjects_helper:
   assumes vd:"vs_valid_duplicates' (m::(word32 \<rightharpoonup> Structures_H.kernel_object))"
-  assumes inc: "\<And>p ko. \<lbrakk>m p = Some (KOArch ko);p \<in> {ptr .. ptr + 2 ^ sz - 1}\<rbrakk> \<Longrightarrow> 7 \<le> sz"
+  assumes inc: "\<And>p ko. \<lbrakk>m p = Some (KOArch ko);p \<in> mask_range ptr sz \<rbrakk> \<Longrightarrow> 7 \<le> sz"
   assumes aligned:"is_aligned ptr sz"
   notes blah[simp del] =  atLeastatMost_subset_iff atLeastLessThan_iff
           Int_atLeastAtMost atLeastatMost_empty_iff split_paired_Ex
           atLeastAtMost_iff
-  shows "vs_valid_duplicates'  (\<lambda>x. if x \<in> {ptr .. ptr + 2 ^ sz - 1} then None else m x)"
+  shows "vs_valid_duplicates'  (\<lambda>x. if x \<in> mask_range ptr sz then None else m x)"
   apply (clarsimp simp: vs_valid_duplicates'_def split:option.splits)
   apply (case_tac "the (m x)"; simp)
   apply (rename_tac arch_kernel_object)
   apply (case_tac arch_kernel_object; clarsimp)
    apply (drule (1) valid_duplicates'_D[OF vd])
-   apply (clarsimp simp: valid_pte_duplicates_at'_def)
+   apply (clarsimp simp: valid_pte_duplicates_at'_def add_mask_fold)
    apply (rule conjI, clarsimp)
     apply (drule (1) inc)
     apply (clarsimp simp: vspace_bits_defs)
-    apply (simp add: mask_lower_twice mask_in_range[OF aligned,symmetric])
+    apply (fastforce simp: mask_lower_twice simp flip: neg_mask_in_mask_range[OF aligned])
    apply clarsimp
    apply (drule (1) bspec, clarsimp)
    apply (drule (1) inc)
-   apply (simp add: mask_in_range[OF aligned,symmetric] vspace_bits_defs)
-   apply (simp add: neg_mask_add_aligned_special largePagePTEOffsets_bound)
+   apply (simp add: vspace_bits_defs neg_mask_in_mask_range[OF aligned, symmetric]
+                    neg_mask_add_aligned_special largePagePTEOffsets_bound)
   apply (drule (1) valid_duplicates'_D[OF vd])
   apply (clarsimp simp: valid_pde_duplicates_at'_def)
   apply (rule conjI, clarsimp)
    apply (drule (1) inc)
    apply (clarsimp simp: vspace_bits_defs)
-   apply (simp add: mask_lower_twice mask_in_range[OF aligned,symmetric])
+   apply (fastforce simp: mask_lower_twice simp flip: neg_mask_in_mask_range[OF aligned])
   apply clarsimp
   apply (drule (1) bspec, clarsimp)
   apply (drule (1) inc)
-  apply (simp add: mask_in_range[OF aligned,symmetric] vspace_bits_defs)
-  apply (simp add: neg_mask_add_aligned_special superSectionPDEOffsets_bound)
+  apply (simp add: vspace_bits_defs neg_mask_in_mask_range[OF aligned, symmetric]
+                   neg_mask_add_aligned_special superSectionPDEOffsets_bound)
   done
 
 lemma deleteObjects_valid_duplicates'[wp]:
@@ -868,17 +910,19 @@ lemma deleteObjects_valid_duplicates'[wp]:
   apply clarsimp
   apply (simp add:deletionIsSafe_def)
   apply (erule valid_duplicates_deleteObjects_helper)
-   apply fastforce
+   apply (fastforce simp: arch_deletionIsSafe_def)
   apply simp
   done
 
-crunch arch_inv[wp]: resetUntypedCap "\<lambda>s. P (ksArchState s)"
+crunch resetUntypedCap
+  for arch_inv[wp]: "\<lambda>s. P (ksArchState s)"
   (simp: crunch_simps
-     wp: hoare_drop_imps hoare_unless_wp mapME_x_inv_wp
+     wp: hoare_drop_imps unless_wp mapME_x_inv_wp
          preemptionPoint_inv
    ignore: freeMemory)
 
-crunch valid_duplicates[wp]: updateFreeIndex "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch updateFreeIndex
+  for valid_duplicates[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 
 lemma resetUntypedCap_valid_duplicates'[wp]:
   "\<lbrace>(\<lambda>s. vs_valid_duplicates' (ksPSpace s))
@@ -888,7 +932,7 @@ lemma resetUntypedCap_valid_duplicates'[wp]:
   (is "\<lbrace>?P\<rbrace> ?f \<lbrace>\<lambda>_. ?Q\<rbrace>")
   apply (clarsimp simp: resetUntypedCap_def)
   apply (rule hoare_pre)
-   apply (wp | simp add: unless_def)+
+   apply (wp postResetUntyped_inv | simp add: unless_def)+
    apply (wp mapME_x_inv_wp preemptionPoint_inv | simp | wp (once) hoare_drop_imps)+
    apply (wp getSlotCap_wp)
   apply (clarsimp simp: cte_wp_at_ctes_of split del: if_split)
@@ -909,7 +953,7 @@ lemma invokeUntyped_valid_duplicates[wp]:
          and valid_untyped_inv' ui and ct_active'\<rbrace>
      invokeUntyped ui
    \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s) \<rbrace>"
-  supply hoare_whenE_wps[wp_split del]
+  supply whenE_wps[wp_split del]
   apply (simp only: invokeUntyped_def updateCap_def)
   apply (rule hoare_name_pre_state)
   apply (cases ui)
@@ -919,10 +963,10 @@ lemma invokeUntyped_valid_duplicates[wp]:
   apply (rule hoare_pre)
    apply simp
    apply (wp updateFreeIndex_pspace_no_overlap')
-   apply ((rule validE_validE_R)?, rule hoare_post_impErr)
+   apply ((rule validE_validE_R)?, rule hoare_strengthen_postE)
      apply (rule combine_validE)
       apply (rule_tac ui=ui in whenE_reset_resetUntypedCap_invs_etc)
-     apply (rule hoare_whenE_wp)
+     apply (rule whenE_wp)
      apply (rule valid_validE)
      apply (rule resetUntypedCap_valid_duplicates')
     defer
@@ -939,38 +983,43 @@ lemma invokeUntyped_valid_duplicates[wp]:
   apply (auto split: if_split_asm)
   done
 
-crunch valid_duplicates'[wp]:
-  doReplyTransfer "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  doReplyTransfer
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps isFinalCapability_inv
    simp: crunch_simps unless_def)
 
 lemma setVCPU_valid_duplicates'[wp]:
  "setObject a (vcpu::vcpu) \<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (clarsimp simp: setObject_def split_def valid_def in_monad
-                        projectKOs pspace_aligned'_def ps_clear_upd
+                        pspace_aligned'_def ps_clear_upd
                         objBits_def[symmetric] lookupAround2_char1
                  split: if_split_asm)
   apply (frule pspace_storable_class.updateObject_type[where v = vcpu,simplified])
   apply (clarsimp simp:updateObject_default_def assert_def bind_def
     alignCheck_def in_monad when_def alignError_def magnitudeCheck_def
-    assert_opt_def return_def fail_def typeError_def projectKOs
+    assert_opt_def return_def fail_def typeError_def
     split:if_splits option.splits Structures_H.kernel_object.splits)
      apply (erule valid_duplicates'_non_pd_pt_I[rotated 3],simp+)+
   done
 
-crunch valid_duplicates'[wp]: vcpuSwitch "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch vcpuSwitch
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps FalseI simp: crunch_simps)
 
-crunch valid_duplicates'[wp]:
-  setVMRoot "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  setVMRoot
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunch valid_duplicates'[wp]:
-  invalidateASIDEntry "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  invalidateASIDEntry
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunch valid_duplicates'[wp]:
-  flushSpace "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  flushSpace
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 (wp: crunch_wps simp: crunch_simps unless_def)
 
 lemma get_asid_valid_duplicates'[wp]:
@@ -985,7 +1034,7 @@ lemma set_asid_pool_valid_duplicates'[wp]:
   setObject a (pool::asidpool)
   \<lbrace>\<lambda>r s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (clarsimp simp: setObject_def split_def valid_def in_monad
-                        projectKOs pspace_aligned'_def ps_clear_upd
+                        pspace_aligned'_def ps_clear_upd
                         objBits_def[symmetric] lookupAround2_char1
                  split: if_split_asm)
   apply (frule pspace_storable_class.updateObject_type[where v = pool,simplified])
@@ -996,12 +1045,14 @@ lemma set_asid_pool_valid_duplicates'[wp]:
      apply (erule valid_duplicates'_non_pd_pt_I[rotated 3],clarsimp+)+
   done
 
-crunch valid_duplicates'[wp]:
-  suspend "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  suspend
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def o_def)
 
-crunch valid_duplicates'[wp]:
-  deletingIRQHandler "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  deletingIRQHandler
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
 lemma storePDE_no_duplicates':
@@ -1072,8 +1123,9 @@ lemma storePTE_no_duplicates':
   apply fastforce
   done
 
-crunch valid_duplicates'[wp]:
- lookupPTSlot "\<lambda>s. valid_duplicates' (ksPSpace s)"
+crunch
+ lookupPTSlot
+  for valid_duplicates'[wp]: "\<lambda>s. valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
 lemma checkMappingPPtr_SmallPage:
@@ -1100,22 +1152,12 @@ lemma checkMappingPPtr_Section:
     arch_kernel_object.splits option.splits)
   done
 
-lemma mapM_x_mapM_valid:
-  "\<lbrace> P \<rbrace> mapM_x f xs \<lbrace>\<lambda>r. Q\<rbrace> \<Longrightarrow> \<lbrace>P\<rbrace>mapM f xs \<lbrace>\<lambda>r. Q\<rbrace>"
-  apply (simp add:NonDetMonadLemmaBucket.mapM_x_mapM)
-  apply (clarsimp simp:valid_def return_def bind_def)
-  apply (drule spec)
-  apply (erule impE)
-   apply simp
-  apply (drule(1) bspec)
-  apply fastforce
-  done
-
-crunch valid_duplicates'[wp]:
- flushPage "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+ flushPage
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-lemma lookupPTSlot_aligned:
+lemma lookupPTSlot_aligned':
   "\<lbrace>\<lambda>s. valid_objs' s \<and> vmsz_aligned' vptr sz \<and> sz \<noteq> ARMSuperSection\<rbrace>
    lookupPTSlot pd vptr
   \<lbrace>\<lambda>rv s. is_aligned rv ((pageBitsForSize sz) - 9)\<rbrace>,-"
@@ -1148,7 +1190,8 @@ lemma doMachineOp_live_vcpu_at_tcb[wp]: "\<lbrakk>\<forall>s xb. (p s) = (p (s\<
     apply clarsimp+
   done
 
-crunch ko_at'_s[wp]: armv_contextSwitch "\<lambda>s. ko_at' t (ksCurThread s) s"
+crunch armv_contextSwitch
+  for ko_at'_s[wp]: "\<lambda>s. ko_at' t (ksCurThread s) s"
 
 lemma flushPage_valid_arch_state'[wp]:
   "\<lbrace>\<lambda>s. valid_arch_state' s \<and> live_vcpu_at_tcb (ksCurThread s) s \<rbrace>
@@ -1165,8 +1208,9 @@ lemma flushPage_valid_arch_state'[wp]:
   apply (clarsimp split: option.splits)
   done
 
-crunch valid_arch_state'[wp]:
- flushTable "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+ flushTable
+  for valid_arch_state'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
 lemma unmapPage_valid_duplicates'[wp]:
@@ -1184,8 +1228,8 @@ lemma unmapPage_valid_duplicates'[wp]:
           apply (rule_tac ptr = "p && ~~ mask ptBits" and word = p
             in mapM_x_storePTE_update_helper[where sz = 7])
           apply (wp checkMappingPPtr_inv lookupPTSlot_page_table_at'
-                    Arch_R.lookupPTSlot_aligned | simp)+
-      apply (rule hoare_post_imp_R[OF lookupPTSlot_aligned[where sz= vmpage_size]])
+                    lookupPTSlot_aligned' | simp)+
+      apply (rule hoare_strengthen_postE_R[OF lookupPTSlot_aligned'[where sz= vmpage_size]])
       apply (simp add:pageBitsForSize_def pt_bits_def pte_bits_def)
       apply (drule upto_enum_step_shift[where n = 7 and m = 3,simplified])
       apply (clarsimp simp: mask_def add.commute upto_enum_step_def largePagePTEOffsets_def
@@ -1199,7 +1243,7 @@ lemma unmapPage_valid_duplicates'[wp]:
                         in mapM_x_storePDE_update_helper[where sz = 7])
        apply (wp mapM_x_mapM_valid checkMappingPPtr_inv)+
    apply (clarsimp simp:conj_comms)
-   apply (rule hoare_post_imp_R[where Q'= "\<lambda>r. pspace_aligned' and
+   apply (rule hoare_strengthen_postE_R[where Q'= "\<lambda>r. pspace_aligned' and
      (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and
      K(vmsz_aligned' vptr vmpage_size \<and> is_aligned r pdBits)
      and page_directory_at' (lookup_pd_slot r vptr && ~~ mask pdBits)"])
@@ -1214,12 +1258,9 @@ lemma unmapPage_valid_duplicates'[wp]:
   apply (clarsimp simp:ptBits_def pt_bits_def pageBits_def nondup_obj_def vmsz_aligned'_def)
   done
 
-crunch ko_wp_at'[wp]:
- checkPDNotInASIDMap "\<lambda>s. ko_wp_at' P p s"
-  (wp: crunch_wps simp: crunch_simps unless_def)
-
-crunch ko_wp_at'[wp]:
- armv_contextSwitch "\<lambda>s. ko_wp_at' P p s"
+crunch
+ checkPDNotInASIDMap
+  for ko_wp_at'[wp]: "\<lambda>s. ko_wp_at' P p s"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
 lemma setVCPU_nondup_obj[wp]:
@@ -1227,7 +1268,7 @@ lemma setVCPU_nondup_obj[wp]:
    setObject a (vcpu::vcpu)
   \<lbrace>\<lambda>rv. ko_wp_at' nondup_obj p\<rbrace>"
   apply (clarsimp simp: setObject_def split_def valid_def in_monad
-                        projectKOs pspace_aligned'_def ps_clear_upd
+                        pspace_aligned'_def ps_clear_upd
                         objBits_def[symmetric] lookupAround2_char1
                  split: if_split_asm)
   apply (frule pspace_storable_class.updateObject_type[where v = vcpu,simplified])
@@ -1237,14 +1278,14 @@ lemma setVCPU_nondup_obj[wp]:
      by (clarsimp simp: updateObject_default_def assert_def bind_def
                            alignCheck_def in_monad when_def alignError_def magnitudeCheck_def
                            assert_opt_def return_def fail_def typeError_def objBits_simps
-                           nondup_obj_def projectKOs archObjSize_def
+                           nondup_obj_def
                     split: if_splits option.splits Structures_H.kernel_object.splits,
          (erule(1) ps_clear_updE)+)
   apply (clarsimp)
   apply (erule(1) ps_clear_updE)
   done
 
-crunches vcpuSwitch, setVMRoot, setVMRootForFlush
+crunch vcpuSwitch, setVMRoot, setVMRootForFlush
   for nondup_obj[wp]: "ko_wp_at' nondup_obj p"
   (wp: crunch_wps FalseI simp: crunch_simps unless_def)
 
@@ -1257,7 +1298,7 @@ lemma unmapPageTable_valid_duplicates'[wp]:
     apply (wp storePDE_no_duplicates')+
    apply (simp add:pageTableMapped_def)
    apply (wp getPDE_wp |wpc|simp)+
-   apply (rule hoare_post_imp_R[where Q' = "\<lambda>r s. vs_valid_duplicates' (ksPSpace s)"])
+   apply (rule hoare_strengthen_postE_R[where Q' = "\<lambda>r s. vs_valid_duplicates' (ksPSpace s)"])
     apply wp
    apply (clarsimp simp:ko_wp_at'_def obj_at'_real_def projectKO_opt_pde)
    apply (clarsimp simp: nondup_obj_def
@@ -1265,11 +1306,12 @@ lemma unmapPageTable_valid_duplicates'[wp]:
   apply simp
   done
 
-crunch valid_duplicates'[wp]:
- deleteASID "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+ deleteASID
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunches deleteASIDPool, unbindNotification, prepareThreadDelete, vcpuFinalise
+crunch deleteASIDPool, unbindNotification, prepareThreadDelete, vcpuFinalise
   for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
@@ -1291,28 +1333,30 @@ lemma finaliseCap_valid_duplicates'[wp]:
             apply (wp|intro conjI|clarsimp split: option.splits)+
   done
 
-crunch valid_duplicates'[wp]:
-  capSwapForDelete "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  capSwapForDelete
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunch valid_duplicates'[wp]:
-  cteMove "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  cteMove
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunch valid_duplicates'[wp]:
-  cancelBadgedSends "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  cancelBadgedSends
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps filterM_preserved simp: crunch_simps unless_def)
 
-crunch valid_duplicates'[wp]:
-  invalidateTLBByASID "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  invalidateTLBByASID
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps filterM_preserved simp: crunch_simps unless_def)
-
-declare withoutPreemption_lift [wp del]
 
 lemma valid_duplicates_finalise_prop_stuff:
   "no_cte_prop (vs_valid_duplicates' \<circ> ksPSpace) = vs_valid_duplicates' \<circ> ksPSpace"
   "finalise_prop_stuff (vs_valid_duplicates' \<circ> ksPSpace)"
-  by (simp_all add: no_cte_prop_def finalise_prop_stuff_def
+  by (simp_all add: no_cte_prop_def finalise_prop_stuff_def arch_finalise_prop_stuff_def
                     setCTE_valid_duplicates' o_def)
 
 lemma finaliseSlot_valid_duplicates'[wp]:
@@ -1321,7 +1365,7 @@ lemma finaliseSlot_valid_duplicates'[wp]:
   finaliseSlot slot exposed
   \<lbrace>\<lambda>_ s. invs' s \<and> vs_valid_duplicates' (ksPSpace s) \<and> sch_act_simple s \<rbrace>"
   unfolding finaliseSlot_def
-  apply (rule validE_valid, rule hoare_pre, rule hoare_post_impErr, rule use_spec)
+  apply (rule validE_valid, rule hoare_pre, rule hoare_strengthen_postE, rule use_spec)
      apply (rule finaliseSlot_invs'[where p=slot and slot=slot and Pr="vs_valid_duplicates' o ksPSpace"])
       apply (simp_all add: valid_duplicates_finalise_prop_stuff)
    apply (wp | simp add: o_def)+
@@ -1335,7 +1379,6 @@ lemma cteDelete_valid_duplicates':
   apply (rule hoare_gen_asm)
   apply (simp add: cteDelete_def whenE_def split_def)
   apply (rule hoare_pre, wp finaliseSlot_invs)
-   apply simp
    apply (rule valid_validE)
    apply (rule hoare_post_imp[OF _ finaliseSlot_valid_duplicates'])
    apply simp
@@ -1364,28 +1407,28 @@ lemma mapM_x_storePTE_invalid_whole:
   \<lbrace>\<lambda>y s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (wp mapM_x_storePTE_update_helper[where word = word and sz = ptBits and ptr = word])
   apply (clarsimp simp: valid_cap'_def capAligned_def pageBits_def
-                        ptBits_def objBits_simps archObjSize_def)
+                        ptBits_def objBits_simps)
   apply (simp add: mask_def field_simps vspace_bits_defs is_aligned_neg_mask_eq')
   done
 
-crunch valid_objs'[wp]:
-  invalidateTLBByASID valid_objs'
+crunch
+  invalidateTLBByASID
+  for valid_objs'[wp]: valid_objs'
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunch pspace_aligned'[wp]:
-  invalidateTLBByASID pspace_aligned'
+crunch
+  invalidateTLBByASID
+  for pspace_aligned'[wp]: pspace_aligned'
   (wp: crunch_wps simp: crunch_simps unless_def)
 
-crunch valid_duplicates'[wp]:
-  isFinalCapability "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  isFinalCapability
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps filterM_preserved simp: crunch_simps unless_def)
 
-crunch valid_cap'[wp]:
-  isFinalCapability "\<lambda>s. valid_cap' cap s"
-  (wp: crunch_wps filterM_preserved simp: crunch_simps unless_def)
-
-crunch valid_duplicates'[wp]:
-  sendSignal "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  sendSignal
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 
 lemma invokeIRQControl_valid_duplicates'[wp]:
   "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s) \<rbrace> performIRQControl a
@@ -1398,10 +1441,8 @@ lemma invokeIRQControl_valid_duplicates'[wp]:
 lemma invokeIRQHandler_valid_duplicates'[wp]:
   "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s) \<rbrace> InterruptDecls_H.invokeIRQHandler a
   \<lbrace>\<lambda>_ s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
-  apply (simp add: Interrupt_H.invokeIRQHandler_def)
-  apply (rule hoare_pre)
-  apply (wp|wpc | simp add:ARM_HYP_H.performIRQControl_def invokeIRQHandler_def)+
-  done
+  by (wpsimp simp: Interrupt_H.invokeIRQHandler_def invokeIRQHandler_def
+             split_del: if_split)
 
 lemma invokeCNode_valid_duplicates'[wp]:
   "\<lbrace>\<lambda>s. invs' s \<and> sch_act_simple s \<and> vs_valid_duplicates' (ksPSpace s)
@@ -1415,7 +1456,7 @@ lemma invokeCNode_valid_duplicates'[wp]:
       apply (simp add:invs_valid_objs' invs_pspace_aligned')
      apply (clarsimp simp add:invokeCNode_def | wp | intro conjI)+
     apply (rule hoare_pre)
-    apply (wp hoare_unless_wp | wpc | simp)+
+    apply (wp unless_wp | wpc | simp)+
    apply (simp add:invokeCNode_def)
    apply (wp getSlotCap_inv hoare_drop_imp
      |simp add:locateSlot_conv getThreadCallerSlot_def
@@ -1433,15 +1474,13 @@ lemma invokeCNode_valid_duplicates'[wp]:
 
 lemma getObject_pte_sp:
   "\<lbrace>P\<rbrace> getObject r \<lbrace>\<lambda>t::pte. P and ko_at' t r\<rbrace>"
-  apply (wp getObject_ko_at)
-  apply (auto simp: objBits_simps archObjSize_def pte_bits_def)
-  done
+  by (wp getObject_ko_at)
+     (auto simp: objBits_simps pte_bits_def)
 
 lemma getObject_pde_sp:
   "\<lbrace>P\<rbrace> getObject r \<lbrace>\<lambda>t::pde. P and ko_at' t r\<rbrace>"
-  apply (wp getObject_ko_at)
-  apply (auto simp: objBits_simps archObjSize_def pde_bits_def)
-  done
+  by (wp getObject_ko_at)
+     (auto simp: objBits_simps pde_bits_def)
 
 lemma vs_entry_align_nondup_obj:
   "(vs_entry_align ko = 0) = nondup_obj ko"
@@ -1491,7 +1530,7 @@ lemma mapM_x_zip_the_i:
 lemma upto_enum_word_of_nat:
   "\<lbrakk> a < 2^LENGTH('a); b < 2^LENGTH('a) \<rbrakk> \<Longrightarrow>
   [of_nat a::'a::len word .e. of_nat b] = map of_nat [a .e. b]"
-  by (simp add: upto_enum_word unat_of_nat_eq)
+  by (simp add: upto_enum_word take_bit_nat_eq_self unat_of_nat)
 
 lemma map_shift_of_nat:
   "\<lbrakk> a < 2^LENGTH('a); b < 2^LENGTH('a) \<rbrakk> \<Longrightarrow>
@@ -1522,14 +1561,14 @@ lemma mapM_x_storePTE_slot_updates:
   apply (subst the_ith_mapM_x_reduce, simp)
   apply (drule_tac x="Suc n" in meta_spec)
   apply simp
-  apply (rule hoare_seq_ext, assumption)
+  apply (rule bind_wp, assumption)
   apply (thin_tac "valid P f Q" for P f Q)
   apply (simp add: storePTE_def setObject_def)
   apply (wp hoare_drop_imps | simp add:split_def updateObject_default_def)+
   apply clarsimp
   apply (intro conjI ballI)
    apply (drule(1) bspec)
-   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps archObjSize_def lookupAround2_known1
+   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps lookupAround2_known1
                   dest!:koTypeOf_pte)
    apply (simp add:ps_clear_def dom_fun_upd2[unfolded fun_upd_def])
   apply (erule rsubst[where P=Q])
@@ -1556,15 +1595,15 @@ lemma mapM_x_storePDE_slot_updates:
   apply (subst the_ith_mapM_x_reduce, simp)
   apply (drule_tac x="Suc n" in meta_spec)
   apply simp
-  apply (rule hoare_seq_ext, assumption)
+  apply (rule bind_wp, assumption)
   apply (thin_tac "valid P f Q" for P f Q)
   apply (simp add: storePDE_def setObject_def)
   apply (wp hoare_drop_imps | simp add:split_def updateObject_default_def)+
   apply clarsimp
   apply (intro conjI ballI)
    apply (drule(1) bspec)
-   apply (clarsimp simp:typ_at'_def ko_wp_at'_def objBits_simps archObjSize_def lookupAround2_known1
-                  dest!:koTypeOf_pde)
+   apply (clarsimp simp: typ_at'_def ko_wp_at'_def objBits_simps lookupAround2_known1
+                  dest!: koTypeOf_pde)
    apply (simp add:ps_clear_def dom_fun_upd2[unfolded fun_upd_def])
   apply (erule rsubst[where P=Q])
   apply (rule ext)
@@ -1789,7 +1828,7 @@ lemma performPageInvocation_valid_duplicates'[wp]:
       apply (clarsimp simp: pteCheckIfMapped_def)
       apply (wp mapM_x_mapM_valid | wpc | simp)+
         apply (clarsimp simp:valid_slots_duplicated'_def mapM_x_singleton)+
-        apply (rule PageTableDuplicates.storePTE_no_duplicates', rule getPTE_wp)
+        apply (rule storePTE_no_duplicates', rule getPTE_wp)
       apply (wp hoare_vcg_all_lift hoare_drop_imps)
       apply clarsimp
       apply (simp add:nondup_obj_def)
@@ -1801,7 +1840,7 @@ lemma performPageInvocation_valid_duplicates'[wp]:
      apply (simp add:invs_pspace_aligned' valid_slots'_def)
     apply simp
     apply (clarsimp simp:mapM_singleton pteCheckIfMapped_def)
-    apply (wp PageTableDuplicates.storePTE_no_duplicates' getPTE_wp hoare_drop_imps | simp)+
+    apply (wp storePTE_no_duplicates' getPTE_wp hoare_drop_imps | simp)+
       apply (simp add:nondup_obj_def)
      apply simp+
    apply (clarsimp simp: pdeCheckIfMapped_def)
@@ -1809,19 +1848,19 @@ lemma performPageInvocation_valid_duplicates'[wp]:
       apply (clarsimp simp:valid_arch_inv'_def
           valid_page_inv'_def valid_slots'_def
           valid_slots_duplicated'_def mapM_singleton)
-      apply (wp PageTableDuplicates.storePDE_no_duplicates' getPDE_wp hoare_drop_imps | simp)+
+      apply (wp storePDE_no_duplicates' getPDE_wp hoare_drop_imps | simp)+
         apply (simp add:nondup_obj_def)
        apply simp+
      apply (clarsimp simp:valid_arch_inv'_def
           valid_page_inv'_def valid_slots'_def
           valid_slots_duplicated'_def mapM_singleton)
-     apply (wp PageTableDuplicates.storePDE_no_duplicates' getPDE_wp hoare_drop_imps | simp)+
+     apply (wp storePDE_no_duplicates' getPDE_wp hoare_drop_imps | simp)+
        apply (simp add:nondup_obj_def)
       apply simp+
     apply (clarsimp simp:valid_arch_inv'_def
           valid_page_inv'_def valid_slots'_def
           valid_slots_duplicated'_def mapM_singleton)
-    apply (wp PageTableDuplicates.storePDE_no_duplicates' getPDE_wp hoare_drop_imps | simp)+
+    apply (wp storePDE_no_duplicates' getPDE_wp hoare_drop_imps | simp)+
       apply (simp add:nondup_obj_def)
      apply simp+
    apply (clarsimp simp:valid_arch_inv'_def
@@ -1839,6 +1878,16 @@ lemma performPageInvocation_valid_duplicates'[wp]:
       valid_arch_inv'_def valid_cap'_def invs_valid_objs' invs_pspace_aligned')
   done
 
+lemma pspace_no_overlapD3':
+  "\<lbrakk>pspace_no_overlap' ptr sz s;ksPSpace s p = Some obj;is_aligned ptr sz\<rbrakk>
+  \<Longrightarrow> obj_range' p obj \<inter> {ptr..ptr + 2 ^ sz - 1} = {}"
+  apply (unfold pspace_no_overlap'_def)
+  apply (drule spec)+
+  apply (erule(1) impE)
+  apply (simp only: is_aligned_neg_mask_eq obj_range'_def p_assoc_help)
+  apply (simp only: add_diff_eq ptr_range_mask_range)
+  done
+
 lemma placeASIDPool_valid_duplicates'[wp]:
   notes blah[simp del] = atLeastAtMost_iff atLeastatMost_subset_iff atLeastLessThan_iff
           Int_atLeastAtMost atLeastatMost_empty_iff split_paired_Ex
@@ -1847,7 +1896,7 @@ lemma placeASIDPool_valid_duplicates'[wp]:
   placeNewObject' ptr (KOArch (KOASIDPool makeObject)) 0
   \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (simp add: placeNewObject'_def)
-  apply (wp hoare_unless_wp | wpc |  simp add:alignError_def split_def)+
+  apply (wp unless_wp | wpc |  simp add:alignError_def split_def)+
   apply (subgoal_tac "vs_valid_duplicates' (\<lambda>a. if a = ptr then Some (KOArch (KOASIDPool makeObject)) else ksPSpace s a)")
    apply fastforce
   apply clarsimp
@@ -1856,7 +1905,8 @@ lemma placeASIDPool_valid_duplicates'[wp]:
   apply assumption
   done
 
-crunch valid_duplicates'[wp]: performARMVCPUInvocation "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch performARMVCPUInvocation, performSGISignalGenerate
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps)
 
 lemma performArchInvocation_valid_duplicates':
@@ -1899,7 +1949,7 @@ lemma performArchInvocation_valid_duplicates':
     apply (clarsimp simp:cte_wp_at_ctes_of)
     apply (case_tac ctea,clarsimp)
     apply (frule(1) ctes_of_valid_cap'[OF _ invs_valid_objs'])
-    apply (wp static_imp_wp|simp)+
+    apply (wp hoare_weak_lift_imp|simp)+
         apply (simp add:placeNewObject_def)
         apply (wp |simp add:alignError_def unless_def|wpc)+
        apply (wp updateFreeIndex_pspace_no_overlap' hoare_drop_imp
@@ -1921,13 +1971,10 @@ lemma performArchInvocation_valid_duplicates':
    apply (wp | simp)+
   done
 
-crunches restart, setPriority, setMCPriority
+crunch restart, setPriority, setMCPriority
   for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
   (ignore: threadSet wp: setObject_ksInterrupt updateObject_default_inv
      simp: crunch_simps)
-
-crunch inv [wp]: getThreadBufferSlot P
-  (wp: crunch_wps)
 
 lemma tc_valid_duplicates':
   "\<lbrace>invs' and sch_act_simple and (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and tcb_at' a and ex_nonz_cap_to' a and
@@ -1949,10 +1996,10 @@ lemma tc_valid_duplicates':
   apply (rule hoare_walk_assmsE)
     apply (clarsimp simp: pred_conj_def option.splits [where P="\<lambda>x. x s" for s])
     apply ((wp case_option_wp threadSet_invs_trivial
-               hoare_vcg_all_lift threadSet_cap_to' static_imp_wp | simp add: inQ_def | fastforce)+)[2]
+               hoare_vcg_all_lift threadSet_cap_to' hoare_weak_lift_imp | simp add: inQ_def | fastforce)+)[2]
   apply (rule hoare_walk_assmsE)
     apply (clarsimp simp: pred_conj_def option.splits [where P="\<lambda>x. x s" for s])
-    apply ((wp case_option_wp  setMCPriority_invs' static_imp_wp
+    apply ((wp case_option_wp  setMCPriority_invs' hoare_weak_lift_imp
                typ_at_lifts[OF setMCPriority_typ_at']
                hoare_vcg_all_lift threadSet_cap_to' | simp add: inQ_def  | fastforce)+)[2]
    apply ((simp only: simp_thms cases_simp cong: conj_cong
@@ -1965,13 +2012,13 @@ lemma tc_valid_duplicates':
                checkCap_inv[where P="\<lambda>s. vs_valid_duplicates' (ksPSpace s)"]
                checkCap_inv[where P=sch_act_simple]
                cteDelete_valid_duplicates'
-               hoare_vcg_const_imp_lift_R
+               hoare_vcg_const_imp_liftE_R
                typ_at_lifts [OF setPriority_typ_at']
                assertDerived_wp
                threadSet_cte_wp_at'
-               hoare_vcg_all_lift_R
+               hoare_vcg_all_liftE_R
                hoare_vcg_all_lift
-               static_imp_wp
+               hoare_weak_lift_imp
                )[1]
          | wpc
          | simp add: inQ_def
@@ -1984,7 +2031,7 @@ lemma tc_valid_duplicates':
                simp: isCap_simps)
   done
 
-crunches performTransfer, unbindNotification, bindNotification, setDomain
+crunch performTransfer, unbindNotification, bindNotification, setDomain, prepareSetDomain,postSetFlags, setFlags
   for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
   (ignore: threadSet wp: setObject_ksInterrupt updateObject_default_inv
      simp: crunch_simps)
@@ -2007,8 +2054,11 @@ lemma invokeTCB_valid_duplicates'[wp]:
      apply (clarsimp split:option.splits)
      apply (rename_tac option)
      apply (case_tac option, simp_all)
-    apply (simp add:invokeTCB_def | wp mapM_x_wp' | intro impI conjI | wpc)+
+    apply (simp add:invokeTCB_def invokeSetFlags_def | wp mapM_x_wp' | intro impI conjI | wpc)+
   done
+
+crunch invokeDomain
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 
 lemma performInvocation_valid_duplicates'[wp]:
   "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s) \<and> invs' s \<and> sch_act_simple s
@@ -2045,13 +2095,15 @@ lemma hi_valid_duplicates'[wp]:
                         dest: st_tcb_at_idle_thread')+
   done
 
-crunch valid_duplicates' [wp]:
-  activateIdleThread "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
+crunch
+  activateIdleThread
+  for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
   (ignore: setNextPC threadSet simp:crunch_simps)
 
-crunch valid_duplicates' [wp]:
-  tcbSchedAppend "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
-  (simp:crunch_simps wp:hoare_unless_wp)
+crunch
+  tcbSchedAppend
+  for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
+  (simp:crunch_simps wp:unless_wp)
 
 lemma timerTick_valid_duplicates'[wp]:
   "\<lbrace>\<lambda>s. vs_valid_duplicates' (ksPSpace s)\<rbrace>
@@ -2079,8 +2131,9 @@ lemma handleInterrupt_valid_duplicates'[wp]:
   done
 
 
-crunch valid_duplicates' [wp]:
-  schedule "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
+crunch
+  schedule
+  for valid_duplicates'[wp]: "(\<lambda>s. vs_valid_duplicates' (ksPSpace s))"
   (ignore: setNextPC clearExMonitor threadSet
      simp: crunch_simps wp:findM_inv hoare_drop_imps)
 
@@ -2089,35 +2142,41 @@ lemma activate_sch_valid_duplicates'[wp]:
      activateThread \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
   apply (simp add: activateThread_def getCurThread_def
              cong: if_cong Structures_H.thread_state.case_cong)
-  apply (rule hoare_seq_ext [OF _ gets_sp])
-  apply (rule hoare_seq_ext[where B="\<lambda>st s.  (runnable' or idle') st
-    \<and> vs_valid_duplicates' (ksPSpace s)"])
+  apply (rule bind_wp [OF _ gets_sp])
+  apply (rule bind_wp[where Q'="\<lambda>st s. (runnable' or idle') st \<and> vs_valid_duplicates' (ksPSpace s)"])
    apply (rule hoare_pre)
     apply (wp | wpc | simp add: setThreadState_runnable_simp)+
   apply (clarsimp simp: ct_in_state'_def cur_tcb'_def pred_tcb_at'
                  elim!: pred_tcb'_weakenE)
   done
 
-crunch valid_duplicates'[wp]:
-  receiveSignal "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  receiveSignal
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 
-crunch valid_duplicates'[wp]:
-  receiveIPC "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
-(wp: getNotification_wp gbn_wp')
+crunch
+  receiveIPC
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+  (wp: getNotification_wp gbn_wp' crunch_wps)
 
-crunch valid_duplicates'[wp]:
-  deleteCallerCap "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  deleteCallerCap
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
   (wp: crunch_wps)
 
-crunch valid_duplicates'[wp]:
-  handleReply "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  handleReply
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+  (wp: crunch_wps)
 
-crunch valid_duplicates'[wp]:
-  handleYield "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
- (ignore: threadGet simp:crunch_simps wp:hoare_unless_wp)
+crunch
+  handleYield
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+ (ignore: threadGet simp:crunch_simps wp:unless_wp)
 
-crunch valid_duplicates'[wp]:
-  "VSpace_H.handleVMFault", handleHypervisorFault "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
+crunch
+  "VSpace_H.handleVMFault", handleHypervisorFault
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
  (ignore: getFAR getDFSR getIFSR simp:crunch_simps)
 
 lemma hs_valid_duplicates'[wp]:
@@ -2142,9 +2201,9 @@ lemma handleRecv_valid_duplicates'[wp]:
    apply wp
        apply ((wp getNotification_wp | wpc | simp add: whenE_def split del: if_split)+)[1]
 
-      apply (rule_tac Q="\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)"
+      apply (rule_tac Q'="\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)"
 
-                   in hoare_post_impErr[rotated])
+                   in hoare_strengthen_postE[rotated])
 
         apply (clarsimp simp: isCap_simps sch_act_sane_not)
        apply assumption
@@ -2154,6 +2213,8 @@ lemma handleRecv_valid_duplicates'[wp]:
               simp: ct_in_state'_def sch_act_sane_def)
   done
 
+crunch maybeHandleInterrupt
+  for valid_duplicates'[wp]: "\<lambda>s. vs_valid_duplicates' (ksPSpace s)"
 
 lemma handleEvent_valid_duplicates':
   "\<lbrace>invs' and (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and
@@ -2173,10 +2234,9 @@ lemma dmo_getActiveIRQ_notin_non_kernel_IRQs[wp]:
   unfolding doMachineOp_def
   by (wpsimp simp: getActiveIRQ_def in_monad split: if_split_asm)
 
-lemma non_kernel_IRQs_strg:
-  "invs' s \<and> irq \<notin> Some ` non_kernel_IRQs \<and> Q \<Longrightarrow>
-    (\<exists>y. irq = Some y) \<longrightarrow> invs' s \<and> (the irq \<in> non_kernel_IRQs \<longrightarrow> P) \<and> Q"
-  by auto
+(* nothing extra needed on this architecture *)
+defs fastpathKernelAssertions_def:
+  "fastpathKernelAssertions \<equiv> \<lambda>s. True"
 
 lemma callKernel_valid_duplicates':
   "\<lbrace>invs' and (\<lambda>s. vs_valid_duplicates' (ksPSpace s)) and
@@ -2184,22 +2244,20 @@ lemma callKernel_valid_duplicates':
     (\<lambda>s. e \<noteq> Interrupt \<longrightarrow> ct_running' s)\<rbrace>
    callKernel e
    \<lbrace>\<lambda>rv s. vs_valid_duplicates' (ksPSpace s)\<rbrace>"
-  apply (simp add: callKernel_def)
-  apply (rule hoare_pre)
-   apply (wp activate_invs' activate_sch_act schedule_sch
-             hoare_drop_imp[where R="\<lambda>_. kernelExitAssertions"]
-             schedule_sch_act_simple he_invs' hoare_vcg_if_lift3
-          | simp add: no_irq_getActiveIRQ
-          | strengthen non_kernel_IRQs_strg, simp cong: conj_cong)+
-   apply (rule hoare_post_impErr)
-     apply (rule valid_validE)
-     prefer 2
-     apply assumption
-    apply (wp handleEvent_valid_duplicates')
-   apply simp
-  apply simp
+  unfolding callKernel_def fastpathKernelAssertions_def
+  apply (wpsimp wp: activate_invs' activate_sch_act schedule_sch
+                    hoare_drop_imp[where Q'="\<lambda>_. kernelExitAssertions"]
+                    hoare_drop_imp[where Q'="\<lambda>rv _. rv = None"]
+                    schedule_sch_act_simple he_invs' hoare_vcg_if_lift3
+                simp: no_irq_getActiveIRQ
+         | strengthen non_kernel_IRQs_strg, simp cong: conj_cong)+
+    apply (rule hoare_strengthen_postE)
+      apply (rule valid_validE)
+      prefer 2
+      apply assumption
+     apply (wpsimp wp: handleEvent_valid_duplicates')+
   done
 
-end
+end (* Arch *)
 
 end

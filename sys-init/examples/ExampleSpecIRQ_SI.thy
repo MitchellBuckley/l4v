@@ -16,15 +16,11 @@ theory ExampleSpecIRQ_SI
 imports SysInit.WellFormed_SI
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 (****************************************************
  * Definitions of all the objects and capabilities. *
  ***************************************************)
-
-definition small_section_size :: nat
-where
-  "small_section_size = 20"
 
 definition "guard = 0"
 definition "guard_size = 1"
@@ -58,32 +54,36 @@ lemmas ids [simp] = tcb_a_id_def tcb_b_id_def cnode_a1_id_def
 definition
   "tcb_a =
   \<lparr>cdl_tcb_caps = [tcb_cspace_slot \<mapsto> CNodeCap cnode_a1_id guard guard_size cnode_a1_size,
-                   tcb_vspace_slot \<mapsto> PageDirectoryCap pd_a_id Real None,
+                   tcb_vspace_slot \<mapsto> PageTableCap PD pd_a_id Real None,
                    tcb_replycap_slot \<mapsto> NullCap,
                    tcb_caller_slot \<mapsto> NullCap,
                    tcb_ipcbuffer_slot \<mapsto> FrameCap False frame_a1_id {AllowRead, AllowWrite} small_frame_size Real None,
                    tcb_pending_op_slot \<mapsto> NullCap,
-                   tcb_boundntfn_slot \<mapsto> NullCap],
+                   tcb_boundntfn_slot \<mapsto> NullCap,
+                   tcb_boundvcpu_slot \<mapsto> NullCap],
    cdl_tcb_fault_endpoint = 0,
    cdl_tcb_intent = \<lparr>cdl_intent_op = None, cdl_intent_error = False, cdl_intent_cap = 0,
                      cdl_intent_extras = [], cdl_intent_recv_slot = None\<rparr>,
    cdl_tcb_has_fault = False,
-   cdl_tcb_domain = minBound\<rparr>"
+   cdl_tcb_domain = minBound,
+   cdl_tcb_extra = default_tcb_extra_data \<rparr>"
 
 definition
   "tcb_b =
   \<lparr>cdl_tcb_caps = [tcb_cspace_slot \<mapsto> CNodeCap cnode_b_id guard guard_size cnode_b_size,
-                   tcb_vspace_slot \<mapsto> PageDirectoryCap pd_b_id Real None,
+                   tcb_vspace_slot \<mapsto> PageTableCap PD pd_b_id Real None,
                    tcb_replycap_slot \<mapsto> NullCap,
                    tcb_caller_slot \<mapsto> NullCap,
-                   tcb_ipcbuffer_slot \<mapsto> FrameCap False frame_b_id {AllowRead, AllowWrite} small_section_size Real None,
+                   tcb_ipcbuffer_slot \<mapsto> FrameCap False frame_b_id {AllowRead, AllowWrite} sectionBits Real None,
                    tcb_pending_op_slot \<mapsto> NullCap,
-                   tcb_boundntfn_slot \<mapsto> NullCap],
+                   tcb_boundntfn_slot \<mapsto> NullCap,
+                   tcb_boundvcpu_slot \<mapsto> NullCap],
    cdl_tcb_fault_endpoint = 0,
    cdl_tcb_intent = \<lparr>cdl_intent_op = None, cdl_intent_error = False, cdl_intent_cap = 0,
                      cdl_intent_extras = [], cdl_intent_recv_slot = None\<rparr>,
    cdl_tcb_has_fault = False,
-   cdl_tcb_domain = minBound\<rparr>"
+   cdl_tcb_domain = minBound,
+   cdl_tcb_extra = default_tcb_extra_data \<rparr>"
 
 definition
   "new_cap_map sz caps \<equiv> empty_cap_map sz ++ caps"
@@ -104,8 +104,8 @@ definition
    new_cnode cnode_a2_size
              [0 \<mapsto> EndpointCap ep_id 0 {Write},
               2 \<mapsto> CNodeCap cnode_a1_id guard guard_size cnode_a1_size,
-              3 \<mapsto> PageDirectoryCap pd_a_id Real None,
-              4 \<mapsto> PageTableCap pt_a_id Real None,
+              3 \<mapsto> PageTableCap PD pd_a_id Real None,
+              4 \<mapsto> PageTableCap PT pt_a_id Real None,
               8 \<mapsto> FrameCap False frame_a1_id {AllowRead, AllowWrite} small_frame_size Real None,
               10 \<mapsto> NotificationCap ntfn_id 0 {Read},
               11 \<mapsto> FrameCap False frame_a2_id {AllowRead, AllowWrite} small_frame_size Real None,
@@ -117,9 +117,9 @@ definition
              [0 \<mapsto> TcbCap tcb_b_id,
               2 \<mapsto> CNodeCap cnode_b_id guard guard_size cnode_b_size,
               4 \<mapsto> EndpointCap ep_id 0 {Read},
-              7 \<mapsto> PageDirectoryCap pd_b_id Real None,
-              8 \<mapsto> FrameCap False frame_b_id {AllowRead, AllowWrite} small_section_size Real None,
-              254 \<mapsto> IrqHandlerCap 254]"
+              7 \<mapsto> PageTableCap PD pd_b_id Real None,
+              8 \<mapsto> FrameCap False frame_b_id {AllowRead, AllowWrite} sectionBits Real None,
+              0x3F \<mapsto> IrqHandlerCap 0x3F]"
 
 definition
   "cnode_extra \<equiv>
@@ -129,21 +129,21 @@ definition
               2 \<mapsto> NotificationCap ntfn_id 0 {Read, Write}]"
 
 definition
-  "pd_a \<equiv> \<lparr>cdl_page_directory_caps = new_cap_map pd_size [0 \<mapsto> PageTableCap pt_a_id Fake None]\<rparr>"
+  "pd_a \<equiv> new_cap_map pd_size [0 \<mapsto> PageTableCap PT pt_a_id (Fake 0) None]"
 
 definition
-  "pd_b \<equiv> \<lparr>cdl_page_directory_caps = new_cap_map pd_size
-           [2 \<mapsto> FrameCap False frame_b_id {AllowRead, AllowWrite} small_section_size Fake None]\<rparr>"
+  "pd_b \<equiv> new_cap_map pd_size
+           [2 \<mapsto> FrameCap False frame_b_id {AllowRead, AllowWrite} sectionBits (Fake 0) None]"
 
 definition
-  "pt_a \<equiv> \<lparr>cdl_page_table_caps = new_cap_map pt_size
-           [0 \<mapsto> FrameCap False frame_a1_id {AllowRead, AllowWrite} small_frame_size Fake None,
-            255 \<mapsto> FrameCap False frame_a2_id {AllowRead, AllowWrite} small_frame_size Fake None]\<rparr>"
+  "pt_a \<equiv> new_cap_map pt_size
+           [0 \<mapsto> FrameCap False frame_a1_id {AllowRead, AllowWrite} small_frame_size (Fake 0) None,
+            255 \<mapsto> FrameCap False frame_a2_id {AllowRead, AllowWrite} small_frame_size (Fake 0) None]"
 
 definition
-  "empty_frame \<equiv> \<lparr>cdl_frame_size_bits = small_frame_size\<rparr>"
+  "empty_frame \<equiv> \<lparr>cdl_frame_size_bits = small_frame_size, cdl_frame_fills = default_frame_fill_data\<rparr>"
 definition
-  "empty_section \<equiv> \<lparr>cdl_frame_size_bits = small_section_size\<rparr>"
+  "empty_section \<equiv> \<lparr>cdl_frame_size_bits = sectionBits, cdl_frame_fills = default_frame_fill_data\<rparr>"
 
 definition
   example_irq_node :: "cdl_irq \<Rightarrow> cdl_object_id"
@@ -160,14 +160,16 @@ definition
   irq_objects :: cdl_heap
 where
   "irq_objects \<equiv>
-  \<lambda>obj_id. if obj_id = 0x104 then Some (IRQNode (new_irq_node ntfn_id))
-           else if 0x100 \<le> obj_id \<and> obj_id < 0x200 then (Some (IRQNode empty_irq_node))
+  \<lambda>obj_id. if obj_id = 0x104
+           then Some (IRQNode (new_irq_node ntfn_id))
+           else if 0x100 \<le> obj_id \<and> obj_id \<le> 0x100 + mask LENGTH(irq_len)
+           then (Some (IRQNode empty_irq_node))
            else None"
 
 
 lemma
   "irq_objects =
-  (\<lambda>obj_id. if 0x100 \<le> obj_id \<and> obj_id < 0x200
+  (\<lambda>obj_id. if 0x100 \<le> obj_id \<and> obj_id \<le> 0x100 + mask LENGTH(irq_len)
             then (Some (IRQNode empty_irq_node))
             else None) ++
   (\<lambda>obj_id. if obj_id = 0x104 then Some (IRQNode (new_irq_node ntfn_id))
@@ -182,9 +184,9 @@ definition
   \<lparr>cdl_arch = ARM11,
    cdl_objects = [tcb_a_id    \<mapsto> Tcb tcb_a,
                   tcb_b_id    \<mapsto> Tcb tcb_b,
-                  pd_a_id     \<mapsto> PageDirectory pd_a,
-                  pt_a_id     \<mapsto> PageTable pt_a,
-                  pd_b_id     \<mapsto> PageDirectory pd_b,
+                  pd_a_id     \<mapsto> PageTable PD pd_a,
+                  pt_a_id     \<mapsto> PageTable PT pt_a,
+                  pd_b_id     \<mapsto> PageTable PD pd_b,
                   cnode_a1_id \<mapsto> CNode cnode_a1,
                   cnode_a2_id \<mapsto> CNode cnode_a2,
                   cnode_b_id  \<mapsto> CNode cnode_b,
@@ -193,9 +195,9 @@ definition
                   frame_a2_id \<mapsto> Frame empty_frame,
                   frame_b_id  \<mapsto> Frame empty_section,
                   ep_id       \<mapsto> Endpoint,
-                  ntfn_id      \<mapsto> Notification,
+                  ntfn_id     \<mapsto> Notification,
                   0x104       \<mapsto> IRQNode (new_irq_node ntfn_id),
-                  0x1FE       \<mapsto> IRQNode empty_irq_node],
+                  0x13F       \<mapsto> IRQNode empty_irq_node],
    cdl_cdt = [(cnode_a2_id, 0)  \<mapsto> (cnode_extra_id, 1),
               (cnode_b_id,  4)  \<mapsto> (cnode_extra_id, 1),
               (cnode_a2_id, 10) \<mapsto> (cnode_extra_id, 2)], \<comment> \<open>All caps are orig caps,
@@ -203,7 +205,9 @@ definition
    cdl_current_thread = undefined,
    cdl_irq_node = example_irq_node,
    cdl_asid_table = undefined,
-   cdl_current_domain = minBound\<rparr>"
+   cdl_current_domain = minBound,
+   cdl_dom_schedule = [(0, maxBound)],
+   cdl_dom_start = 0\<rparr>"
 
 
 lemmas cnode_defs = cnode_a1_def cnode_a2_def cnode_b_def cnode_extra_def
@@ -245,7 +249,7 @@ lemma cdl_frame_size_bits_empty_frame [simp]:
   by (simp add: empty_frame_def)
 
 lemma cdl_frame_size_bits_empty_section [simp]:
-  "cdl_frame_size_bits empty_section = small_section_size"
+  "cdl_frame_size_bits empty_section = sectionBits"
   by (simp add: empty_section_def)
 
 lemma object_slots_empty_objects [simp]:
@@ -253,8 +257,8 @@ lemma object_slots_empty_objects [simp]:
   by (clarsimp simp: object_slots_def)+
 
 lemma is_fake_pt_cap_simps:
-  "\<not> is_fake_pt_cap (PageTableCap obj_id Real asid)"
-  "is_fake_pt_cap (PageTableCap obj_id Fake asid)"
+  "\<not> is_fake_pt_cap (PageTableCap PT obj_id Real asid)"
+  "is_fake_pt_cap (PageTableCap PT obj_id (Fake attr) asid)"
   by (clarsimp simp: is_fake_pt_cap_def)+
 
 lemma frame_cap_not_cnode:
@@ -322,10 +326,11 @@ lemma object_slots_empty_irq_node [simp, dest!]:
 
 lemma tcb_domain_simp [simp]:
   "tcb_domain (Tcb \<lparr>cdl_tcb_caps = caps,
-                    cdl_tcb_fault_endpoint = 0,
+                    cdl_tcb_fault_endpoint = ep,
                     cdl_tcb_intent = intent,
                     cdl_tcb_has_fault = fault,
-                    cdl_tcb_domain = domain\<rparr>) = domain"
+                    cdl_tcb_domain = domain,
+                    cdl_tcb_extra = extra \<rparr>) = domain"
   by (simp add: tcb_domain_def)
 
 
@@ -334,12 +339,12 @@ lemma cdl_irq_node_example_spec [simp]:
   by (clarsimp simp: example_spec_def)
 
 lemma range_example_irq_node_helper:
-  "range example_irq_node = (\<lambda>irq. irq + 0x100) ` range (ucast :: 10 word \<Rightarrow> 32 word)"
+  "range example_irq_node = (\<lambda>irq. irq + 0x100) ` range (ucast :: irq \<Rightarrow> 32 word)"
   by (auto simp: example_irq_node_def image_def)
 
 lemma range_example_irq_node:
-  "range example_irq_node =  {x. 0x100 \<le> x \<and> x < 0x500}"
-  apply (clarsimp simp: range_example_irq_node_helper ucast_range_less)
+  "range example_irq_node =  {x. 0x100 \<le> x \<and> x < 0x100 + 2^irq_len}"
+  apply (clarsimp simp: range_example_irq_node_helper ucast_range_less irq_len_val)
   apply (clarsimp simp: image_def)
   apply rule
    apply (clarsimp simp:  word_le_nat_alt  word_less_nat_alt unat_plus_if')
@@ -349,7 +354,7 @@ lemma range_example_irq_node:
   done
 
 lemma irq_nodes_example_spec:
-  "irq_nodes example_spec = {obj_id. obj_id = 0x104 \<or> obj_id = 0x1FE}"
+  "irq_nodes example_spec = {obj_id. obj_id = 0x104 \<or> obj_id = 0x13F}"
   by (auto simp: irq_nodes_def example_spec_def object_at_def is_irq_node_def)
 
 (*************************
@@ -369,16 +374,7 @@ lemma onehundred_not_le_one:
   "\<not>(0x100 \<le> (1::32 word))"
   by unat_arith
 
-lemma object_type_simps [simp]:
-  "object_type (Tcb t) = TcbType"
-  "object_type (CNode c) = CNodeType"
-  "object_type (Endpoint) = EndpointType"
-  "object_type (Notification) = NotificationType"
-  "object_type (PageDirectory pd) = PageDirectoryType"
-  "object_type (PageTable pt) = PageTableType"
-  "object_type (Frame f) = FrameType (cdl_frame_size_bits f)"
-  "object_type (IRQNode empty_irq_node) = IRQNodeType"
-  by (clarsimp simp: object_type_def)+
+declare object_type_simps[simp] (* FIXME: move to capDL setup *)
 
 lemma cap_irq_simp [simp]:
   "cap_irq (IrqHandlerCap irq) = irq"
@@ -386,7 +382,7 @@ lemma cap_irq_simp [simp]:
 
 lemma example_irq_node_simps [simp]:
   "example_irq_node 4 = 0x104"
-  "example_irq_node 0xFE = 0x1FE"
+  "example_irq_node 0x3F = 0x13F"
   by (simp add: example_irq_node_def)+
 
 lemma irq_objects_simps [simp]:
@@ -473,7 +469,7 @@ lemma slots_of_example_spec_obj_ids:
 lemma irq_handler_cap_example_spec:
   "\<lbrakk>is_irqhandler_cap cap; opt_cap (obj_id, slot) example_spec = Some cap\<rbrakk>
   \<Longrightarrow> (obj_id = cnode_a2_id \<and> slot = 12) \<or>
-      (obj_id = cnode_b_id \<and> slot = 254)"
+      (obj_id = cnode_b_id \<and> slot = 0x3F)"
   by (clarsimp simp: example_spec_def opt_cap_def slots_of_def
                      object_slots_def empty_irq_node_def new_irq_node_def new_cnode_def
                      obj_defs new_cap_map_def empty_cap_map_def
@@ -483,7 +479,7 @@ lemma irq_handler_cap_example_spec:
 lemma irqhandler_cap_at_example_spec:
   "irqhandler_cap_at (obj_id, slot) example_spec
   = ((obj_id = cnode_a2_id \<and> slot = 12) \<or>
-     (obj_id = cnode_b_id \<and> slot = 254))"
+     (obj_id = cnode_b_id \<and> slot = 0x3F))"
   apply (clarsimp simp: cap_at_def)
   apply (rule iffI)
    apply clarsimp
@@ -516,12 +512,12 @@ lemma is_orig_cap_example_spec:
 lemma well_formed_tcb_a:
   "well_formed_tcb example_spec obj_id (Tcb tcb_a)"
   by (auto simp: well_formed_tcb_def object_slots_def tcb_a_def tcb_slot_defs tcb_has_fault_def
-                 is_default_cap_def default_cap_def cap_type_def irq_nodes_example_spec)
+                 is_default_cap_def default_cap_def cap_type_def irq_nodes_example_spec obj_tcb_def)
 
 lemma well_formed_tcb_b:
   "well_formed_tcb example_spec obj_id (Tcb tcb_b)"
   by (auto simp: well_formed_tcb_def object_slots_def tcb_b_def tcb_slot_defs tcb_has_fault_def
-                 is_default_cap_def default_cap_def cap_type_def irq_nodes_example_spec)
+                 is_default_cap_def default_cap_def cap_type_def irq_nodes_example_spec obj_tcb_def)
 
 lemma well_formed_orig_caps_unique_example:
   "well_formed_orig_caps_unique example_spec"
@@ -548,6 +544,16 @@ lemma well_formed_cap_ex [simp]:
   "well_formed_cap (CNodeCap a 0 0 2)"
   "well_formed_cap (TcbCap 0)"
   by (clarsimp simp: well_formed_cap_def guard_bits_def)+
+
+lemma validate_vm_attributes_0[simp]:
+  "validate_vm_attributes 0 vmsz = 0"
+  unfolding validate_vm_attributes_def
+  by (clarsimp simp: attribs_from_word_def attribs_to_word_def split: vmpage_size.splits)
+
+lemma validate_pt_vm_attributes_0[simp]:
+  "validate_pt_vm_attributes 0 = 0"
+  unfolding validate_pt_vm_attributes_def
+  by (simp add: attribs_from_word_def attribs_to_word_def)
 
 lemma well_formed_cap_example [simp]:
   "\<lbrakk>cdl_objects example_spec obj_id = Some obj;
@@ -605,15 +611,18 @@ lemma well_formed_orig_cap_example [simp]:
                         new_irq_node_def ep_related_cap_def cap_type_def default_cap_def cap_rights_def
                 split: if_split_asm)
 
+lemma copyable_example:
+  "\<lbrakk> cdl_objects example_spec obj_id = Some obj; object_slots obj slot = Some cap; cap \<noteq> NullCap;
+     \<not> original_cap_at (obj_id, slot) example_spec \<rbrakk> \<Longrightarrow>
+   is_copyable_cap cap"
+  unfolding is_orig_cap_example_spec is_copyable_cap_def
+  by (auto simp: example_spec_def obj_defs object_slots_def
+           dest!: cdl_cnode_caps_new_cnode_D new_cap_map_caps_D)
+
 lemma well_formed_caps_example:
   "cdl_objects example_spec obj_id = Some obj \<Longrightarrow>
    well_formed_caps example_spec obj_id obj"
-   apply (clarsimp simp: well_formed_caps_def, rule conjI)
-   apply (clarsimp simp: is_orig_cap_example_spec)
-   apply (clarsimp simp: example_spec_def obj_defs object_type_def cap_type_def object_slots_def
-                         is_copyable_cap_def
-                  dest!: cdl_cnode_caps_new_cnode_D new_cap_map_caps_D
-                  split: if_split_asm)
+   apply (clarsimp simp: well_formed_caps_def copyable_example)
    apply (rule conjI)
     apply (clarsimp simp: well_formed_cap_to_real_object_def real_object_at_def irq_nodes_example_spec)
     apply (clarsimp simp: example_spec_def obj_defs object_slots_def onehundred_not_le_one
@@ -678,13 +687,13 @@ lemma real_object_at_example_spec_simp [simp]:
   "real_object_at 0xC example_spec"
   "real_object_at 0xD example_spec"
   "\<not>real_object_at 0x104 example_spec"
-  "\<not>real_object_at 0x1FE example_spec"
+  "\<not>real_object_at 0x13F example_spec"
   by (clarsimp simp: real_object_at_example_spec)+
 
 lemma cdl_objects_example_spec_simps [simp]:
   "cdl_objects example_spec 4 = Some (Frame empty_frame)"
   "cdl_objects example_spec 0xD = Some Notification"
-  "cdl_objects example_spec 0x1FE = Some (IRQNode empty_irq_node)"
+  "cdl_objects example_spec 0x13F = Some (IRQNode empty_irq_node)"
   by (clarsimp simp: example_spec_def map_add_def)+
 
 lemma well_formed_cap_to_object_example:
@@ -728,7 +737,7 @@ lemma well_formed_cap_to_object_example:
     apply (rule_tac x=12 in exI) (* Not sure why fastforce gives up here. *)
     apply (fastforce simp: cnode_at_example_spec cnode_a2_def
                            object_slots_def new_cnode_def new_cap_map_def)
-   apply (case_tac "obj_id = 0x1FE")
+   apply (case_tac "obj_id = 0x13F")
     apply (rule_tac x=cnode_b_id in exI)
     apply (fastforce simp: cnode_at_example_spec cnode_b_def
                            object_slots_def new_cnode_def new_cap_map_def)
@@ -760,13 +769,13 @@ lemma well_formed_vspace_example:
   apply (clarsimp simp: example_spec_def is_pt_def is_pd_def object_slots_def empty_cap_map_def
                         new_irq_node_def
                  split: if_split_asm)
-    apply (fastforce simp: cap_type_def is_fake_vm_cap_def obj_defs new_cap_map_def small_section_size_def
+    apply (fastforce simp: cap_type_def is_fake_vm_cap_def obj_defs new_cap_map_def
                     split: if_split_asm)
    apply (clarsimp simp: obj_defs new_cap_map_def cap_type_def small_frame_size_def
-                         is_fake_vm_cap_def is_fake_pt_cap_simps small_section_size_def
+                         is_fake_vm_cap_def is_fake_pt_cap_simps
                   split: if_split_asm)
   apply (clarsimp simp: obj_defs new_cap_map_def cap_type_def small_frame_size_def
-                        is_fake_vm_cap_def is_fake_pt_cap_simps small_section_size_def
+                        is_fake_vm_cap_def is_fake_pt_cap_simps
                  split: if_split_asm)
   done
 
@@ -785,7 +794,7 @@ lemma ucast_0xFE:
   by (rule ucast_up_inj, simp+)
 
 lemma ucast_4:
-  "(ucast :: 10 word \<Rightarrow> 32 word) irq = 4 \<Longrightarrow> irq = 4"
+  "(ucast :: irq \<Rightarrow> 32 word) irq = 4 \<Longrightarrow> irq = 4"
   by (rule ucast_up_inj, simp+)
 
 lemma rangeD:
@@ -864,6 +873,13 @@ lemma well_formed_irq_node_example_spec:
                         split: if_split_asm)
   done
 
+lemma well_formed_frame_extra_example_spec:
+  "cdl_objects example_spec obj_id = Some obj \<Longrightarrow>
+   well_formed_frame_extra example_spec obj_id obj"
+  by (clarsimp simp: well_formed_frame_extra_def example_spec_def empty_frame_def
+                     empty_section_def
+               split: if_split_asm)
+
 lemma well_formed_example:
   "well_formed example_spec"
   apply (clarsimp simp: well_formed_def)
@@ -879,6 +895,8 @@ lemma well_formed_example:
   apply (rule conjI)
    apply (fact well_formed_tcb_example_spec)
   apply (rule conjI)
+   apply (fact well_formed_frame_extra_example_spec)
+  apply (rule conjI)
    apply (fact well_formed_vspace_example)
   apply (rule conjI)
    apply (fact well_formed_irq_node_example_spec)
@@ -887,7 +905,7 @@ lemma well_formed_example:
                     pd_size_def word_bits_def empty_cnode_def is_cnode_def
                     object_slots_def empty_cap_map_def tcb_slot_defs slots_of_def
                     default_tcb_def obj_defs cap_at_def opt_cap_def
-                    small_frame_size_def small_section_size_def pt_size_def
+                    small_frame_size_def pt_size_def pt_type_index_bits_def
                     new_cnode_def new_cap_map_def empty_irq_node_def
                     new_irq_node_def
              split: if_split_asm)
@@ -895,4 +913,3 @@ lemma well_formed_example:
 end
 
 end
-

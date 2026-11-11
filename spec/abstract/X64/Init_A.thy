@@ -14,7 +14,7 @@ theory Init_A
 imports Retype_A
 begin
 
-context Arch begin global_naming X64_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   This is not a specification of true kernel
@@ -56,7 +56,9 @@ definition
     x64_current_cr3 = cr3 0 0,
     x64_allocated_io_ports = \<lambda>_. False,
     x64_num_ioapics = 1,
-    x64_irq_state = K IRQFree
+    x64_ioapic_nirqs = \<lambda>_. ucast ioapicIRQLines,
+    x64_irq_state = K IRQFree,
+    x64_current_fpu_owner = None
    \<rparr>"
 
 definition [simp]:
@@ -91,6 +93,10 @@ definition
          tcb_fault = None,
          tcb_bound_notification = None,
          tcb_mcpriority = minBound,
+         tcb_priority = 0,
+         tcb_time_slice = timeSlice,
+         tcb_domain = default_domain,
+         tcb_flags = {},
          tcb_arch = init_arch_tcb
          \<rparr>,
      init_global_pml4 \<mapsto> ArchObj (PageMapL4 global_pml4),
@@ -113,6 +119,13 @@ definition
     is_original_cap = init_ioc,
     cur_thread = idle_thread_ptr,
     idle_thread = idle_thread_ptr,
+    scheduler_action = resume_cur_thread,
+    domain_list = [(0, -1), (0, 0)],
+    domain_index = 0,
+    domain_start_index = 0,
+    cur_domain = 0,
+    domain_time = 15,
+    ready_queues = const (const []),
     machine_state = init_machine_state,
     interrupt_irq_node = \<lambda>irq. init_irq_node_ptr + (ucast irq << cte_level_bits),
     interrupt_states = \<lambda>_. Structures_A.IRQInactive,

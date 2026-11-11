@@ -201,11 +201,10 @@ lemma lookup_tree_to_list_of_:
   (* this big blob just does case distinctions of both subtrees and
      all possible lookup results within each, then solves *)
   (* slow 10s *)
-  apply (fastforce simp: apfst_def map_prod_def map_add_def
-                   split: prod.splits option.splits if_splits
-                   dest: lookup_tree_valid_empty lookup_tree_valid_range lookup_tree_valid_in_range
-                   elim: lookup_tree_valid_in_range_None)
-  done
+  by (fastforce simp: apfst_def map_prod_def map_add_def
+                split: prod.splits option.splits if_splits
+                dest: lookup_tree_valid_empty lookup_tree_valid_range lookup_tree_valid_in_range
+                elim: lookup_tree_valid_in_range_None)
 
 (* Standard form of above *)
 lemma lookup_tree_to_list_of:
@@ -363,22 +362,22 @@ fun conv_at skel conv ctxt ct = let
   fun mismatch current_skel current_ct =
     raise TERM ("conv_at mismatch", [current_skel, Thm.term_of current_ct, skel, Thm.term_of ct])
 
-  fun walk (Free ("HERE", _)) ctxt ct = conv ct
+  fun walk (Free ("HERE", _)) _ ct = conv ct
     | walk (skel as skel_f $ skel_x) ctxt ct =
         (case Thm.term_of ct of
-            f $ x => Conv.combination_conv (walk skel_f ctxt) (walk skel_x ctxt) ct
+            _ $ _ => Conv.combination_conv (walk skel_f ctxt) (walk skel_x ctxt) ct
           | _ => mismatch skel ct)
     | walk (skel as Abs (_, _, skel_body)) ctxt ct =
         (case Thm.term_of ct of
-            Abs _ => Conv.abs_conv (fn (v, ctxt') => walk skel_body ctxt') ctxt ct
+            Abs _ => Conv.abs_conv (fn (_, ctxt') => walk skel_body ctxt') ctxt ct
           | _ => mismatch skel ct)
     (* Also check that Consts match the skeleton pattern *)
-    | walk (skel as Const (skel_name, _)) ctxt ct =
+    | walk (skel as Const (skel_name, _)) _ ct =
         if (case Thm.term_of ct of Const (name, _) => name = skel_name | _ => false)
         then Thm.reflexive ct
         else mismatch skel ct
     (* Default case *)
-    | walk _ ctxt ct = Thm.reflexive ct
+    | walk _ _ ct = Thm.reflexive ct
   in walk skel ctxt ct end
 
 fun gconv_at_tac pat conv ctxt = Conv.gconv_rule (conv_at pat conv ctxt) 1 #> Seq.succeed
@@ -614,7 +613,7 @@ fun define_map
     val start = Timing.start ()
     val convert_thm =
           convert_to_lookup_list kT valT mappings map_const map_def tree_valid_thm simp_ctxt ctxt
-    val [lookup_list_eqn, map_distinct_thm] = HOLogic.conj_elims ctxt convert_thm
+    val [lookup_list_eqn, map_distinct_thm] = HOLogic.conj_elims convert_thm
     val _ = tracing ("  done: " ^ Timing.message (Timing.result start))
     val _ = tracing (#map_name name_opts ^ ": storing map and distinctness theorems")
     val start = Timing.start ()
@@ -634,7 +633,7 @@ fun define_map
           |> Conv.fconv_rule (conv_at @{term "Trueprop HERE"} (dest_list_all_conv ()) ctxt)
     val _ = tracing ("  splitting... " ^ Timing.message (Timing.result start))
     val lookup_thms =
-          HOLogic.conj_elims ctxt combined_lookup_thm
+          HOLogic.conj_elims combined_lookup_thm
           |> map (Conv.fconv_rule (conv_at @{term "Trueprop HERE"}
                                      (fo_rewr_conv @{thm prod.case[THEN eq_reflection]}) ctxt))
 

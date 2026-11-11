@@ -82,7 +82,7 @@ lemma invoke_irq_handler_pas_refined:
    apply (wp cap_insert_pas_refined_not_transferable delete_one_caps_of_state
           | strengthen invs_mdb | simp add: cte_wp_at_caps_of_state)+
     apply (rename_tac irq cap slot)
-    apply (rule_tac Q =
+    apply (rule_tac Q'=
             "\<lambda> irq_slot. K(irq_slot \<noteq> slot) and invs and emptyable irq_slot
                      and cte_wp_at can_fast_finalise irq_slot
                      and not cte_wp_at is_transferable_cap slot
@@ -150,17 +150,11 @@ lemma decode_irq_control_invocation_authorised [wp]:
        (args \<noteq> [] \<longrightarrow> (pasSubject aag, Control, pasIRQAbs aag (ucast (args ! 0))) \<in> pasPolicy aag))\<rbrace>
    decode_irq_control_invocation info_label args slot caps
    \<lbrace>\<lambda>x s. authorised_irq_ctl_inv aag x\<rbrace>, -"
-  unfolding decode_irq_control_invocation_def authorised_irq_ctl_inv_def
+  unfolding decode_irq_control_invocation_def authorised_irq_ctl_inv_def Let_def
   apply (rule hoare_gen_asmE)
-  apply (rule hoare_pre)
-   apply (simp add: Let_def split del: if_split cong: if_cong)
-   apply (wp arch_decode_irq_control_invocation_authorised
-             whenE_throwError_wp hoare_vcg_imp_lift hoare_drop_imps
-          | strengthen  aag_Control_owns_strg
-          | simp add: o_def del: hoare_True_E_R)+
+  apply (wpsimp wp: weak_if_wp arch_decode_irq_control_invocation_authorised simp: o_def)
   apply (cases args, simp_all)
   apply (cases caps, simp_all)
-  apply (simp add: ucast_mask_drop)
   apply (auto simp: is_cap_simps cap_auth_conferred_def
                     pas_refined_wellformed
                     pas_refined_all_auth_is_owns aag_cap_auth_def)

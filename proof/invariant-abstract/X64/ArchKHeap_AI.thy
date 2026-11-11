@@ -8,7 +8,7 @@ theory ArchKHeap_AI
 imports KHeapPre_AI
 begin
 
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
 definition "non_vspace_obj \<equiv> non_arch_obj"
 definition "vspace_obj_pred \<equiv> arch_obj_pred"
@@ -19,10 +19,10 @@ locale vspace_only_obj_pred = Arch +
   fixes P :: "kernel_object \<Rightarrow> bool"
   assumes vspace_only: "vspace_obj_pred P"
 
-sublocale vspace_only_obj_pred < arch_only_obj_pred
+sublocale vspace_only_obj_pred \<subseteq> arch_only_obj_pred
   using vspace_only[unfolded vspace_obj_pred_def] by unfold_locales
 
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
 sublocale empty_table: vspace_only_obj_pred "empty_table S" for S
   by unfold_locales (simp add: vspace_obj_pred_def empty_table_def del: arch_obj_fun_lift_expand)
@@ -256,7 +256,8 @@ lemma set_object_pt_not_vs_lookup_pages:
    apply (clarsimp simp: obj_at_def split:if_split_asm)
    apply (case_tac "pa=p")
     apply (clarsimp simp: vs_refs_pages_def graph_of_def)
-    apply (erule_tac x=ab in allE)
+    apply (rename_tac slot pte)
+    apply (erule_tac x=slot in allE)
     apply (drule_tac R="vs_lookup_pages1 s" in rtranclD)
     apply clarsimp
     apply (drule tranclD)
@@ -277,7 +278,8 @@ lemma set_object_pt_not_vs_lookup_pages:
   apply (clarsimp simp: obj_at_def split:if_split_asm)
   apply (case_tac "pa=p")
    apply (clarsimp simp: vs_refs_pages_def graph_of_def)
-   apply (erule_tac x=rs in allE)
+   apply (rename_tac vs slot pte)
+   apply (erule_tac x=vs in allE)
    apply (clarsimp simp: vs_lookup_pages_def)
    apply (drule(1) ImageI, erule (1) notE)
   apply clarsimp
@@ -300,10 +302,6 @@ lemma set_object_vs_lookup_pages:
    apply (clarsimp simp: obj_at_def split: if_split_asm)
   apply simp
   done
-
-lemma set_aobject_valid_arch [wp]:
-  "set_object ptr (ArchObj obj) \<lbrace>valid_arch_state\<rbrace>"
-  by (wpsimp wp: valid_arch_state_lift set_object_wp)
 
 lemma set_object_atyp_at:
   "\<lbrace>\<lambda>s. typ_at (AArch (aa_type ako)) p s \<and> P (typ_at (AArch T) p' s)\<rbrace>
@@ -332,7 +330,7 @@ lemma set_object_vspace_objs:
   apply (case_tac ko; auto)
   done
 
-lemma set_object_valid_kernel_mappings:
+lemma set_object_valid_kernel_mappings[wp]:
   "\<lbrace>\<lambda>s. valid_kernel_mappings s
            \<and> valid_kernel_mappings_if_pm
                 (set (second_level_tables (arch_state s)))
@@ -396,7 +394,7 @@ lemma valid_global_objs_lift':
    apply (rule hoare_use_eq [where f="\<lambda>s. x64_global_pds (arch_state s)", OF pds])
    apply (rule hoare_use_eq [where f="\<lambda>s. x64_global_pdpts (arch_state s)", OF pdpts])
    apply (rule hoare_use_eq [where f="\<lambda>s. x64_global_pml4 (arch_state s)", OF pml4])
-   apply (wp obj ko emp hoare_vcg_const_Ball_lift hoare_ex_wp)
+   apply (wp obj ko emp hoare_vcg_const_Ball_lift hoare_vcg_ex_lift)
   apply (clarsimp simp: second_level_tables_def)
   done
 
@@ -529,18 +527,74 @@ lemma valid_global_pdpts_lift:
   apply clarsimp
   done
 
-lemma valid_arch_state_lift_aobj_at:
-    "\<lbrace>valid_arch_state\<rbrace> f \<lbrace>\<lambda>rv. valid_arch_state\<rbrace>"
-  apply (simp add: valid_arch_state_def valid_asid_table_def)
+lemma valid_asid_table_lift:
+  "f \<lbrace>\<lambda>s. valid_asid_table (x64_asid_table (arch_state s)) s\<rbrace>"
+  apply (simp add: valid_asid_table_def)
   apply (rule hoare_lift_Pf[where f="arch_state", OF _ arch])
-  apply (wp hoare_vcg_conj_lift hoare_vcg_ball_lift
-            valid_global_pts_lift valid_global_pds_lift valid_global_pdpts_lift
-        | (rule aobj_at, clarsimp))+
+  apply (wp hoare_vcg_conj_lift hoare_vcg_ball_lift aobj_at)
+    apply wpsimp+
+  done
+
+lemma typ_at_lift:
+  "f \<lbrace>\<lambda>s. typ_at (AArch aty) (P (arch_state s)) s\<rbrace>"
+  by (rule hoare_lift_Pf2[where f="arch_state", OF _ arch])
+     (wpsimp wp: aobj_at)
+
+lemma valid_arch_state_lift_ioports_aobj_at:
+  assumes ioports: "\<lbrace> P \<rbrace> f \<lbrace>\<lambda>_. valid_ioports \<rbrace>"
+  assumes control: "\<lbrace> Q \<rbrace> f \<lbrace>\<lambda>_. ioport_control_unique \<rbrace>"
+  shows "\<lbrace>valid_arch_state and P and Q\<rbrace> f \<lbrace>\<lambda>rv. valid_arch_state\<rbrace>"
+  apply (simp add: valid_arch_state_def)
+  apply (rule hoare_vcg_conj_lift
+         | wp valid_asid_table_lift typ_at_lift valid_global_pts_lift valid_global_pds_lift
+            valid_global_pdpts_lift)+
+    apply (rule hoare_lift_Pf[where f="arch_state", OF _ arch], wp)
+   apply (rule hoare_vcg_conj_lift)
+    apply (rule hoare_lift_Pf[where f="arch_state", OF _ arch], wp)
+   apply (wp control ioports)
   apply simp
+  done
+
+(* interface lemma *)
+lemma valid_arch_state_lift_aobj_at:
+  assumes caps: "\<And>P. \<lbrace>\<lambda>s. P (caps_of_state s)\<rbrace> f \<lbrace>\<lambda>_ s. P (caps_of_state s)\<rbrace>"
+  shows "f \<lbrace>valid_arch_state\<rbrace>"
+  apply (simp add: valid_arch_state_def valid_asid_table_def
+                   valid_global_pts_def valid_global_pds_def valid_global_pdpts_def)
+  apply (rule hoare_lift_Pf[where f="\<lambda>s. arch_state s"])
+   apply (wp arch typ_at_lift caps hoare_vcg_conj_lift hoare_vcg_const_Ball_lift)+
   done
 
 end
 end
+
+\<comment> \<open>FIXME arch-split: if tcb_at and related terms were moved to InvariantsPre_AI then this lemma
+                     could go in ArchInvariants_AI.\<close>
+lemma current_fpu_owner_Some_tcb_at:
+  "\<lbrakk>x64_current_fpu_owner (arch_state s) = Some p; valid_cur_fpu s\<rbrakk> \<Longrightarrow> tcb_at p s"
+  by (auto simp: valid_cur_fpu_defs is_tcb)
+
+\<comment> \<open>FIXME arch-split: is_tcb_cur_fpu can't be defined like this because arch_tcb_at isn't defined
+                     until Invariants_AI.\<close>
+lemma is_tcb_cur_fpu_def2:
+  "is_tcb_cur_fpu \<equiv> arch_tcb_at itcb_cur_fpu"
+  by (clarsimp simp: is_tcb_cur_fpu_def pred_tcb_at_def)
+
+\<comment> \<open>Intended for use inside Arch, as opposed to the interface lemma valid_cur_fpu_lift\<close>
+lemma valid_cur_fpu_lift_arch:
+  assumes arch_tcb_at[wp]: "\<And>P p. f \<lbrace>\<lambda>s. P (arch_tcb_at itcb_cur_fpu p s)\<rbrace>"
+  assumes fpu_owner[wp]: "\<And>P. f \<lbrace>\<lambda>s. P (x64_current_fpu_owner (arch_state s))\<rbrace>"
+  shows "f \<lbrace>valid_cur_fpu\<rbrace>"
+  unfolding valid_cur_fpu_def
+  apply (rule hoare_lift_Pf[where f="\<lambda>s. x64_current_fpu_owner (arch_state s)", rotated], rule fpu_owner)
+  by (wpsimp wp: hoare_vcg_all_lift simp: is_tcb_cur_fpu_def2)
+
+\<comment> \<open>Interface lemma\<close>
+lemma valid_cur_fpu_lift:
+  assumes arch_tcb_at[wp]: "\<And>P P' p. f \<lbrace>\<lambda>s. P (arch_tcb_at P' p s)\<rbrace>"
+  assumes arch_state[wp]: "\<And>P. f \<lbrace>\<lambda>s. P (arch_state s)\<rbrace>"
+  shows "f \<lbrace>valid_cur_fpu\<rbrace>"
+  by (wpsimp wp: valid_cur_fpu_lift_arch)
 
 lemma equal_kernel_mappings_lift:
   assumes aobj_at:
@@ -744,11 +798,11 @@ lemma store_pde_pred_tcb_at:
   "\<lbrace>pred_tcb_at proj P t\<rbrace> store_pde ptr val \<lbrace>\<lambda>rv. pred_tcb_at proj P t\<rbrace>"
   apply (simp add: store_pde_def set_pd_def set_object_def
                    get_pd_def bind_assoc)
-  apply (rule hoare_seq_ext [OF _ get_object_sp])
-  apply (case_tac x, simp_all)
+  apply (rule bind_wp [OF _ get_object_sp])
+  apply (case_tac rv, simp_all)
   apply (rename_tac arch_kernel_obj)
   apply (case_tac arch_kernel_obj, simp_all)
-  apply (rule hoare_seq_ext [OF _ get_object_sp])
+  apply (rule bind_wp [OF _ get_object_sp])
   apply wp
   apply (clarsimp simp: pred_tcb_at_def obj_at_def)
   done
@@ -818,7 +872,7 @@ lemma pspace_respects_region_cong[cong]:
 
 definition "obj_is_device tp dev \<equiv>
   case tp of Untyped \<Rightarrow> dev
-    | _ \<Rightarrow>(case (default_object tp dev 0) of (ArchObj (DataPage dev _)) \<Rightarrow> dev
+    | _ \<Rightarrow>(case default_object tp dev 0 0 of (ArchObj (DataPage dev _)) \<Rightarrow> dev
           | _ \<Rightarrow> False)"
 
 lemma cap_is_device_obj_is_device[simp]:
@@ -827,71 +881,96 @@ lemma cap_is_device_obj_is_device[simp]:
                 default_object_def  default_arch_object_def
          split: apiobject_type.splits aobject_type.splits)
 
-crunch device_state_inv: storeWord "\<lambda>ms. P (device_state ms)"
+crunch storeWord
+  for device_state_inv: "\<lambda>ms. P (device_state ms)"
   (ignore_del: storeWord)
 
 (* some hyp_ref invariants *)
 
 lemma state_hyp_refs_of_ep_update: "\<And>s ep val. typ_at AEndpoint ep s \<Longrightarrow>
-       state_hyp_refs_of (s\<lparr>kheap := kheap s(ep \<mapsto> Endpoint val)\<rparr>) = state_hyp_refs_of s"
+       state_hyp_refs_of (s\<lparr>kheap := (kheap s)(ep \<mapsto> Endpoint val)\<rparr>) = state_hyp_refs_of s"
   apply (rule all_ext)
   apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def hyp_refs_of_def)
   done
 
 lemma state_hyp_refs_of_ntfn_update: "\<And>s ep val. typ_at ANTFN ep s \<Longrightarrow>
-       state_hyp_refs_of (s\<lparr>kheap := kheap s(ep \<mapsto> Notification val)\<rparr>) = state_hyp_refs_of s"
+       state_hyp_refs_of (s\<lparr>kheap := (kheap s)(ep \<mapsto> Notification val)\<rparr>) = state_hyp_refs_of s"
   apply (rule all_ext)
   apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def hyp_refs_of_def)
   done
 
 lemma state_hyp_refs_of_tcb_bound_ntfn_update:
-       "kheap s t = Some (TCB tcb) \<Longrightarrow>
-          state_hyp_refs_of (s\<lparr>kheap := kheap s(t \<mapsto> TCB (tcb\<lparr>tcb_bound_notification := ntfn\<rparr>))\<rparr>)
-            = state_hyp_refs_of s"
+  "kheap s t = Some (TCB tcb) \<Longrightarrow>
+   state_hyp_refs_of (s\<lparr>kheap := (kheap s)(t \<mapsto> TCB (tcb\<lparr>tcb_bound_notification := ntfn\<rparr>))\<rparr>)
+   = state_hyp_refs_of s"
   apply (rule all_ext)
   apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def split: option.splits)
   done
 
 lemma state_hyp_refs_of_tcb_state_update:
-       "kheap s t = Some (TCB tcb) \<Longrightarrow>
-          state_hyp_refs_of (s\<lparr>kheap := kheap s(t \<mapsto> TCB (tcb\<lparr>tcb_state := ts\<rparr>))\<rparr>)
-            = state_hyp_refs_of s"
+  "kheap s t = Some (TCB tcb) \<Longrightarrow>
+   state_hyp_refs_of (s\<lparr>kheap := (kheap s)(t \<mapsto> TCB (tcb\<lparr>tcb_state := ts\<rparr>))\<rparr>)
+   = state_hyp_refs_of s"
+  apply (rule all_ext)
+  apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def split: option.splits)
+  done
+
+lemma state_hyp_refs_of_tcb_domain_update:
+  "kheap s t = Some (TCB tcb) \<Longrightarrow>
+   state_hyp_refs_of (s\<lparr>kheap := (kheap s)(t \<mapsto> TCB (tcb\<lparr>tcb_domain := d\<rparr>))\<rparr>)
+   = state_hyp_refs_of s"
+  apply (rule all_ext)
+  apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def split: option.splits)
+  done
+
+lemma state_hyp_refs_of_tcb_priority_update:
+  "kheap s t = Some (TCB tcb) \<Longrightarrow>
+   state_hyp_refs_of (s\<lparr>kheap := (kheap s)(t \<mapsto> TCB (tcb\<lparr>tcb_priority := p\<rparr>))\<rparr>)
+   = state_hyp_refs_of s"
+  apply (rule all_ext)
+  apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def split: option.splits)
+  done
+
+lemma state_hyp_refs_of_tcb_time_slice_update:
+  "kheap s t = Some (TCB tcb) \<Longrightarrow>
+   state_hyp_refs_of (s\<lparr>kheap := (kheap s)(t \<mapsto> TCB (tcb\<lparr>tcb_time_slice := ts\<rparr>))\<rparr>)
+   = state_hyp_refs_of s"
   apply (rule all_ext)
   apply (clarsimp simp add: state_hyp_refs_of_def obj_at_def split: option.splits)
   done
 
 lemma arch_valid_obj_same_type:
   "\<lbrakk> arch_valid_obj ao s; kheap s p = Some ko; a_type k = a_type ko \<rbrakk>
-   \<Longrightarrow> arch_valid_obj ao (s\<lparr>kheap := kheap s(p \<mapsto> k)\<rparr>)"
+   \<Longrightarrow> arch_valid_obj ao (s\<lparr>kheap := (kheap s)(p \<mapsto> k)\<rparr>)"
   by (induction ao rule: arch_kernel_obj.induct;
          clarsimp simp: typ_at_same_type)
 
 
-lemma default_arch_object_not_live: "\<not> live (ArchObj (default_arch_object aty dev us))"
+lemma default_arch_object_not_live[simp]: "\<not> live (ArchObj (default_arch_object aty dev us))"
   by (clarsimp simp: default_arch_object_def live_def hyp_live_def arch_live_def
                split: aobject_type.splits)
 
-lemma default_tcb_not_live: "\<not> live (TCB default_tcb)"
-  by (clarsimp simp: default_tcb_def default_arch_tcb_def live_def hyp_live_def)
+lemma default_tcb_not_live[simp]: "\<not> live (TCB (default_tcb d))"
+  by (clarsimp simp: default_tcb_def default_arch_tcb_def live_def hyp_live_def arch_tcb_live_def)
 
 lemma valid_arch_tcb_same_type:
   "\<lbrakk> valid_arch_tcb t s; valid_obj p k s; kheap s p = Some ko; a_type k = a_type ko \<rbrakk>
-   \<Longrightarrow> valid_arch_tcb t (s\<lparr>kheap := kheap s(p \<mapsto> k)\<rparr>)"
+   \<Longrightarrow> valid_arch_tcb t (s\<lparr>kheap := (kheap s)(p \<mapsto> k)\<rparr>)"
   by (auto simp: valid_arch_tcb_def obj_at_def)
 
 lemma valid_ioports_lift:
   assumes x: "\<And>P. \<lbrace>\<lambda>s. P (caps_of_state s)\<rbrace> f \<lbrace>\<lambda>rv s. P (caps_of_state s)\<rbrace>"
   assumes y: "\<And>P. \<lbrace>\<lambda>s. P (arch_state s)\<rbrace> f \<lbrace>\<lambda>rv s. P (arch_state s)\<rbrace>"
-  shows      "\<lbrace>valid_ioports\<rbrace> f \<lbrace>\<lambda>rv. valid_ioports\<rbrace>"
-  apply (simp add: valid_ioports_def)
-  apply (rule hoare_use_eq [where f=caps_of_state, OF x y])
+  shows      "f \<lbrace> valid_ioports \<rbrace>"
+  apply (simp add: valid_ioports_2_def)
+  apply (rule hoare_use_eq[where f=caps_of_state, OF x y])
   done
 
 lemma valid_arch_mdb_lift:
   assumes c: "\<And>P. \<lbrace>\<lambda>s. P (caps_of_state s)\<rbrace> f \<lbrace>\<lambda>r s. P (caps_of_state s)\<rbrace>"
   assumes r: "\<And>P. \<lbrace>\<lambda>s. P (is_original_cap s)\<rbrace> f \<lbrace>\<lambda>r s. P (is_original_cap s)\<rbrace>"
   shows "\<lbrace>\<lambda>s. valid_arch_mdb (is_original_cap s) (caps_of_state s)\<rbrace> f \<lbrace>\<lambda>r s. valid_arch_mdb (is_original_cap s) (caps_of_state s)\<rbrace>"
-  apply (clarsimp simp: valid_arch_mdb_def valid_def)
+  apply (clarsimp simp: valid_def)
   apply (frule_tac P1="(=) (caps_of_state s)" in use_valid [OF _  c], rule refl)
   apply (frule_tac P1="(=) (is_original_cap s)" in use_valid [OF _  r], rule refl)
   apply clarsimp

@@ -7,17 +7,18 @@
 theory ArchStructures_H
 imports
   "Lib.Lib"
+  "Lib.Heap_List"
   Types_H
   Hardware_H
 begin
-context Arch begin global_naming ARM_HYP_H
+context Arch begin arch_global_naming (H)
 
 #INCLUDE_SETTINGS keep_constructor=asidpool
 #INCLUDE_SETTINGS keep_constructor=arch_tcb
 
-#INCLUDE_HASKELL SEL4/Object/Structures/ARM.lhs CONTEXT ARM_HYP_H decls_only NOT VPPIEventIRQ VirtTimer
+#INCLUDE_HASKELL SEL4/Object/Structures/ARM.lhs CONTEXT ARM_HYP_H decls_only NOT VPPIEventIRQ VirtTimer parseTimeArg timeArgLen
 #INCLUDE_HASKELL SEL4/Object/Structures/ARM.lhs CONTEXT ARM_HYP_H instanceproofs NOT VPPIEventIRQ VirtTimer
-#INCLUDE_HASKELL SEL4/Object/Structures/ARM.lhs CONTEXT ARM_HYP_H bodies_only NOT makeVCPUObject
+#INCLUDE_HASKELL SEL4/Object/Structures/ARM.lhs CONTEXT ARM_HYP_H bodies_only NOT makeVCPUObject parseTimeArg timeArgLen
 
 (* we define makeVCPUObject_def manually because we want a total function vgicLR *)
 defs makeVCPUObject_def:
@@ -25,15 +26,14 @@ defs makeVCPUObject_def:
     VCPUObj_ \<lparr>
           vcpuTCBPtr= Nothing
         , vcpuVGIC= VGICInterface_ \<lparr>
-                          vgicHCR= vgicHCREN
+                          vgicHCR= vgicHCREN || vgicHCRTALL0
                         , vgicVMCR= 0
                         , vgicAPR= 0
                         , vgicLR= (\<lambda>_. 0)
                         \<rparr>
         , vcpuRegs= funArray (const 0)  aLU  [(VCPURegSCTLR, sctlrDefault)
-                                             ,(VCPURegACTLR, actlrDefault)]
+                                             ,(VCPURegCPACR, cpacrDefault)]
         , vcpuVPPIMasked= (\<lambda>_. False)
-        , vcpuVTimer= VirtTimer 0
         \<rparr>"
 
 datatype arch_kernel_object_type =
@@ -52,10 +52,8 @@ where
 
 end
 
-context begin interpretation Arch .
-
-requalify_types
+(* not possible to move this requalification to generic, as some arches don't have vcpu *)
+arch_requalify_types (H)
   vcpu
 
-end
 end

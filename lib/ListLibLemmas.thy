@@ -371,6 +371,52 @@ lemma list_insert_after_after:
   apply fastforce
   done
 
+lemma list_insert_before_not_found:
+  "a \<notin> set ls \<Longrightarrow> list_insert_before ls a new = ls"
+  by (induct ls; fastforce)
+
+lemma list_insert_before_nonempty:
+  "ls \<noteq> [] \<Longrightarrow> list_insert_before ls a new \<noteq> []"
+  by (induct ls; clarsimp)
+
+lemma list_insert_before_head:
+  "xs \<noteq> [] \<Longrightarrow> list_insert_before xs (hd xs) new = new # xs"
+   by (induct xs; fastforce)
+
+lemma last_of_list_insert_before:
+  "xs \<noteq> [] \<Longrightarrow> last (list_insert_before xs a new) = last xs"
+  by (induct xs; clarsimp simp: list_insert_before_nonempty)
+
+lemma list_insert_before_distinct:
+  "\<lbrakk>distinct (xs @ ys); ys \<noteq> []\<rbrakk> \<Longrightarrow> list_insert_before (xs @ ys) (hd ys) new = xs @ new # ys"
+  by (induct xs; fastforce simp add: list_insert_before_head)
+
+lemma set_list_insert_before:
+  "\<lbrakk>new \<notin> set ls; before \<in> set ls\<rbrakk> \<Longrightarrow> set (list_insert_before ls before new) = set ls \<union> {new}"
+  apply (induct ls; clarsimp)
+  apply fastforce
+  done
+
+lemma takeWhile_dropWhile_insert_list_before:
+  assumes distinct: "distinct ts"
+  assumes member: "ptr \<in> set ts"
+  assumes nf: "\<forall>t \<in> set ts. \<exists>v. f t s = Some v"
+  assumes rel': "\<exists>val'. f ptr s = Some val' \<and> R val val' \<and> val \<noteq> val'"
+                "\<forall>pfx. (\<exists>sfx. pfx @ ptr # sfx = ts) \<longrightarrow> (\<forall>x \<in> set pfx. R (the (f x s)) val)"
+  assumes ord: "antisymp R"
+  shows
+    "map fst (takeWhile (\<lambda>(t', val'). R val' val) (zip ts (map (\<lambda>t. the (f t s)) ts)))
+       @ t # map fst (dropWhile (\<lambda>(t', val'). R val' val) (zip ts (map (\<lambda>t. the (f t s)) ts)))
+     = list_insert_before ts ptr t"
+  apply (insert assms)
+  apply (clarsimp simp: in_set_conv_decomp simp del: distinct_append)
+  apply (rename_tac xs val' ys)
+  apply (cut_tac xs=xs and ys="ptr # ys" and new=t in list_insert_before_distinct)
+    apply fastforce
+   apply fastforce
+  apply (fastforce dest: antisympD)
+  done
+
 lemma list_remove_removed:
   "set (list_remove list x) = (set list) - {x}"
   apply (induct list,simp+)
@@ -395,6 +441,16 @@ lemma list_remove_distinct:
 lemma list_remove_none: "x \<notin> set list \<Longrightarrow> list_remove list x = list"
   apply (induct list)
   apply clarsimp+
+  done
+
+lemma list_remove_append[simp]:
+  "list_remove (xs @ ys) t = list_remove xs t @ list_remove ys t"
+  by (induct xs) auto
+
+lemma list_remove_middle_distinct:
+  "\<lbrakk>distinct q; q = ys @ t # zs\<rbrakk> \<Longrightarrow> list_remove q t = ys @ zs"
+  apply (induct q rule: length_induct)
+  apply (simp add: list_remove_none)
   done
 
 lemma replace_distinct: "x \<notin> set list \<Longrightarrow> distinct list \<Longrightarrow> distinct (list_replace list y x)"
@@ -1086,5 +1142,102 @@ lemma after_in_list_last_None:
 lemma after_in_list_None_last:
   "\<lbrakk>after_in_list list x = None; x \<in> set list\<rbrakk> \<Longrightarrow> x = last list"
   by (induct list x rule: after_in_list.induct,(simp split: if_split_asm)+)
+
+lemma map2_append1:
+  "map2 f (as @ bs) cs = map2 f as (take (length as) cs) @ map2 f bs (drop (length as) cs)"
+  by (simp add: map_def zip_append1)
+
+lemma sorted_lastD:
+  "\<lbrakk> sorted xs; xs \<noteq> [] \<rbrakk> \<Longrightarrow> \<forall>x\<in>set xs. x \<le> last xs"
+  by (induct xs, auto)
+
+lemma sorted_last_leD:
+  "\<lbrakk> sorted xs; y \<ge> last xs ; xs \<noteq> [] \<rbrakk> \<Longrightarrow> \<forall>x\<in>set xs. x \<le> y"
+  by (fastforce dest: sorted_lastD)
+
+lemma sorted_wrt_subseq:
+  "\<lbrakk>sorted_wrt P ys; subseq xs ys\<rbrakk> \<Longrightarrow> sorted_wrt P xs"
+  apply (induct xs arbitrary: ys)
+   apply fastforce
+  apply (frule list_emb_ConsD)
+  apply (clarsimp simp: sorted_wrt_append simp flip: subseq_singleton_left)
+  done
+
+lemma sorted_wrt_prefix:
+  "\<lbrakk>sorted_wrt P ys; prefix xs ys\<rbrakk> \<Longrightarrow> sorted_wrt P xs"
+  by (fastforce intro: sorted_wrt_subseq)
+
+lemma sorted_wrt_suffix:
+  "\<lbrakk>sorted_wrt P ys; suffix xs ys\<rbrakk> \<Longrightarrow> sorted_wrt P xs"
+  by (fastforce intro: sorted_wrt_subseq)
+
+lemma sorted_wrt_insert:
+  "\<lbrakk>sorted_wrt P xs; prefix pfx xs; suffix sfx xs;
+    pfx \<noteq> [] \<longrightarrow> P (last pfx) x; sfx \<noteq> [] \<longrightarrow> P x (hd sfx); transp P\<rbrakk>
+   \<Longrightarrow> sorted_wrt P (pfx @ x # sfx)"
+  apply (clarsimp simp: sorted_wrt_append)
+  apply (prop_tac "\<forall>y \<in> set pfx. P y x")
+   apply (clarsimp, rename_tac y)
+   apply (frule set_list_mem_nonempty)
+   apply (case_tac "y = last pfx", fastforce)
+   apply (frule (1) sorted_wrt_prefix)
+   apply (clarsimp simp: in_set_conv_nth last_conv_nth)
+   apply (frule_tac i=i and j="length pfx - 1" and xs=pfx in sorted_wrt_nth_less)
+     apply (fastforce dest: le_neq_implies_less nat_le_Suc_less_imp)
+    apply clarsimp
+   apply (fastforce elim: transpE)
+  apply (frule (1) sorted_wrt_suffix)
+  apply clarsimp
+  apply (intro context_conjI impI)
+    apply (clarsimp simp: sorted_wrt_append prefix_def)
+   apply clarsimp
+   apply (rename_tac y)
+   apply (frule set_list_mem_nonempty)
+   apply (case_tac "y = hd sfx")
+    apply (fastforce simp: reflp_def)
+   apply (clarsimp simp: in_set_conv_nth)
+   apply (rename_tac i)
+   apply (frule_tac i=0 and j=i in sorted_wrt_nth_less[where xs=sfx])
+     apply (fastforce intro: gr0I simp: hd_conv_nth)
+    apply fastforce
+   apply (fastforce elim: transpE simp: hd_conv_nth)
+  apply (fastforce elim: transpE)
+  done
+
+lemma length_gt_1_imp_butlast_nonempty:
+  "Suc 0 < length xs \<Longrightarrow> butlast xs \<noteq> []"
+  by (cases xs; clarsimp)
+
+lemma not_last_in_set_butlast:
+  "\<lbrakk>ptr \<in> set ls; ptr \<noteq> last ls\<rbrakk> \<Longrightarrow> ptr \<in> set (butlast ls)"
+  apply (induct ls; simp)
+  apply fastforce
+  done
+
+lemma distinct_in_butlast_not_last:
+  "\<lbrakk>distinct ls; x \<in> set (butlast ls)\<rbrakk> \<Longrightarrow> x \<noteq> last ls"
+  apply (induct ls; simp)
+  apply force
+  done
+
+lemma prefix_of_hd_nil:
+  "\<lbrakk>xs = ys @ hd xs # zs; distinct xs\<rbrakk> \<Longrightarrow> ys = []"
+  by (cases xs; cases ys; clarsimp)
+
+lemma suffix_last_nil:
+  "\<lbrakk>xs = ys @ last xs # zs; distinct xs\<rbrakk> \<Longrightarrow> zs = []"
+  apply (cases xs; cases ys; clarsimp split: if_splits)
+  by (metis append_butlast_last_id distinct_inj_middle)
+
+\<comment> \<open>@{thm split_list} uses # instead of @\<close>
+lemma split_list':
+  "x \<in> set xs \<Longrightarrow> \<exists>ys zs. xs = ys @ [x] @ zs"
+  by (fastforce dest: split_list)
+
+lemma distinct_prefix':
+  "\<lbrakk>distinct xs; prefix ys xs\<rbrakk> \<Longrightarrow> distinct ys"
+  apply (induct xs arbitrary: ys; clarsimp)
+  apply (rename_tac ys, case_tac ys; clarsimp)
+  by (fastforce simp: less_eq_list_def dest: set_mono_prefix)
 
 end

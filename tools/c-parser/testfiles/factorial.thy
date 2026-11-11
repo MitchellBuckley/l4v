@@ -5,8 +5,10 @@
  *)
 
 theory factorial
-imports "CParser.CTranslation" MachineWords
+imports "CParser.CTranslation" "ARM/imports/MachineWords"
 begin
+
+unbundle C_seplog_syntax
 
 declare hrs_simps [simp add]
 declare sep_conj_ac [simp add]
@@ -47,11 +49,7 @@ lemma fac_list_length [simp]:
 
 lemma fac_list_unfold:
   "unat n \<noteq> 0 \<Longrightarrow> fac_list (unat n) = fac (unat n) # fac_list (unat (n - 1))"
-  apply(case_tac "unat n")
-   apply clarsimp
-  apply(subst unat_minus_one)
-   apply clarsimp+
-  done
+  by (metis Suc_unat_minus_one fac_list.simps(2) unat_eq_zero)
 
 primrec
   sep_list :: "machine_word list \<Rightarrow> machine_word ptr \<Rightarrow> heap_assert"
@@ -328,14 +326,13 @@ lemma (in factorial_global_addresses) mem_safe_factorial:
   shows "mem_safe (\<acute>ret__ptr_to_unsigned_long :== PROC factorial(\<acute>n)) \<Gamma>"
   apply(subst mem_safe_restrict)
   apply(rule intra_mem_safe)
-   apply (insert factorial_impl free_impl alloc_impl)
+   apply (insert factorial_impl free_impl alloc_impl)[1]
    apply(drule_tac t="Some C" in sym)
-   apply(simp_all add: restrict_map_def call_def block_def whileAnno_def
-                       free_body_def alloc_body_def factorial_body_def creturn_def
-                split: if_split_asm option.splits)
-  apply((erule disjE)?, simp,
-        (thin_tac "C=x" for x, (thin_tac "\<Gamma> x = y" for x y)+,
-        force simp: intra_sc)?)+
+   apply(simp add: restrict_map_def call_def block_def whileAnno_def block_exn_def
+                   free_body_def alloc_body_def factorial_body_def creturn_def
+              split: if_split_asm option.splits)
+   subgoal by (force simp: intra_sc)
+  apply clarsimp
   done
 
 end

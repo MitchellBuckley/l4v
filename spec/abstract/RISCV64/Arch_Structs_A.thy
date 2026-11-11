@@ -8,12 +8,14 @@ chapter "RISCV64-Specific Data Types"
 
 theory Arch_Structs_A
 imports
-  "ExecSpec.Arch_Structs_B"
+  ExecSpec.Arch_Structs_B
   ExceptionTypes_A
   VMRights_A
+  ArchVMAttributes_A
+  ExecSpec.Arch_Kernel_Config_Lemmas
 begin
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   This theory provides architecture-specific definitions and datatypes including
@@ -48,12 +50,6 @@ definition update_map_data :: "arch_cap \<Rightarrow> (asid \<times> vspace_ref)
 
 
 section \<open>Architecture-specific objects\<close>
-
-(* This datatype does not match up with the executable spec directly:
-   This one here models all "things" one can set on a page or page table entry.
-   The attributes accessible to users are the ones returned by attribs_from_word. *)
-datatype vm_attribute = Global | Execute | User
-type_synonym vm_attributes = "vm_attribute set"
 
 (* The address of the target object is stored shifted right by pt_bits and stored as a ppn (page
    number). To get the address, use addr_from_pte *)
@@ -242,7 +238,7 @@ text \<open>
 
 end_qualify
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 section "Type declarations for invariant definitions"
 
@@ -275,7 +271,7 @@ record arch_tcb =
 
 end_qualify
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 definition default_arch_tcb :: arch_tcb
   where

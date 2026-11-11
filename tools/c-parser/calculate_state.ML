@@ -480,8 +480,12 @@ fun mk_thy_types cse install thy = let
 
   val thy = List.foldl rcddecls_phase0 thy sorted_structs
 
+  val abs_outfilnameN = (if Path.is_absolute (Path.explode outfilnameN)
+                            then outfilnameN
+                            else (Path.implode o Path.expand)
+                                   (Path.append (Resources.master_directory thy) (Path.explode outfilnameN)))
   (* Yuck, sorry *)
-  val _ = gen_umm_types_file cse outfilnameN
+  val _ = gen_umm_types_file cse abs_outfilnameN
 
   val arrays = List.filter (fn (_, sz) => sz <> 0)
                            (Binaryset.listItems (get_array_mentions cse))
@@ -750,7 +754,6 @@ end
 structure csenvData = Theory_Data(
   type T = csenv Symtab.table
   val empty = Symtab.empty
-  val extend = I
   val merge = Symtab.merge (K true)
 )
 
@@ -761,7 +764,6 @@ val get_csenv = Symtab.lookup o csenvData.get
 structure ghostData = Theory_Data(
   type T = typ Symtab.table
   val empty = Symtab.empty
-  val extend = I
   val merge = Symtab.merge (K true)
 )
 
@@ -772,7 +774,6 @@ val get_ghostty = Symtab.lookup o ghostData.get
 structure mungeDBs = Theory_Data(
   type T = mungedb Symtab.table
   val empty = Symtab.empty
-  val extend = I
   val merge = Symtab.merge (K true)
 )
 

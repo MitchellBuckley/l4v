@@ -23,7 +23,7 @@ end
 
 declare [[populate_globals=true]]
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 type_synonym cghost_state = "(machine_word \<rightharpoonup> vmpage_size) * (machine_word \<rightharpoonup> nat)
     * ghost_assertions"
@@ -70,6 +70,8 @@ end
 (* x86-64 asm statements are not yet supported by the c-parser *)
 setup \<open>Context.theory_map (ASM_Ignore_Hooks.add_hook (fn _ => true))\<close>
 
+(* workaround for the fact that the C parser wants to know the vmpage sizes*)
+(* create appropriately qualified aliases *)
 context begin interpretation Arch . global_naming vmpage_size
 requalify_consts X64SmallPage X64LargePage X64HugePage
 end
@@ -88,14 +90,25 @@ lemmas ctcb_offset_defs = ctcb_offset_def ctcb_size_bits_def
 
 cond_sorry_modifies_proofs SORRY_MODIFIES_PROOFS
 
-install_C_file "../c/build/$L4V_ARCH/kernel_all.c_pp"
+(* no modifies theorems, because we re-prove them later in kernel_all_substitute *)
+install_C_file no_modifies "../c/build/$L4V_ARCH/kernel_all.c_pp"
   [machinety=machine_state, ghostty=cghost_state]
 
+text \<open>Hide unqualified names conflicting with Kernel_Config names. Force use of Kernel_C prefix
+  for these:\<close>
+hide_const (open)
+  numDomains
+
+text \<open>Add a more usable name for the collection of ThreadState definitions\<close>
+lemmas ThreadState_defs = StrictC'_thread_state_defs
+
+(* hide vmpage sizes again *)
 hide_const
   vmpage_size.X64SmallPage
   vmpage_size.X64LargePage
   vmpage_size.X64HugePage
 
+(* re-allow fully qualified accesses (for consistency). Slightly clunky *)
 context Arch begin
 global_naming "X64.vmpage_size" requalify_consts X64SmallPage X64LargePage X64HugePage
 global_naming "X64" requalify_consts X64SmallPage X64LargePage X64HugePage

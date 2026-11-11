@@ -39,9 +39,6 @@ physBase = PAddr 0x10000000
 pptrBase :: VPtr
 pptrBase = VPtr 0xe0000000
 
-pageColourBits :: Int
-pageColourBits = 0 -- qemu has no cache
-
 getMemoryRegions :: Ptr CallbackData -> IO [(PAddr, PAddr)]
 getMemoryRegions _ = return [(physBase, physBase + (0x8 `shiftL` 24))]
 
@@ -161,9 +158,8 @@ cacheInvalidateL2RangeCallback _ _ _ = return ()
 cacheCleanL2RangeCallback :: Ptr CallbackData -> PAddr -> PAddr -> IO ()
 cacheCleanL2RangeCallback _ _ _ = return ()
 
--- FIXME: This is not correct now, we do not have l2cc interface abstracted.
 cacheLine :: Int
-cacheLine = 32
+cacheLine = isabelleOp
 
 cacheLineBits :: Int
-cacheLineBits = 5
+cacheLineBits = isabelleOp

@@ -12,7 +12,7 @@ theory ArchCSpaceInv_AI
 imports CSpaceInv_AI
 begin
 
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
 definition
    safe_ioport_insert :: "cap \<Rightarrow> cap \<Rightarrow> 'a::state_ext state \<Rightarrow> bool"
@@ -32,23 +32,40 @@ lemma safe_ioport_insert_triv:
   "\<not>is_arch_cap newcap \<Longrightarrow> safe_ioport_insert newcap oldcap s"
   by (clarsimp simp: safe_ioport_insert_def)
 
-lemma set_cap_ioports':
+lemma set_cap_ioports_safe:
  "\<lbrace>\<lambda>s. valid_ioports s
       \<and> cte_wp_at (\<lambda>cap'. safe_ioport_insert cap cap' s) ptr s\<rbrace>
     set_cap cap ptr
   \<lbrace>\<lambda>rv. valid_ioports\<rbrace>"
   apply (simp add: valid_ioports_def)
   apply (rule hoare_conjI)
-   apply (simp add: all_ioports_issued_def)
-   apply wpx
+   apply (simp add: all_ioports_issued_def Ball_def)
+   apply (wp hoare_vcg_all_lift hoare_vcg_imp_lift')
    apply (clarsimp simp: cte_wp_at_caps_of_state safe_ioport_insert_def elim!: ranE split: if_split_asm)
-    apply (auto intro: ranI simp: all_ioports_issued_def)[2]
-  apply wpx
+    apply (auto)[2]
+  apply (unfold ioports_no_overlap_def Ball_def)
+  apply (wp hoare_vcg_all_lift hoare_vcg_imp_lift')
   apply (clarsimp simp: cte_wp_at_caps_of_state safe_ioport_insert_def elim!: ranE split: if_split_asm)
-  apply (clarsimp simp: ioports_no_overlap_def ran_def)
-  apply (erule disjE)
-   apply (auto simp: ioports_no_overlap_def ran_def)[1]
-  by (force simp: ioports_no_overlap_def ran_def) (* long *)
+    apply blast+
+  done
+
+lemma set_cap_ioport_control_safe:
+ "\<lbrace>\<lambda>s. ioport_control_unique s \<and>
+       (cap = ArchObjectCap IOPortControlCap \<longrightarrow> cte_wp_at ((=) (ArchObjectCap IOPortControlCap)) ptr s) \<rbrace>
+    set_cap cap ptr
+  \<lbrace>\<lambda>rv. ioport_control_unique \<rbrace>"
+  apply wp
+  apply (auto simp: ioport_control_unique_def cte_wp_at_caps_of_state)
+  done
+
+lemma set_cap_non_arch_valid_arch_state:
+ "\<lbrace>\<lambda>s. valid_arch_state s \<and> cte_wp_at (\<lambda>_. \<not>is_arch_cap cap) ptr s\<rbrace>
+  set_cap cap ptr
+  \<lbrace>\<lambda>rv. valid_arch_state \<rbrace>"
+  unfolding valid_arch_state_def
+  by (wp set_cap.aobj_at valid_asid_table_lift valid_global_pts_lift valid_global_pds_lift
+         valid_global_pdpts_lift typ_at_lift set_cap_ioports_safe set_cap_ioport_control_safe)+
+     (clarsimp simp: cte_wp_at_caps_of_state is_cap_simps valid_pspace_def safe_ioport_insert_triv)
 
 lemma set_cap_ioports_no_new_ioports:
  "\<lbrace>\<lambda>s. valid_ioports s
@@ -57,13 +74,31 @@ lemma set_cap_ioports_no_new_ioports:
   \<lbrace>\<lambda>rv. valid_ioports\<rbrace>"
   apply (simp add: valid_ioports_def)
   apply (rule hoare_conjI)
-   apply (simp add: all_ioports_issued_def)
-   apply wpx
-   apply (clarsimp simp: cte_wp_at_caps_of_state elim!: ranE split: if_split_asm)
-    apply (auto intro: ranI simp: all_ioports_issued_def)[2]
-  apply wpx
-  apply (clarsimp simp: cte_wp_at_caps_of_state elim!: ranE split: if_split_asm)
-  by (auto intro: ranI simp: ioports_no_overlap_def ran_def)
+   apply (simp add: all_ioports_issued_def Ball_def)
+   apply (wp hoare_vcg_all_lift hoare_vcg_imp_lift')
+   apply (clarsimp simp: cte_wp_at_caps_of_state safe_ioport_insert_def elim!: ranE split: if_split_asm)
+    apply (auto)[2]
+  apply (unfold ioports_no_overlap_def Ball_def)
+  apply (wp hoare_vcg_all_lift hoare_vcg_imp_lift')
+  apply (clarsimp simp: cte_wp_at_caps_of_state all_ioports_issued_def ioports_no_overlap_def
+                  elim!: ranE
+                  split: if_split_asm)
+    apply (metis Int_empty_left ranI)
+   apply (metis Int_empty_right ranI)
+  by (meson ranI)
+
+lemma set_cap_no_new_ioports_arch_valid_arch_state:
+ "\<lbrace>\<lambda>s. valid_arch_state s
+       \<and> cte_wp_at (\<lambda>cap'. cap_ioports cap = {} \<or> cap_ioports cap = cap_ioports cap') ptr s
+       \<and> (cap = ArchObjectCap IOPortControlCap \<longrightarrow>
+          cte_wp_at ((=) (ArchObjectCap IOPortControlCap)) ptr s) \<rbrace>
+  set_cap cap ptr
+  \<lbrace>\<lambda>rv. valid_arch_state \<rbrace>"
+  unfolding valid_arch_state_def
+  by (wp set_cap.aobj_at valid_asid_table_lift valid_global_pts_lift valid_global_pds_lift
+         valid_global_pdpts_lift typ_at_lift set_cap_ioports_no_new_ioports
+         set_cap_ioport_control_safe)+
+     (clarsimp simp: cte_wp_at_caps_of_state is_cap_simps valid_pspace_def)
 
 lemma valid_ioportsD:
   "\<lbrakk>valid_ioports s; caps_of_state s p = Some cap; cap' \<in> ran (caps_of_state s);
@@ -88,6 +123,10 @@ lemma unique_table_refs_no_cap_asidE:
 lemmas unique_table_refs_no_cap_asidD
      = unique_table_refs_no_cap_asidE[where S="{}"]
 
+lemma is_ioport_control_cap_simp[simp]:
+  "is_ioport_control_cap (ArchObjectCap IOPortControlCap)"
+  by (simp add: is_ioport_control_cap_def)
+
 lemma replace_cap_invs:
   "\<lbrace>\<lambda>s. invs s \<and> cte_wp_at (replaceable s p cap) p s
         \<and> cap \<noteq> cap.NullCap
@@ -101,7 +140,7 @@ lemma replace_cap_invs:
              set_cap_caps_of_state2 set_cap_idle
              replace_cap_ifunsafe valid_irq_node_typ
              set_cap_typ_at set_cap_irq_handlers
-             set_cap_valid_arch_caps set_cap_ioports_no_new_ioports
+             set_cap_valid_arch_caps set_cap_no_new_ioports_arch_valid_arch_state
              set_cap_cap_refs_respects_device_region_replaceable)
   apply (clarsimp simp: valid_pspace_def cte_wp_at_caps_of_state
                         replaceable_def)
@@ -120,7 +159,7 @@ lemma replace_cap_invs:
    apply (erule allEI, erule allEI)
    apply (drule_tac x="fst p" in spec, drule_tac x="snd p" in spec)
    apply (clarsimp simp: gen_obj_refs_subset)
-   apply (drule(1) disjoint_subset, simp)
+   apply (drule(1) disjoint_subset, erule (1) notE)
   apply (rule conjI)
    apply (erule descendants_inc_minor)
     apply simp
@@ -190,8 +229,10 @@ lemma replace_cap_invs:
    apply (clarsimp simp: valid_table_capsD[OF caps_of_state_cteD]
                     valid_arch_caps_def unique_table_refs_no_cap_asidE)
   apply clarsimp
-  apply (rule conjI, rule Ball_emptyI, simp add: gen_obj_refs_subset)
-  by clarsimp
+  apply (rule conjI, solves clarsimp)
+  apply (rule conjI, solves clarsimp)
+  apply (rule Ball_emptyI, simp add: gen_obj_refs_subset)
+  done
 
 
 definition
@@ -266,7 +307,7 @@ lemma safe_parent_for_arch_not_arch:
   by (clarsimp simp: safe_parent_for_arch_def is_cap_simps)
 
 lemma safe_parent_cap_range_arch:
-  "\<And>cap pcap. safe_parent_for_arch cap pcap \<Longrightarrow> cap_range cap \<subseteq> cap_range pcap"
+  "safe_parent_for_arch cap pcap \<Longrightarrow> cap_range cap \<subseteq> cap_range pcap"
   by (clarsimp simp: safe_parent_for_arch_def cap_range_def)
 
 definition
@@ -298,10 +339,6 @@ declare cap_vptr_arch_def[abs_def, simp]
 lemmas cap_vptr_simps [simp] =
   cap_vptr_def [simplified, split_simps cap.split arch_cap.split option.split prod.split]
 
-end
-
-context begin interpretation Arch .
-requalify_facts replace_cap_invs
 end
 
 end

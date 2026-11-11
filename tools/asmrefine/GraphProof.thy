@@ -892,8 +892,7 @@ lemma num_visits_equals_j_first:
   "card {i. i < m \<and> trace_addr tr i = Some n} = j
     \<Longrightarrow> j \<noteq> 0
     \<Longrightarrow> \<exists>m'. trace_addr tr m' = Some n \<and> card {i. i < m' \<and> trace_addr tr i = Some n} = j - 1"
-  apply (frule_tac P="\<lambda>m. card {i. i < m \<and> trace_addr tr i = Some n} = j"
-    in ex_least_nat_le[rotated])
+  apply (frule_tac P="\<lambda>m. card {i. i < m \<and> trace_addr tr i = Some n} = j" in ex_least_nat_le)
    apply simp
   apply clarify
   apply (rule_tac x="k - 1" in exI)
@@ -2181,7 +2180,6 @@ lemma stepwise_graph_refine_Basic:
   apply (frule_tac i=i and tr=tr in exec_trace_step_cases)
   apply (frule_tac i=j and tr=tr' in exec_trace_step_cases)
   apply (clarsimp simp: exec_graph_step_def exec_graph_invariant_Cons split: graph_function.split_asm)
-  apply (simp add: K_def)
   done
 
 lemma stepwise_graph_refine_Cond:
@@ -2320,7 +2318,6 @@ lemma stepwise_graph_refine_inline_left:
   apply (frule_tac i=i and tr=tr in exec_trace_step_cases)
   apply (frule_tac i=j and tr=tr' in exec_trace_step_cases)
   apply (clarsimp simp: exec_graph_step_def exec_graph_invariant_Cons split: graph_function.split_asm)
-  apply (simp add: K_def)
   done
 
 lemma stepwise_graph_refine_end_inline_left:
@@ -2341,7 +2338,6 @@ lemma stepwise_graph_refine_end_inline_left:
   apply (frule_tac i=i and tr=tr in exec_trace_step_cases)
   apply (frule_tac i=j and tr=tr' in exec_trace_step_cases)
   apply (clarsimp simp: exec_graph_step_def exec_graph_invariant_Cons split: graph_function.split_asm)
-  apply (simp add: K_def)
   done
 
 lemma stepwise_graph_refine_inline_right:
@@ -2362,7 +2358,6 @@ lemma stepwise_graph_refine_inline_right:
   apply (frule_tac i=i and tr=tr in exec_trace_step_cases)
   apply (frule_tac i=j and tr=tr' in exec_trace_step_cases)
   apply (clarsimp simp: exec_graph_step_def exec_graph_invariant_Cons split: graph_function.split_asm)
-  apply (simp add: K_def)
   done
 
 lemma stepwise_graph_refine_end_inline_right:
@@ -2383,7 +2378,6 @@ lemma stepwise_graph_refine_end_inline_right:
   apply (frule_tac i=i and tr=tr in exec_trace_step_cases)
   apply (frule_tac i=j and tr=tr' in exec_trace_step_cases)
   apply (clarsimp simp: exec_graph_step_def exec_graph_invariant_Cons split: graph_function.split_asm)
-  apply (simp add: K_def)
   done
 
 lemma stepwise_graph_refine_induct:

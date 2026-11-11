@@ -23,7 +23,7 @@ lemma c_guard_abs_cte:
   apply (simp add: typ_heap_simps')
   done
 
-lemmas ccorres_move_c_guard_cte [corres_pre] = ccorres_move_c_guards  [OF c_guard_abs_cte]
+lemmas ccorres_move_c_guard_cte [ccorres_pre] = ccorres_move_c_guards  [OF c_guard_abs_cte]
 
 lemma c_guard_abs_tcb:
   fixes p :: "tcb_C ptr"
@@ -33,7 +33,7 @@ lemma c_guard_abs_tcb:
   apply simp
   done
 
-lemmas ccorres_move_c_guard_tcb [corres_pre] = ccorres_move_c_guards [OF c_guard_abs_tcb]
+lemmas ccorres_move_c_guard_tcb [ccorres_pre] = ccorres_move_c_guards [OF c_guard_abs_tcb]
 
 lemma cte_array_relation_array_assertion:
   "gsCNodes s p = Some n \<Longrightarrow> cte_array_relation s cstate
@@ -90,13 +90,13 @@ lemma array_assertion_abs_tcb_ctes_add':
   apply (clarsimp, drule(1) rf_sr_tcb_ctes_array_assertion')
   apply (simp add: ptr_add_assertion_positive, rule disjCI2)
   apply (erule array_assertion_shrink_right)
-  apply (cases strong, simp_all add: unat_def)
+  apply (cases strong, simp_all add: unat_def del: nat_uint_eq)
   done
 
 lemmas array_assertion_abs_tcb_ctes_add
   = array_assertion_abs_tcb_ctes_add'[simplified objBits_defs mask_def, simplified]
 
-lemmas ccorres_move_array_assertion_tcb_ctes [corres_pre]
+lemmas ccorres_move_array_assertion_tcb_ctes [ccorres_pre]
     = ccorres_move_array_assertions [OF array_assertion_abs_tcb_ctes(1)]
       ccorres_move_array_assertions [OF array_assertion_abs_tcb_ctes(2)]
       ccorres_move_Guard_Seq[OF array_assertion_abs_tcb_ctes_add]
@@ -119,7 +119,7 @@ lemma c_guard_abs_tcb_ctes':
   done
 
 lemmas c_guard_abs_tcb_ctes = c_guard_abs_tcb_ctes'[simplified objBits_defs mask_def, simplified]
-lemmas ccorres_move_c_guard_tcb_ctes [corres_pre] = ccorres_move_c_guards  [OF c_guard_abs_tcb_ctes]
+lemmas ccorres_move_c_guard_tcb_ctes [ccorres_pre] = ccorres_move_c_guards  [OF c_guard_abs_tcb_ctes]
 
 lemma c_guard_abs_pte:
   "\<forall>s s'. (s, s') \<in> rf_sr \<and> pte_at' (ptr_val p) s \<and> True
@@ -161,11 +161,11 @@ lemmas ccorres_move_c_guard_ap = ccorres_move_c_guards [OF move_c_guard_ap]
 
 lemma array_assertion_abs_irq:
   "\<forall>s s'. (s, s') \<in> rf_sr \<and> True
-        \<and> (n s' \<le> 64 \<and> (x s' \<noteq> 0 \<longrightarrow> n s' \<noteq> 0))
+        \<and> (n s' \<le> 2 ^ irqBits \<and> (x s' \<noteq> 0 \<longrightarrow> n s' \<noteq> 0))
     \<longrightarrow> (x s' = 0 \<or> array_assertion intStateIRQNode_Ptr (n s') (hrs_htd (t_hrs_' (globals s'))))"
   apply (intro allI impI disjCI2)
   apply (clarsimp simp: rf_sr_def cstate_relation_def Let_def)
-  apply (clarsimp simp: h_t_valid_clift_Some_iff)
+  apply (clarsimp simp: h_t_valid_clift_Some_iff simp flip: LENGTH_irq_len_irqBits)
   apply (erule clift_array_assertion_imp, (simp add: exI[where x=0])+)
   done
 

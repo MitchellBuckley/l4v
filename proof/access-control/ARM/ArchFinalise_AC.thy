@@ -8,13 +8,15 @@ theory ArchFinalise_AC
 imports Finalise_AC
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 named_theorems Finalise_AC_assms
 
-crunch pas_refined[wp]: arch_finalise_cap, prepare_thread_delete "pas_refined aag"
+crunch arch_finalise_cap, prepare_thread_delete
+  for pas_refined[wp]: "pas_refined aag"
 
-crunch respects[Finalise_AC_assms, wp]: prepare_thread_delete "integrity aag X st"
+crunch prepare_thread_delete
+  for respects[Finalise_AC_assms, wp]: "integrity aag X st"
 
 lemma sbn_st_vrefs[Finalise_AC_assms, wp]:
   "set_bound_notification t st \<lbrace>\<lambda>s. P (state_vrefs s)\<rbrace>"
@@ -28,16 +30,16 @@ lemma sbn_st_vrefs[Finalise_AC_assms, wp]:
 lemma arch_finalise_cap_auth'[Finalise_AC_assms]:
    "\<lbrace>pas_refined aag\<rbrace> arch_finalise_cap x12 final \<lbrace>\<lambda>rv s. pas_cap_cur_auth aag (fst rv)\<rbrace>"
   unfolding arch_finalise_cap_def
-  by (wp | wpc | simp add: comp_def hoare_post_taut[where P = \<top>] split del: if_split)+
+  by (wp | wpc | simp add: comp_def hoare_TrueI[where P = \<top>] split del: if_split)+
 
 lemma arch_finalise_cap_obj_refs[Finalise_AC_assms]:
   "\<lbrace>\<lambda>s. \<forall>x \<in> aobj_ref' acap. P x\<rbrace>
    arch_finalise_cap acap slot
-   \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs (fst rv). P x\<rbrace>"
+   \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs_ac (fst rv). P x\<rbrace>"
   by (wpsimp simp: arch_finalise_cap_def)
 
 lemma arch_finalise_cap_makes_halted[Finalise_AC_assms]:
-  "\<lbrace>\<top>\<rbrace> arch_finalise_cap arch_cap ex \<lbrace>\<lambda>rv s. \<forall>t\<in>Access.obj_refs (fst rv). halted_if_tcb t s\<rbrace>"
+  "\<lbrace>\<top>\<rbrace> arch_finalise_cap arch_cap ex \<lbrace>\<lambda>rv s. \<forall>t\<in>obj_refs_ac (fst rv). halted_if_tcb t s\<rbrace>"
   apply (case_tac arch_cap, simp_all add: arch_finalise_cap_def)
   by (wpsimp simp: valid_cap_def split: option.split bool.split)+
 
@@ -46,7 +48,7 @@ lemma arch_cap_cleanup_wf[Finalise_AC_assms]:
      \<Longrightarrow> (\<exists>irq. arch_cap_cleanup_opt acap = IRQHandlerCap irq \<and> is_subject_irq aag irq)"
   by simp
 
-lemma arch_finalise_cap_respects[wp]:
+lemma arch_finalise_cap_respects[Finalise_AC_assms, wp]:
   "\<lbrace>integrity aag X st and invs and pas_refined aag and valid_cap (ArchObjectCap cap)
                        and K (pas_cap_cur_auth aag (ArchObjectCap cap))\<rbrace>
    arch_finalise_cap cap final
@@ -59,6 +61,13 @@ lemma arch_finalise_cap_respects[wp]:
              intro: pas_refined_Control_into_is_subject_asid)
   done
 
+declare finalise_cap_replaceable[Finalise_AC_assms]
+declare finalise_cap_valid_list[Finalise_AC_assms]
+declare arch_finalise_cap_pas_refined[Finalise_AC_assms]
+declare prepare_thread_delete_st_tcb_at_halted[Finalise_AC_assms]
+declare prepare_thread_delete_pas_refined[Finalise_AC_assms]
+declare valid_cur_fpu_lift_arch[Finalise_AC_assms]
+
 end
 
 
@@ -66,11 +75,11 @@ global_interpretation Finalise_AC_1?: Finalise_AC_1
 proof goal_cases
   interpret Arch .
   case 1 show ?case
-    by (unfold_locales; (fact Finalise_AC_assms | wp finalise_cap_replaceable))
+    by (unfold_locales; (fact Finalise_AC_assms | solves \<open>wp only: Finalise_AC_assms; simp\<close>)?)
 qed
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 lemma cap_revoke_respects'[Finalise_AC_assms]:
   "s \<turnstile> \<lbrace>(\<lambda>s. trp \<longrightarrow> integrity aag X st s) and K (is_subject aag (fst slot))
@@ -93,7 +102,7 @@ proof (induct rule: cap_revoke.induct[where ?a1.0=s])
 qed
 
 lemma finalise_cap_caps_of_state_nullinv[Finalise_AC_assms]:
-  "\<lbrace>\<lambda>s. P (caps_of_state s) \<and> (\<forall>p. P (caps_of_state s(p \<mapsto> NullCap)))\<rbrace>
+  "\<lbrace>\<lambda>s. P (caps_of_state s) \<and> (\<forall>p. P ((caps_of_state s)(p \<mapsto> NullCap)))\<rbrace>
    finalise_cap cap final
    \<lbrace>\<lambda>_ s. P (caps_of_state s)\<rbrace>"
   by (cases cap;
@@ -107,7 +116,7 @@ lemma finalise_cap_fst_ret[Finalise_AC_assms]:
   "\<lbrace>\<lambda>_. P NullCap \<and> (\<forall>a b c. P (Zombie a b c))\<rbrace>
    finalise_cap cap is_final
    \<lbrace>\<lambda>rv _. P (fst rv)\<rbrace>"
-  including no_pre
+  including classic_wp_pre
   apply (cases cap, simp_all add: arch_finalise_cap_def split del: if_split)
   apply (wp | simp add: comp_def split del: if_split | fastforce)+
   apply (rule hoare_pre)
@@ -121,7 +130,7 @@ global_interpretation Finalise_AC_2?: Finalise_AC_2
 proof goal_cases
   interpret Arch .
   case 1 show ?case
-    by (unfold_locales; fact Finalise_AC_assms)
+    by (unfold_locales; (fact Finalise_AC_assms)?)
 qed
 
 end

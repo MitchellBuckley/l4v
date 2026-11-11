@@ -12,14 +12,10 @@ theory Interrupt_AI
 imports ArchIpc_AI
 begin
 
-
-context begin interpretation Arch .
-requalify_consts
-  maxIRQ
-
-requalify_facts
+arch_requalify_facts
   arch_post_cap_deletion_mdb_inv
-end
+  handle_spurious_irq_invs
+  invs_irq_state_independent
 
 definition
   interrupt_derived :: "cap \<Rightarrow> cap \<Rightarrow> bool"
@@ -116,7 +112,8 @@ locale Interrupt_AI =
         set_thread_state t st
       \<lbrace>\<lambda>rv. arch_irq_control_inv_valid i\<rbrace>"
 
-crunch inv[wp]: decode_irq_handler_invocation "P"
+crunch decode_irq_handler_invocation
+  for inv[wp]: "P"
   (simp: crunch_simps)
 
 lemma valid_irq_handlersD:
@@ -139,7 +136,8 @@ lemma decode_irq_handler_valid[wp]:
   apply (fastforce dest: valid_irq_handlersD simp: invs_def valid_state_def)
   done
 
-crunch inv[wp]: is_irq_active "P"
+crunch is_irq_active
+  for inv[wp]: "P"
 
 lemma mod_le:
   "\<lbrakk>b < c;b dvd c\<rbrakk>  \<Longrightarrow> (a mod b \<le> a mod (c::nat))"
@@ -150,7 +148,7 @@ lemma is_up_8_32: "is_up (ucast :: word8 \<Rightarrow> word32)"
   by (simp add: is_up_def source_size_def target_size_def word_size)
 
 
-crunches
+crunch
   cancel_all_ipc, cancel_all_signals, fast_finalise, set_cap, post_cap_deletion
   for mdb_inv[wp]: "\<lambda>s. P (cdt s)"
   (wp: crunch_wps)
@@ -207,18 +205,23 @@ lemma get_irq_slot_ex_cte:
   apply clarsimp
   done
 
-crunch pspace_aligned[wp]: set_irq_state "pspace_aligned"
+crunch set_irq_state
+  for pspace_aligned[wp]: "pspace_aligned"
 
-crunch pspace_distinct[wp]: set_irq_state "pspace_distinct"
+crunch set_irq_state
+  for pspace_distinct[wp]: "pspace_distinct"
 
 lemma valid_mdb_interrupts[simp]:
   "valid_mdb (interrupt_states_update f s) = valid_mdb s"
   by (simp add: valid_mdb_def mdb_cte_at_def)
 
-crunch valid_mdb[wp]: set_irq_state "valid_mdb"
+crunch set_irq_state
+  for valid_mdb[wp]: "valid_mdb"
 
-crunch mdb_cte_wp_at[wp]: set_irq_state "\<lambda>s. cte_wp_at (P (cdt s)) p s"
-crunch real_cte_at[wp]: set_irq_state "real_cte_at p"
+crunch set_irq_state
+  for mdb_cte_wp_at[wp]: "\<lambda>s. cte_wp_at (P (cdt s)) p s"
+crunch set_irq_state
+  for real_cte_at[wp]: "real_cte_at p"
 
 lemmas set_irq_state_cte_cap_to[wp]
     = ex_cte_cap_to_pres [OF set_irq_state_mdb_cte_wp_at set_irq_state_irq_node]
@@ -236,12 +239,13 @@ lemma IRQHandler_valid:
 
 lemmas (in Interrupt_AI)
   invoke_irq_handler_invs[wp] = invoke_irq_handler_invs'[where ex_inv=\<top>
-                                                             , simplified hoare_post_taut
+                                                             , simplified hoare_TrueI
                                                              , OF TrueI TrueI TrueI
                                                              , simplified
                                                         ]
 
-crunch interrupt_states[wp]: update_waiting_ntfn, cancel_signal, blocked_cancel_ipc "\<lambda>s. P (interrupt_states s)" (wp: mapM_x_wp_inv)
+crunch update_waiting_ntfn, cancel_signal, blocked_cancel_ipc
+  for interrupt_states[wp]: "\<lambda>s. P (interrupt_states s)" (wp: mapM_x_wp_inv)
 
 lemma cancel_ipc_noreply_interrupt_states:
   "\<lbrace>\<lambda>s. st_tcb_at (\<lambda>st. st \<noteq> BlockedOnReply) t s \<and> P (interrupt_states s) \<rbrace> cancel_ipc t \<lbrace> \<lambda>_ s. P (interrupt_states s) \<rbrace>"
@@ -256,7 +260,7 @@ lemma cancel_ipc_noreply_interrupt_states:
 lemma send_signal_interrupt_states[wp_unsafe]:
   "\<lbrace>\<lambda>s. P (interrupt_states s) \<and> valid_objs s\<rbrace> send_signal a b \<lbrace>\<lambda>_ s. P (interrupt_states s)\<rbrace>"
   apply (simp add: send_signal_def)
-  apply (rule hoare_seq_ext [OF _ get_simple_ko_sp])
+  apply (rule bind_wp [OF _ get_simple_ko_sp])
   apply (rule hoare_pre)
   apply (wp cancel_ipc_noreply_interrupt_states gts_wp hoare_vcg_all_lift thread_get_wp | wpc | simp)+
   apply (clarsimp)
@@ -266,5 +270,13 @@ lemma send_signal_interrupt_states[wp_unsafe]:
   apply (auto simp: pred_tcb_at_def obj_at_def receive_blocked_def)
   done
 
+context Interrupt_AI begin
+
+lemma maybe_handle_interrupt_invs[wp]:
+  "maybe_handle_interrupt in_kernel \<lbrace>invs :: 'a state \<Rightarrow> _\<rbrace>"
+  unfolding maybe_handle_interrupt_def
+  by (wpsimp wp: handle_spurious_irq_invs simp: invs_irq_state_independent)
+
+end
 
 end

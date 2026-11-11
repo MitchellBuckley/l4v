@@ -1,0 +1,109 @@
+(*
+ * Copyright 2014, General Dynamics C4 Systems
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ *)
+
+(*
+    Properties of machine operations.
+*)
+
+theory ArchMachine_R
+imports Machine_R
+begin
+
+context Arch begin arch_global_naming
+
+clear_named_theorems Arch_assms (* accumulate assumptions for Machine_R locale *)
+
+lemma dmo_getirq_inv[Arch_assms, wp]:
+  "irq_state_independent_H P \<Longrightarrow> \<lbrace>P\<rbrace> doMachineOp (getActiveIRQ in_kernel) \<lbrace>\<lambda>rv. P\<rbrace>"
+  apply (simp add: getActiveIRQ_def doMachineOp_def split_def exec_gets
+                   select_f_select[simplified liftM_def]
+                   select_modify_comm gets_machine_state_modify)
+  apply wp
+  apply (clarsimp simp: irq_state_independent_H_def in_monad return_def split: if_splits)
+  done
+
+lemma getActiveIRQ_masked:
+  "\<lbrace>\<lambda>s. valid_irq_masks' table (irq_masks s)\<rbrace> getActiveIRQ in_kernel
+  \<lbrace>\<lambda>rv s. \<forall>irq. rv = Some irq \<longrightarrow> table irq \<noteq> IRQInactive\<rbrace>"
+  apply (simp add: getActiveIRQ_def)
+  apply wp
+  apply (clarsimp simp: valid_irq_masks'_def)
+  done
+
+lemma dmo_maskInterrupt[Arch_assms]:
+  "\<lbrace>\<lambda>s. P (ksMachineState_update (irq_masks_update (\<lambda>t. t (irq := m))) s)\<rbrace>
+  doMachineOp (maskInterrupt m irq) \<lbrace>\<lambda>_. P\<rbrace>"
+  apply (simp add: doMachineOp_def split_def)
+  apply wp
+  apply (clarsimp simp: maskInterrupt_def in_monad)
+  apply (erule rsubst [where P=P])
+  apply simp
+  done
+
+lemma dmo_maskInterrupt_True:
+  "\<lbrace>invs'\<rbrace> doMachineOp (maskInterrupt True irq) \<lbrace>\<lambda>_. invs'\<rbrace>"
+  apply (wp dmo_maskInterrupt)
+  apply (clarsimp simp: invs'_def valid_state'_def)
+  apply (simp add: valid_irq_masks'_def valid_machine_state'_def
+                   ct_not_inQ_def ct_idle_or_in_cur_domain'_def tcb_in_cur_domain'_def)
+  done
+
+lemma setIRQState_irq_states'[Arch_assms, wp]:
+  "setIRQState state irq \<lbrace>valid_irq_states'\<rbrace>"
+  apply (simp add: setIRQState_def setInterruptState_def getInterruptState_def)
+  apply (wp dmo_maskInterrupt)
+  apply (simp add: valid_irq_masks'_def)
+  done
+
+lemma getActiveIRQ_le_maxIRQ:
+  "\<lbrace>irqs_masked' and valid_irq_states'\<rbrace> doMachineOp (getActiveIRQ in_kernel) \<lbrace>\<lambda>rv s. \<forall>x. rv = Some x \<longrightarrow> x \<le> maxIRQ\<rbrace>"
+  apply (simp add: doMachineOp_def split_def)
+  apply wp
+  apply (clarsimp simp: maxIRQ_def)
+  apply (drule use_valid, rule getActiveIRQ_le_maxIRQ')
+   apply (simp add: irqs_masked'_def valid_irq_states'_def maxIRQ_def)+
+  done
+
+lemma doMachineOp_getActiveIRQ_non_kernel[Arch_assms, wp]:
+  "\<lbrace>\<top>\<rbrace> doMachineOp (getActiveIRQ True)
+   \<lbrace>\<lambda>rv s. \<forall>irq. rv = Some irq \<longrightarrow> irq \<in> non_kernel_IRQs \<longrightarrow> P irq s\<rbrace>"
+  unfolding doMachineOp_def
+  apply wpsimp
+  apply (drule use_valid, rule getActiveIRQ_neq_non_kernel, rule TrueI)
+  apply clarsimp
+  done
+
+lemma frameRegisters_def'[Arch_assms]:
+  "frameRegisters = MachineExports.frameRegisters"
+  by (simp add: frameRegisters_def)
+
+lemma gpRegisters_def'[Arch_assms]:
+  "gpRegisters = MachineExports.gpRegisters"
+  by (simp add: gpRegisters_def)
+
+lemma tlsBaseRegister_def'[Arch_assms]:
+  "tlsBaseRegister = MachineExports.tlsBaseRegister"
+  by (simp add: tlsBaseRegister_def)
+
+(* FIXME arch-split: missing crunches in Machine_AI compared to other architectures *)
+crunch resetTimer, ackInterrupt
+  for underlying_memory_inv[wp]: "\<lambda>s. P (underlying_memory s)"
+
+(* FIXME arch-split: missing crunches in Machine_AI compared to other architectures *)
+crunch setIRQTrigger
+  for (no_fail) no_fail[intro!, wp, simp]
+  (ignore: setIRQTrigger_impl)
+
+lemmas Machine_R_assms = Arch_assms (* extract accumulated assumptions *)
+
+end (* Arch *)
+
+global_interpretation Machine_R?: Machine_R
+proof goal_cases
+  case 1 show ?case by (intro_locales; (unfold_locales; fact ARM_HYP.Machine_R_assms)?)
+qed
+
+end

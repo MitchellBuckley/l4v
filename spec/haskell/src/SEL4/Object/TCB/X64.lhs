@@ -8,8 +8,6 @@ This module contains x64-specific TCB management functions. Specifically, these 
 
 There are presently no x64-specific register subsets defined, but in future this may be extended to transfer floating point registers and other coprocessor state.
 
-%FIXME: add x64 floating point registers + any extra state
-
 > module SEL4.Object.TCB.X64 where
 
 \begin{impdetails}
@@ -18,11 +16,13 @@ There are presently no x64-specific register subsets defined, but in future this
 > import SEL4.Machine(PPtr)
 > import SEL4.Model
 > import SEL4.Object.Structures
+> import SEL4.API.Types
 > import SEL4.API.Failures
 > import SEL4.API.Invocation.X64
 > import SEL4.Machine.RegisterSet(setRegister, UserMonad, VPtr(..))
 > import qualified SEL4.Machine.RegisterSet as RegisterSet(Register(..))
 > import SEL4.Machine.RegisterSet.X64(Register(..), Word)
+> import SEL4.Object.FPU.X64
 > import Data.Bits
 
 > import Data.Word(Word8)
@@ -60,3 +60,9 @@ Here, cur = ksCurThread
 > postModifyRegisters cur dest =
 >     when (dest /= cur) $ setRegister (RegisterSet.Register ErrorRegister) 0
 
+> postSetFlags :: PPtr TCB -> TcbFlags -> Kernel ()
+> postSetFlags t flags = do
+>     cur <- getCurThread
+>     if (isFlagSet FpuDisabled flags)
+>         then fpuRelease t
+>         else when (t == cur) (lazyFpuRestore t)

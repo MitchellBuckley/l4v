@@ -248,6 +248,14 @@ The TCB is used to store various data about the thread's current state:
 >         tcbState :: ThreadState,
 >         tcbMCP :: Priority,
 >         tcbPriority :: Priority,
+
+\item a flag indicating whether the thread is a member of a ready queue.
+    Note that the flag is necessary, since although the tcbSchedPrev and tcbSchedNext fields listed below
+    are used only to navigate through a ready queue, we cannot say that a thread is queued
+    if and only if either its tcbSchedPrev or tcbSchedNext field is not Nothing.
+    For consider a thread that is the sole member of a ready queue.
+    It will have both its tcbSchedNext and tcbSchedPrev fields equal to Nothing, but it will still be tcbQueued.
+
 >         tcbQueued :: Bool,
 
 \item the thread's current fault state;
@@ -269,6 +277,15 @@ The TCB is used to store various data about the thread's current state:
 \item the thread's currently bound notification object;
 
 >         tcbBoundNotification :: Maybe (PPtr Notification),
+
+\item the thread's pointers to the previous and next entries in a scheduling queue;
+
+>         tcbSchedPrev :: Maybe (PPtr TCB),
+>         tcbSchedNext :: Maybe (PPtr TCB),
+
+\item the thread's feature flags, currently only used for fpuDisabled
+
+>         tcbFlags :: TcbFlags,
 
 \item and any arch-specific TCB contents
 
@@ -339,8 +356,7 @@ The basic structure is a double-linked list. The algorithm used to determine the
 
 A user thread may be in the following states:
 
-%FIXME: Mangled for datatype constructor order
-
+%Note: datatype constructor order below is determined by the proof, do not change for aesthetics
 
 > data ThreadState
 
@@ -403,7 +419,8 @@ This type is used to represent the required action, if any, of the scheduler nex
 
 \item IPC operations may request that the scheduler switch to a specific thread.
 
->     | SwitchToThread (PPtr TCB)
+>     | SwitchToThread {
+>         schActTarget :: PPtr TCB }
 
 >     deriving (Eq, Show)
 
@@ -426,11 +443,20 @@ The interrupt controller state consists of an array with one entry for each of t
 
 Each entry in the domain schedule specifies a domain and a length (a number of time slices).
 
-> type DomainSchedule = (Domain, Word)
-> dschDomain :: (Domain, Word) -> Domain
+> type DomainScheduleItem = (Domain, DomainDuration)
+>
+> dschDomain :: DomainScheduleItem -> Domain
 > dschDomain = fst
-> dschLength :: (Domain, Word) -> Word
+> dschLength :: DomainScheduleItem -> DomainDuration
 > dschLength = snd
+>
+> domainEndMarker :: DomainScheduleItem
+> domainEndMarker = (0,0)
+
+Schedule entries are represented as single 64-bit words in C, with 8 bits for the domain and 64-8=56 bits for the duration.
+
+> maxDomainDuration :: DomainDuration
+> maxDomainDuration = mask 56
 
 > isReceive :: ThreadState -> Bool
 > isReceive (BlockedOnReceive _ _) = True
@@ -475,4 +501,29 @@ Various operations on the free index of an Untyped cap.
 >         endPtr = capPtr cap + PPtr (2 ^ capBlockSize cap) - 1
 > untypedZeroRange _ = Nothing
 
+> data TcbQueue = TcbQueue {
+>     tcbQueueHead :: Maybe (PPtr TCB),
+>     tcbQueueEnd :: Maybe (PPtr TCB) }
 
+> emptyQueue :: TcbQueue
+> emptyQueue = TcbQueue { tcbQueueHead = Nothing, tcbQueueEnd = Nothing }
+
+\subsubsection{TCB Flags}
+
+> data TcbFlag = FpuDisabled
+
+> tcbFlagToWord :: TcbFlag -> Word
+> tcbFlagToWord (FpuDisabled) = bit 0
+
+Sets of TCB flags are bitwise OR'd and represented as a word.
+
+> type TcbFlags = Word
+
+> noFlag :: TcbFlags
+> noFlag = 0x0
+
+> isFlagSet :: TcbFlag -> TcbFlags -> Bool
+> isFlagSet flag flags = tcbFlagToWord flag .&. flags /= 0
+
+> tcbFlagMask :: Word
+> tcbFlagMask = if config_HAVE_FPU then tcbFlagToWord FpuDisabled else 0

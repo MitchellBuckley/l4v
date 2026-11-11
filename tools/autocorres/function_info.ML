@@ -278,7 +278,7 @@ fun calc_call_graph fn_infos = let
           cmp = String.compare,
           graph = Symtab.lookup fn_callees_lists #> the,
           converse = Symtab.lookup fn_callers_lists #> the
-        } (Symtab.keys fn_callees_lists |> sort String.compare)
+        } (Symtab.keys fn_callees_lists |> sort_strings)
         |> map Symset.make;
 
   val fn_callees = Symtab.map (K Symset.make) fn_callees_lists;
@@ -383,7 +383,7 @@ fun init_function_info ctxt filename = let
     val (definition, invented) =
         (Proof_Context.get_thm ctxt (name ^ "_body_def"), false)
         handle ERROR _ =>
-          (Thm.instantiate ([((("'a", 0), ["HOL.type"]), Thm.ctyp_of ctxt myvars_typ)], [])
+          (Thm.instantiate (TVars.make [((("'a", 0), ["HOL.type"]), Thm.ctyp_of ctxt myvars_typ)], Vars.empty)
                            @{thm undefined_function_body_def}, true);
     in {
          name = name,

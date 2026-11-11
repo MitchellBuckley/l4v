@@ -15,26 +15,21 @@ design specification, and builds on the [Abstract Spec Invariant
 Proof](../invariant-abstract/). It is described in the TPHOLS '08
 [paper][1].
 
-  [1]: https://ts.data61.csiro.au/publications/nictaabstracts/Cock_KS_08.abstract "Secure Microkernels, State Monads and Scalable Refinement"
+  [1]: https://trustworthy.systems/publications/nictaabstracts/Cock_KS_08.abstract "Secure Microkernels, State Monads and Scalable Refinement"
 
 Building
 --------
 
-Make sure that the `L4V_ARCH` environment variable is set to the desired
-target architecture. If in doubt, use `L4V_ARCH=ARM`.
+To build for the ARM architecture from the `l4v/` directory, run:
 
-To build from the `l4v/` directory, run:
-
-    ./isabelle/bin/isabelle build -d . -v -b Refine
+    L4V_ARCH=ARM ./run_tests Refine
 
 Important Theories
 ------------------
 
-The top-level theory where the refinement statement is established over
-the entire kernel is [`Refine`](ARM/Refine.thy); the state-relation that
-relates the state-spaces of the two specifications is defined in
-[`StateRelation`](ARM/StateRelation.thy) and the basic correspondence
-property proved over each kernel function is defined in
-[`Corres`](ARM/Corres.thy).
-
-
+The top-level theory where the refinement statement is established over the
+entire kernel is [`Refine`](Refine.thy) with architecture assumptions that
+are discharged in [`ArchRefine`](AARCH64/ArchRefine.thy); the state-relation
+that relates the state-spaces of the two specifications is defined in
+[`StateRelation`](StateRelation.thy) and the basic correspondence property
+proved over each kernel function is defined in [`Corres`](Corres.thy).

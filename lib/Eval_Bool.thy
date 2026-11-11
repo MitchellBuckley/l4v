@@ -5,9 +5,7 @@
  *)
 
 theory Eval_Bool
-
-imports Try_Methods
-
+  imports Main
 begin
 
 text \<open>The eval_bool method/simproc uses the code generator setup to
@@ -47,27 +45,24 @@ val eval_nat = eval (mk_constname_tab [@{term "Suc 0"}, @{term "Suc 1"},
 val eval_int = eval (mk_constname_tab [@{term "0 :: int"}, @{term "1 :: int"},
     @{term "18 :: int"}, @{term "(-9) :: int"}])
 
-val eval_bool_simproc = Simplifier.make_simproc @{context} "eval_bool"
-  { lhss = [@{term "b :: bool"}], proc = K eval_bool }
-val eval_nat_simproc = Simplifier.make_simproc @{context} "eval_nat"
-  { lhss = [@{term "n :: nat"}], proc = K eval_nat }
-val eval_int_simproc = Simplifier.make_simproc @{context} "eval_int"
-  { lhss = [@{term "i :: int"}], proc = K eval_int }
+val eval_bool_simproc = \<^simproc_setup>\<open>eval_bool ("b :: bool") = \<open>K eval_bool\<close>\<close>
+val eval_nat_simproc = \<^simproc_setup>\<open>eval_nat ("n :: nat") = \<open>K eval_nat\<close>\<close>
+val eval_int_simproc = \<^simproc_setup>\<open>eval_int ("i :: int") = \<open>K eval_int\<close>\<close>
 
 end
 \<close>
 
+(* simproc_setup declares them globally, remove again *)
+declare [[simproc del: eval_bool eval_nat eval_int]]
+
 method_setup eval_bool = \<open>Scan.succeed (fn ctxt => SIMPLE_METHOD'
-    (CHANGED o full_simp_tac (clear_simpset ctxt
-        addsimprocs [Eval_Simproc.eval_bool_simproc])))\<close>
+    (CHANGED o full_simp_tac (clear_simpset ctxt addsimprocs [@{simproc eval_bool}])))\<close>
     "use code generator setup to simplify booleans in goals to True or False"
 
 method_setup eval_int_nat = \<open>Scan.succeed (fn ctxt => SIMPLE_METHOD'
     (CHANGED o full_simp_tac (clear_simpset ctxt
-        addsimprocs [Eval_Simproc.eval_nat_simproc, Eval_Simproc.eval_int_simproc])))\<close>
+        addsimprocs [@{simproc eval_nat}, @{simproc eval_int}])))\<close>
     "use code generator setup to simplify nats and ints in goals to values"
-
-add_try_method eval_bool
 
 text \<open>Testing.\<close>
 definition
@@ -103,8 +98,7 @@ fun get_const_defs thy nm = Sign.consts_of thy
   |> filter (Thm.strip_shyps #> Thm.shyps_of #> null)
   |> tap (fn xs => tracing ("Installing " ^ string_of_int (length xs) ^ " code defs"))
 
-fun setup nm thy = fold (fn t => Code.add_eqn_global (t, true))
-    (get_const_defs thy nm) thy
+fun setup nm thy = Code.declare_eqns_global (map (rpair true) (get_const_defs thy nm)) thy
 
 end
 \<close>
@@ -121,8 +115,6 @@ definition
   "z = (x * y) + x + y"
 
 end
-
-setup \<open>Add_Locale_Code_Defs.setup "eval_bool_test_locale"\<close>
 
 setup \<open>Add_Locale_Code_Defs.setup "eval_bool_test_locale"\<close>
 

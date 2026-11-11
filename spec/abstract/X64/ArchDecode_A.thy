@@ -14,11 +14,10 @@ theory ArchDecode_A
 imports
   Interrupt_A
   InvocationLabels_A
-  "Word_Lib.Word_Lib"
   "ExecSpec.InvocationLabels_H"
 begin
 
-context Arch begin global_naming X64_A
+context Arch begin arch_global_naming (A)
 
 section "Helper definitions"
 
@@ -69,13 +68,11 @@ definition
         dest_slot \<leftarrow> lookup_target_slot cnode (data_to_cptr index) (unat depth);
         ensure_empty dest_slot;
 
-       \<comment> \<open>Following should be wrapped in to a function like what c did
-          since it is pc99 related, problem is where to put this function\<close>
-
         numIOAPICs \<leftarrow> liftE $ gets (x64_num_ioapics \<circ> arch_state);
+        ioapic_nirqs \<leftarrow> liftE $ gets (x64_ioapic_nirqs \<circ> arch_state);
         whenE (numIOAPICs = 0) $ throwError IllegalOperation;
         whenE (ioapic > numIOAPICs - 1) $ throwError (RangeError 0 (numIOAPICs-1));
-        whenE (pin > ioapicIRQLines - 1) $ throwError (RangeError 0 (ioapicIRQLines-1));
+        whenE (pin > ucast (ioapic_nirqs ioapic - 1)) $ throwError (RangeError 0 (ucast (ioapic_nirqs ioapic - 1)));
         whenE (level > 1) $ throwError (RangeError 0 1);
         whenE (polarity > 1) $ throwError (RangeError 0 1);
 
@@ -372,9 +369,9 @@ where
   else throwError IllegalOperation
  | _ \<Rightarrow> fail)"
 
-definition filter_frame_attrs :: "frame_attrs \<Rightarrow> table_attrs"
+definition filter_vm_attributes :: "vm_attributes \<Rightarrow> table_attrs"
 where
-  "filter_frame_attrs attrs \<equiv> {s. \<exists>s' \<in> attrs. s' = PTAttr s}"
+  "filter_vm_attributes attrs \<equiv> {s. \<exists>s' \<in> attrs. s' = PTAttr s}"
 
 definition
   decode_page_table_invocation :: "data \<Rightarrow> data list \<Rightarrow> cslot_ptr \<Rightarrow> arch_cap \<Rightarrow>
@@ -400,7 +397,7 @@ where
                old_pde \<leftarrow> liftE $ get_pde pd_slot;
                unlessE (old_pde = InvalidPDE) $ throwError DeleteFirst;
                pde \<leftarrow> returnOk (PageTablePDE (addrFromPPtr p)
-                                  (filter_frame_attrs $ attribs_from_word attr) vm_read_write);
+                                  (filter_vm_attributes $ attribs_from_word attr) vm_read_write);
                cap' <- returnOk $ ArchObjectCap $ PageTableCap p $ Some (asid, vaddr');
                returnOk $ InvokePageTable $ PageTableMap cap' cte pde pd_slot pml4
             odE
@@ -437,7 +434,7 @@ where
                old_pdpte \<leftarrow> liftE $ get_pdpte pdpt_slot;
                unlessE (old_pdpte = InvalidPDPTE) $ throwError DeleteFirst;
                pdpte \<leftarrow> returnOk (PageDirectoryPDPTE (addrFromPPtr p)
-                          (filter_frame_attrs $ attribs_from_word attr) vm_read_write);
+                          (filter_vm_attributes $ attribs_from_word attr) vm_read_write);
                cap' <- returnOk $ ArchObjectCap $ PageDirectoryCap p $ Some (asid, vaddr');
                returnOk $ InvokePageDirectory $ PageDirectoryMap cap' cte pdpte pdpt_slot pml4
         odE
@@ -474,7 +471,7 @@ where
                old_pml4e \<leftarrow> liftE $ get_pml4e pml_slot;
                unlessE (old_pml4e = InvalidPML4E) $ throwError DeleteFirst;
                pml4e \<leftarrow> returnOk (PDPointerTablePML4E (addrFromPPtr p)
-                          (filter_frame_attrs $ attribs_from_word attr) vm_read_write);
+                          (filter_vm_attributes $ attribs_from_word attr) vm_read_write);
                cap' <- returnOk $ ArchObjectCap $ PDPointerTableCap p $ Some (asid, vaddr');
                returnOk $ InvokePDPT $ PDPTMap cap' cte pml4e pml_slot pml4
             odE

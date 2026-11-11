@@ -1,4 +1,5 @@
 (*
+ * Copyright 2023, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
@@ -11,13 +12,13 @@ imports
   StoreWord_C  DetWP
 begin
 
-(*FIXME: arch_split: C kernel names hidden by Haskell names *)
+(*FIXME: arch-split: C kernel names hidden by Haskell names *)
 context kernel_m begin
 abbreviation "msgRegistersC \<equiv> kernel_all_substitute.msgRegisters"
 lemmas msgRegistersC_def = kernel_all_substitute.msgRegisters_def
 end
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 declare word_neq_0_conv[simp del]
 
@@ -37,7 +38,8 @@ where
      od)
   od"
 
-crunch typ_at'[wp]: replyOnRestart "\<lambda>s. P (typ_at' T p s)"
+crunch replyOnRestart
+  for typ_at'[wp]: "\<lambda>s. P (typ_at' T p s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemmas replyOnRestart_typ_ats[wp] = typ_at_lifts [OF replyOnRestart_typ_at']
@@ -46,10 +48,8 @@ lemma replyOnRestart_invs'[wp]:
   "\<lbrace>invs'\<rbrace> replyOnRestart thread reply isCall \<lbrace>\<lambda>rv. invs'\<rbrace>"
   including no_pre
   apply (simp add: replyOnRestart_def)
-  apply (wp setThreadState_nonqueued_state_update rfk_invs' static_imp_wp)
-  apply (rule hoare_vcg_all_lift)
-  apply (wp setThreadState_nonqueued_state_update rfk_invs' hoare_vcg_all_lift rfk_ksQ)
-   apply (rule hoare_strengthen_post, rule gts_sp')
+  apply (wp setThreadState_nonqueued_state_update rfk_invs' hoare_weak_lift_imp)
+  apply (rule hoare_strengthen_post, rule gts_sp')
   apply (clarsimp simp: pred_tcb_at')
   apply (auto elim!: pred_tcb'_weakenE st_tcb_ex_cap''
                dest: st_tcb_at_idle_thread')
@@ -169,7 +169,7 @@ lemma preemptionPoint_ccorres:
         apply (simp add: from_bool_0 whenE_def returnOk_def throwError_def
                          return_def split: option.splits)
         apply (clarsimp simp: cintr_def exception_defs)
-       apply wp+
+       apply wpsimp+
      apply vcg
     apply (unfold modifyWorkUnits_def)[1]
     apply wp
@@ -288,7 +288,7 @@ lemma ccorres_invocationCatch_Inr:
            if reply = [] then liftE (replyOnRestart thread [] isCall) \<sqinter> returnOk ()
                          else liftE (replyOnRestart thread reply isCall)
        odE od) c"
-  apply (simp add: invocationCatch_def liftE_bindE o_xo_injector)
+  apply (simp add: invocationCatch_def liftE_bindE o_xo_injector cong: ccorres_all_cong)
   apply (subst ccorres_liftM_simp[symmetric])
   apply (simp add: liftM_def bind_assoc bindE_def)
   apply (rule_tac f="\<lambda>f. ccorres rvr xs P P' hs f c" for rvr xs in arg_cong)
@@ -414,11 +414,13 @@ lemma is_syscall_error_codes:
   by ((rule iffD2[OF is_syscall_error_code_def], intro allI,
       rule conseqPre, vcg, safe, (simp_all add: o_def)?)+)
 
-lemma syscall_error_throwError_ccorres_direct:
+lemma syscall_error_throwError_ccorres_direct_gen:
   "\<lbrakk> is_syscall_error_code f code;
+     \<And>x y g. arrel (Inl x) y = (intr_and_se_rel \<currency> g) (Inl x) y;
      \<And>err' ft'. syscall_error_to_H (f err') ft' = Some err \<rbrakk>
    \<Longrightarrow>
-   ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id v' ret__unsigned_long_')
+   ccorres_underlying rf_sr \<Gamma> rrel xf
+      arrel (liftxf errstate id v' ret__unsigned_long_')
       \<top> (UNIV) (SKIP # hs)
       (throwError (Inl err)) code"
   apply (rule ccorres_from_vcg_throws)
@@ -428,27 +430,34 @@ lemma syscall_error_throwError_ccorres_direct:
   apply (simp add: syscall_error_rel_def exception_defs)
   done
 
-lemma syscall_error_throwError_ccorres_succs:
+lemma syscall_error_throwError_ccorres_succs_gen:
   "\<lbrakk> is_syscall_error_code f code;
+     \<And>x y g. arrel (Inl x) y = (intr_and_se_rel \<currency> g) (Inl x) y;
      \<And>err' ft'. syscall_error_to_H (f err') ft' = Some err \<rbrakk>
    \<Longrightarrow>
-   ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id v' ret__unsigned_long_')
+   ccorres_underlying rf_sr \<Gamma> rrel xf
+      arrel (liftxf errstate id v' ret__unsigned_long_')
       \<top> (UNIV) (SKIP # hs)
       (throwError (Inl err)) (code ;; remainder)"
   apply (rule ccorres_guard_imp2,
          rule ccorres_split_throws)
-    apply (erule syscall_error_throwError_ccorres_direct)
-    apply simp
+    apply (erule syscall_error_throwError_ccorres_direct_gen; assumption)
    apply (rule HoarePartialProps.augment_Faults)
     apply (erule iffD1[OF is_syscall_error_code_def, THEN spec])
    apply simp+
   done
 
+lemmas syscall_error_throwError_ccorres_n_gen =
+    is_syscall_error_codes[THEN syscall_error_throwError_ccorres_direct_gen,
+                           simplified o_apply]
+    is_syscall_error_codes[THEN syscall_error_throwError_ccorres_succs_gen,
+                           simplified o_apply]
+
 lemmas syscall_error_throwError_ccorres_n =
-    is_syscall_error_codes[THEN syscall_error_throwError_ccorres_direct,
-                           simplified o_apply]
-    is_syscall_error_codes[THEN syscall_error_throwError_ccorres_succs,
-                           simplified o_apply]
+  syscall_error_throwError_ccorres_n_gen[where arrel="intr_and_se_rel \<currency> dc", simplified]
+
+lemmas syscall_error_throwError_ccorres_n_inl_rrel =
+  syscall_error_throwError_ccorres_n_gen[where arrel="inl_rrel (intr_and_se_rel \<currency> dc)", simplified]
 
 definition idButNot :: "'a \<Rightarrow> 'a"
 where "idButNot x = x"
@@ -587,7 +596,7 @@ lemma no_fail_loadWordUser:
   "no_fail (pointerInUserData x and K (is_aligned x 3)) (loadWordUser x)"
   apply (simp add: loadWordUser_def)
   apply (rule no_fail_pre, wp no_fail_stateAssert)
-  apply simp
+  apply (simp add: word_size_bits_def)
   done
 
 lemma no_fail_getMRs:
@@ -654,9 +663,9 @@ lemma getMRs_tcbContext:
   apply (thin_tac "thread = t" for t)
   apply (clarsimp simp add: getMRs_def)
   apply (wp|wpc)+
-    apply (rule_tac P="n < length x" in hoare_gen_asm)
+    apply (rule_tac P="n < length rv" in hoare_gen_asm)
     apply (clarsimp simp: nth_append)
-    apply (wp mapM_wp' static_imp_wp)+
+    apply (wp mapM_wp' hoare_weak_lift_imp)+
     apply simp
     apply (rule asUser_cur_obj_at')
     apply (simp add: getRegister_def msgRegisters_unfold)
@@ -702,25 +711,6 @@ lemma ccorres_case_bools:
                       hs (a b) (c b)"
   apply (cases b)
    apply (auto simp: P Q)
-  done
-
-lemma ccorres_cond_both':
-  assumes abs: "\<forall>s s'. (s, s') \<in> sr \<and> Q s \<and> Q' s' \<longrightarrow> P = (s' \<in> P')"
-  and     ac: "P \<Longrightarrow> ccorres_underlying sr G r xf arrel axf R R' hs a c"
-  and     bd: "\<not> P \<Longrightarrow> ccorres_underlying sr G r xf arrel axf U U' hs b d"
-  shows  "ccorres_underlying sr G r xf arrel axf
-          (Q and (\<lambda>s. P \<longrightarrow> R s) and (\<lambda>s. \<not> P \<longrightarrow> U s))
-          (Collect Q' \<inter> {s. (s \<in> P' \<longrightarrow> s \<in> R') \<and> (s \<notin> P' \<longrightarrow> s \<in> U')})
-          hs
-          (if P then a else b) (Cond P' c d)"
-  apply (rule ccorres_guard_imp2)
-   apply (rule ccorres_if_lhs)
-    apply (rule ccorres_cond_true)
-    apply (erule ac)
-   apply (rule ccorres_cond_false)
-   apply (erule bd)
-  apply clarsimp
-  apply (frule abs[rule_format, OF conjI], simp+)
   done
 
 lemma pageBitsForSize_32 [simp]:
@@ -782,12 +772,12 @@ lemma lookupIPCBuffer_ccorres[corres]:
      apply (rule ccorres_move_array_assertion_tcb_ctes)
      apply (ctac (no_vcg))
        apply csymbr
-       apply (rule_tac b="isArchObjectCap rva \<and> isPageCap (capCap rva)" in ccorres_case_bools')
+       apply (rule_tac b="isArchObjectCap rv \<and> isPageCap (capCap rv)" in ccorres_case_bools')
         apply simp
         apply (rule ccorres_cond_false_seq)
         apply (simp(no_asm))
         apply csymbr
-        apply (rule_tac b="isDeviceCap rva" in ccorres_case_bools')
+        apply (rule_tac b="isDeviceCap rv" in ccorres_case_bools')
          apply (rule ccorres_cond_true_seq)
          apply (rule ccorres_from_vcg_split_throws[where P=\<top> and P'=UNIV])
           apply vcg
@@ -810,8 +800,7 @@ lemma lookupIPCBuffer_ccorres[corres]:
            apply (frule cap_get_tag_isCap_unfolded_H_cap(18),simp)
            apply (frule capFVMRights_range)
            apply (simp add: cap_frame_cap_lift)
-           apply (clarsimp simp: cap_to_H_def vmrights_to_H_def to_bool_def
-                                 word_le_make_less
+           apply (clarsimp simp: cap_to_H_def vmrights_to_H_def word_le_make_less
                                  Kernel_C.VMReadWrite_def Kernel_C.VMReadOnly_def
                                  Kernel_C.VMKernelOnly_def
                            dest: word_less_cases)
@@ -940,7 +929,7 @@ lemma getMRs_user_word:
                          linorder_not_less [symmetric])
    apply (wp mapM_loadWordUser_user_words_at)
    apply (wp hoare_vcg_all_lift)
-    apply (rule_tac Q="\<lambda>_. \<top>" in hoare_strengthen_post)
+    apply (rule_tac Q'="\<lambda>_. \<top>" in hoare_strengthen_post)
      apply wp
     apply clarsimp
     defer
@@ -965,7 +954,7 @@ lemma getMRs_user_word:
    apply (drule (1) order_less_le_trans)
    apply (simp add: word_less_nat_alt word_le_nat_alt)
   apply (simp add: word_le_nat_alt add.commute add.left_commute mult.commute mult.left_commute
-                   wordSize_def')
+                   wordSize_def' take_bit_Suc)
   done
 
 declare if_split [split]
@@ -994,9 +983,9 @@ lemma getMRs_rel:
   getMRs thread buffer mi \<lbrace>\<lambda>args. getMRs_rel args buffer\<rbrace>"
   apply (simp add: getMRs_rel_def)
   apply (rule hoare_pre)
-   apply (rule_tac x=mi in hoare_vcg_exI)
+   apply (rule_tac x=mi in hoare_exI)
    apply wp
-   apply (rule_tac Q="\<lambda>rv s. thread = ksCurThread s \<and> fst (getMRs thread buffer mi s) = {(rv,s)}" in hoare_strengthen_post)
+   apply (rule_tac Q'="\<lambda>rv s. thread = ksCurThread s \<and> fst (getMRs thread buffer mi s) = {(rv,s)}" in hoare_strengthen_post)
     apply (wp det_result det_wp_getMRs)
    apply clarsimp
   apply (clarsimp simp: cur_tcb'_def)
@@ -1141,7 +1130,7 @@ lemma getSyscallArg_ccorres_foo:
        apply (simp add: index_msgRegisters_less unat_less_helper)
       apply wp[1]
      apply (wp getMRs_tcbContext)
-    apply simp
+    apply fastforce
    apply (rule ccorres_seq_skip [THEN iffD2])
    apply (rule ccorres_add_return2)
    apply (rule ccorres_symb_exec_l)
@@ -1162,10 +1151,10 @@ lemma getSyscallArg_ccorres_foo:
     apply (clarsimp simp: option_to_ptr_def option_to_0_def)
     apply (rule_tac P="\<lambda>s. valid_ipc_buffer_ptr' (ptr_val (Ptr b)) s \<and> i < msgLength mi \<and>
                            msgLength mi \<le> msgMaxLength \<and> scast n_msgRegisters \<le> i"
-                 in hoare_pre(1))
+                 in hoare_weaken_pre)
      apply (wp getMRs_user_word)
     apply (clarsimp simp: msgMaxLength_def unat_less_helper)
-   apply simp
+   apply fastforce
   apply (clarsimp simp: sysargs_rel_def sysargs_rel_n_def)
   apply (rule conjI, clarsimp simp: unat_of_nat64 word_bits_def)
    apply (drule equalityD2)
@@ -1188,7 +1177,7 @@ lemma getSyscallArg_ccorres_foo:
 
 end
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 lemma invocation_eq_use_type:
   "\<lbrakk> value \<equiv> (value' :: 32 signed word);

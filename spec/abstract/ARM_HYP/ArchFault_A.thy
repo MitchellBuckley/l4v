@@ -14,14 +14,13 @@ theory ArchFault_A
 imports Structures_A Tcb_A
 begin
 
-context Arch begin global_naming ARM_HYP_A
+context Arch begin arch_global_naming (A)
 
 fun make_arch_fault_msg :: "arch_fault \<Rightarrow> obj_ref \<Rightarrow> (data \<times> data list,'z::state_ext) s_monad"
 where
   "make_arch_fault_msg (VMFault vptr archData) thread = do
      pc \<leftarrow> as_user thread getRestartPC;
-     upc \<leftarrow> do_machine_op (addressTranslateS1CPR pc);
-     return (5, (upc && ~~ mask pageBits || pc && mask pageBits) # vptr # archData) od"
+     return (5, pc # vptr # archData) od"
 | "make_arch_fault_msg (VCPUFault hsr) thread = return (7, [hsr])"
 | "make_arch_fault_msg (VPPIEvent irq) thread = return (8, [ucast irq])"
 | "make_arch_fault_msg (VGICMaintenance archData) thread = do

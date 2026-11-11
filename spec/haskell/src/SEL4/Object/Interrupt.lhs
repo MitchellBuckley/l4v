@@ -18,7 +18,7 @@ We use the C preprocessor to select a target architecture.
 >     decodeIRQControlInvocation, decodeIRQHandlerInvocation,
 >     performIRQControl, invokeIRQHandler,
 >     deletingIRQHandler, deletedIRQHandler,
->     initInterruptController, handleInterrupt,
+>     initInterruptController, maybeHandleInterrupt,
 >     setIRQState, getIRQState, isIRQActive
 >   ) where
 
@@ -30,6 +30,7 @@ We use the C preprocessor to select a target architecture.
 The architecture-specific definitions are imported qualified with the "Arch" prefix.
 
 > import qualified SEL4.Object.Interrupt.TARGET as Arch
+> import SEL4.Object.Interrupt.TARGET (handleSpuriousIRQ)
 
 \begin{impdetails}
 
@@ -105,8 +106,6 @@ An IRQ handler capability allows a thread possessing it to set an endpoint which
 > toBool :: Word -> Bool
 > toBool w = w /= 0
 
-%FIXME x64 naming: this should be called perform, not invoke, same for CNode
-
 > invokeIRQHandler :: IRQHandlerInvocation -> Kernel ()
 > invokeIRQHandler (AckIRQ irq) =
 >     Arch.invokeIRQHandler (AckIRQ irq)
@@ -164,6 +163,17 @@ This function is called during bootstrap to set up the initial state of the inte
 
 This function is called when the kernel receives an interrupt event.
 
+We attempt to retrieve the current IRQ from the IRQ controller. If this fails,
+we call the platform-defined spurious IRQ handler (on most platforms this is
+empty). Otherwise, we handle the interrupt.
+
+> maybeHandleInterrupt :: Bool -> Kernel ()
+> maybeHandleInterrupt inKernel = do
+>     maybeIRQ <- doMachineOp (getActiveIRQ inKernel)
+>     case maybeIRQ of
+>         Nothing -> handleSpuriousIRQ
+>         Just irq -> handleInterrupt irq
+
 In the case of an interrupt above maxIRQ, we mask, ack and pretend it didn't
 happen.  We assume that mask and ack operations for this IRQ are safe in
 hardware, since the hardware returned it. The situation can arise when maxIRQ
@@ -208,7 +218,7 @@ The following functions are used within this module to access the global interru
 >     doMachineOp $ maskInterrupt (irqState==IRQInactive) irq
 
 > getIRQState :: IRQ -> Kernel IRQState
-> getIRQState irq = liftM ((!irq) . intStateIRQTable) getInterruptState
+> getIRQState irq = liftM ((! irq) . intStateIRQTable) getInterruptState
 
 > getIRQSlot :: IRQ -> Kernel (PPtr CTE)
 > getIRQSlot irq = do

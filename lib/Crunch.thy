@@ -6,10 +6,10 @@
 
 theory Crunch
 imports
-  WPSimp
+  Monads.WPSimp
   Lib
-  MLUtils
-keywords "crunch" "crunch_ignore" "crunches" :: thy_decl
+  ML_Utils.ML_Utils
+keywords "crunch" "crunch_ignore" :: thy_decl
 begin
 
 named_theorems "crunch_def"

@@ -14,15 +14,12 @@ theory Interrupt_A
 imports ArchInterrupt_A
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   arch_invoke_irq_control
   arch_invoke_irq_handler
   handle_reserved_irq
   arch_mask_irq_signal
-end
-
+  handle_spurious_irq
 
 text \<open>The IRQControl capability can be used to create a new IRQHandler
 capability as well as to perform whatever architecture specific interrupt
@@ -60,21 +57,21 @@ included in this model, so no scheduling action needs to be taken on timer
 ticks. If the IRQ has a valid Notification cap loaded a message is
 delivered.\<close>
 
-definition timer_tick :: "unit det_ext_monad" where
+definition timer_tick :: "(unit, 'z::state_ext) s_monad" where
   "timer_tick \<equiv> do
      cur \<leftarrow> gets cur_thread;
      state \<leftarrow> get_thread_state cur;
      case state of Running \<Rightarrow> do
-       ts \<leftarrow> ethread_get tcb_time_slice cur;
+       ts \<leftarrow> thread_get tcb_time_slice cur;
        let ts' = ts - 1 in
        if (ts' > 0) then thread_set_time_slice cur ts' else do
-         thread_set_time_slice cur time_slice;
+         thread_set_time_slice cur timeSlice;
          tcb_sched_action tcb_sched_append cur;
          reschedule_required
        od
      od
      | _ \<Rightarrow> return ();
-     when (num_domains > 1) (do
+     when (numDomains > 1) (do
        dec_domain_time;
        dom_time \<leftarrow> gets domain_time;
        when (dom_time = 0) reschedule_required
@@ -82,12 +79,12 @@ definition timer_tick :: "unit det_ext_monad" where
    od"
 
 definition
-  handle_interrupt :: "irq \<Rightarrow> (unit,'z::state_ext) s_monad" where
+  handle_interrupt :: "irq \<Rightarrow> (unit, 'z::state_ext) s_monad" where
  "handle_interrupt irq \<equiv>
-   if (irq > maxIRQ) then do_machine_op $ do
+   if irq > maxIRQ then do_machine_op $ do
     maskInterrupt True irq;
     ackInterrupt irq
-    od
+   od
   else do
    st \<leftarrow> get_irq_state irq;
    case st of
@@ -99,12 +96,20 @@ definition
        arch_mask_irq_signal irq
      od
    | IRQTimer \<Rightarrow> do
-       do_extended_op timer_tick;
+       timer_tick;
        do_machine_op resetTimer
      od
    | IRQInactive \<Rightarrow> fail \<comment> \<open>not meant to be able to get IRQs from inactive lines\<close>
    | IRQReserved \<Rightarrow> handle_reserved_irq irq;
    do_machine_op $ ackInterrupt irq
+  od"
+
+definition maybe_handle_interrupt :: "bool \<Rightarrow> (unit, 'z::state_ext) s_monad" where
+  "maybe_handle_interrupt in_kernel \<equiv> do
+     irq_opt \<leftarrow> do_machine_op $ getActiveIRQ in_kernel;
+     case irq_opt of
+       None \<Rightarrow> handle_spurious_irq
+     | Some irq \<Rightarrow> handle_interrupt irq
    od"
 
 end

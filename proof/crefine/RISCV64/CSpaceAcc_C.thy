@@ -188,10 +188,6 @@ lemma ccorres_pre_getIdleThread:
   apply (clarsimp simp: rf_sr_ksIdleThread)
   done
 
-
-lemma cd_wp [wp]: "\<lbrace>\<lambda>s. P (ksCurDomain s) s\<rbrace> curDomain \<lbrace>P\<rbrace>"
-  by (unfold curDomain_def, wp)
-
 lemma curDomain_sp:
   "\<lbrace>P\<rbrace> curDomain \<lbrace>\<lambda>rv s. ksCurDomain s = rv \<and> P s\<rbrace>"
   apply wp
@@ -274,7 +270,7 @@ lemma array_assertion_abs_cnode_ctes:
   apply (metis array_assertion_shrink_right)
   done
 
-lemmas ccorres_move_array_assertion_cnode_ctes [corres_pre]
+lemmas ccorres_move_array_assertion_cnode_ctes [ccorres_pre]
     = ccorres_move_Guard_Seq [OF array_assertion_abs_cnode_ctes]
       ccorres_move_Guard [OF array_assertion_abs_cnode_ctes]
 
@@ -326,7 +322,7 @@ lemma getSlotCap_h_val_ccorres [corres]:
   apply simp
   apply (rule ccorres_guard_imp2)
   apply (rule ccorres_pre_getCTE)
-   apply (rule_tac R = "\<lambda>s. ctes_of s a = Some rva" in ccorres_return  [where R' = UNIV])
+   apply (rule_tac R = "\<lambda>s. ctes_of s a = Some cte" in ccorres_return  [where R' = UNIV])
    apply vcg
    apply (clarsimp simp: gl fg cte_wp_at_ctes_of)
    apply (erule (1) rf_sr_ctes_of_cliftE)

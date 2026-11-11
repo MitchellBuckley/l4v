@@ -8,17 +8,13 @@ theory Detype_AI
 imports ArchRetype_AI
 begin
 
-context begin interpretation Arch .
-
-requalify_facts
+arch_requalify_facts
   valid_arch_mdb_detype
   clearMemory_invs
   invs_irq_state_independent
   init_arch_objects_invs_from_restricted
   caps_region_kernel_window_imp
   init_arch_objects_wps
-
-end
 
 declare clearMemory_invs[wp]
 
@@ -41,8 +37,6 @@ locale Detype_AI =
                 (\<lambda>m x. if \<exists>k. x = ptr + of_nat k \<and> k < n * word_size then 0 else m x))"
   assumes empty_fail_freeMemory:
     "empty_fail (freeMemory ptr bits)"
-  assumes valid_ioports_detype:
-    "valid_ioports (s::'a state) \<Longrightarrow> valid_ioports (detype (untyped_range cap) s)"
 
 lemma obj_at_detype[simp]:
   "obj_at P p (detype S s) = (p \<notin> S \<and> obj_at P p s)"
@@ -76,8 +70,7 @@ lemma cdt_detype[simp]:
 lemma caps_of_state_detype[simp]:
   "caps_of_state (detype S s) =
    (\<lambda>p. if fst p \<in> S then None else caps_of_state s p)"
-  by (clarsimp simp add: caps_of_state_cte_wp_at
-                 intro!: ext)
+  by (fastforce simp add: caps_of_state_cte_wp_at)
 
 
 lemma state_refs_of_detype:
@@ -400,6 +393,9 @@ lemma valid_arch_caps: "valid_arch_caps s"
 lemma valid_arch_state: "valid_arch_state s" using invs
   by clarsimp
   (* moreover *)
+lemma valid_cur_fpu: "valid_cur_fpu s" using invs
+  by clarsimp
+  (* moreover *)
 lemma ut_mdb: "untyped_mdb (cdt s) (caps_of_state s)"
   using invs
   by (clarsimp dest!: invs_mdb simp add: valid_mdb_def)
@@ -468,6 +464,7 @@ locale detype_locale_gen_2 = detype_locale_gen_1 cap ptr s
   assumes detype_invs_assms:
     "valid_idle (detype (untyped_range cap) s)"
     "valid_arch_state (detype (untyped_range cap) s)"
+    "valid_cur_fpu (detype (untyped_range cap) s)"
     "valid_vspace_objs (detype (untyped_range cap) s)"
     "valid_arch_caps (detype (untyped_range cap) s)"
     "valid_kernel_mappings (detype (untyped_range cap) s)"
@@ -691,11 +688,6 @@ lemma valid_mdb_detype[detype_invs_lemmas]: "valid_mdb (detype (untyped_range ca
   apply (simp add: valid_arch_mdb_detype)
   done
 
-lemma valid_ioports_detype[detype_invs_lemmas]:
-  "valid_ioports (detype (untyped_range cap) s)"
-  apply (insert invs, drule invs_valid_ioports)
-  by (clarsimp simp: valid_ioports_detype)
-
 lemma untype_children_detype[detype_invs_lemmas]: "untyped_children_in_mdb (detype (untyped_range cap) s)"
   apply (insert child)
   apply (simp add: untyped_children_in_mdb_def)
@@ -809,9 +801,7 @@ lemma valid_ioc_detype[detype_invs_lemmas]: "valid_ioc (detype (untyped_range ca
       done
   qed
 
-(* FIXME: consider to source out. *)
-lemma p2pm1_to_mask: "\<And>p n. p + 2 ^ n - 1 = p + mask n" (* SIMP *)
-  by (simp add: mask_2pm1 field_simps)
+lemmas p2pm1_to_mask = add_mask_fold
 
 lemma valid_irq_states_detype[detype_invs_lemmas]: "valid_irq_states
           (clear_um (untyped_range cap) (detype (untyped_range cap) s))"
@@ -829,9 +819,9 @@ lemma invariants:
   assumes ct_act: "ct_active s"
   shows "(invs and untyped_children_in_mdb)
          (detype (untyped_range cap) (clear_um (untyped_range cap) s))"
-using detype_invs_lemmas detype_invs_assms ct_act
-by (simp add: invs_def valid_state_def valid_pspace_def
-                 detype_clear_um_independent clear_um.state_refs_update clear_um.state_hyp_refs_update)
+  using detype_invs_lemmas detype_invs_assms ct_act
+  by (simp add: invs_def valid_state_def valid_pspace_def
+                detype_clear_um_independent clear_um.state_refs_update)
 
 end
 
@@ -929,8 +919,6 @@ lemma of_nat_le_pow:
   apply simp
   done
 
-lemma maxword_len_conv': "(x::machine_word) + max_word = x - 1" by (simp add: max_word_def)
-
 (* FIXME: copied from Retype_C and slightly adapted. *)
 lemma (in Detype_AI) mapM_x_storeWord_step:
   assumes al: "is_aligned ptr sz"
@@ -944,7 +932,7 @@ lemma (in Detype_AI) mapM_x_storeWord_step:
   apply (subst if_not_P)
    apply (subst not_less)
    apply (erule is_aligned_no_overflow)
-  apply (simp add: mapM_x_map comp_def upto_enum_word maxword_len_conv' del: upt.simps)
+  apply (simp add: mapM_x_map comp_def upto_enum_word del: upt.simps)
   apply (simp add: Suc_unat_mask_div_obfuscated[simplified mask_2pm1] min_def)
   apply (subst mapM_x_storeWord)
    apply (erule is_aligned_weaken [OF _ sz2])
@@ -1025,7 +1013,7 @@ lemma dom_known_length:
   by (drule domI[where m=f], simp)
 
 
-lemma (in Detype_AI) cte_map_not_null_outside: (*FIXME: arch_split*)
+lemma (in Detype_AI) cte_map_not_null_outside: (*FIXME: arch-split*)
   "\<lbrakk> cte_wp_at ((\<noteq>) cap.NullCap) p (s :: 'a state);
      cte_wp_at ((=) cap) p' s;is_untyped_cap cap;
      descendants_range cap p' s; untyped_children_in_mdb s;
@@ -1054,7 +1042,7 @@ lemma (in Detype_AI) cte_map_not_null_outside: (*FIXME: arch_split*)
   apply (drule(1) valid_globals_irq_node, fastforce simp: cap_range_def)
   done
 
-
+(* FIXME: move *)
 lemma corres_submonad2:
   "\<lbrakk> submonad f r g fn; submonad f' r' g' fn';
      \<forall>s s'. (s, s') \<in> sr \<and> g s \<and> g' s' \<longrightarrow> (f s, f' s') \<in> ssr;
@@ -1063,24 +1051,24 @@ lemma corres_submonad2:
    \<Longrightarrow> corres_underlying sr nf nf' rvr (g and P o f) (g' and P' o f') (fn x) (fn' x')"
   apply (subst submonad.fn_is_sm, assumption)+
   apply (clarsimp simp: submonad_fn_def)
-  apply (rule corres_split' [OF _ _ stateAssert_sp stateAssert_sp])
+  apply (rule corres_underlying_split [OF _ _ stateAssert_sp stateAssert_sp])
    apply (fastforce simp: corres_underlying_def stateAssert_def get_def
                          assert_def return_def bind_def)
-  apply (rule corres_split' [where r'="\<lambda>x y. (x, y) \<in> ssr",
+  apply (rule corres_underlying_split [where r'="\<lambda>x y. (x, y) \<in> ssr",
                              OF _ _ gets_sp gets_sp])
-   apply (clarsimp simp: corres_gets)
-  apply (rule corres_split' [where r'="\<lambda>(x, x') (y, y'). rvr x y \<and> (x', y') \<in> ssr",
-                             OF _ _ hoare_post_taut hoare_post_taut])
+   apply clarsimp
+  apply (rule corres_underlying_split [where r'="\<lambda>(x, x') (y, y'). rvr x y \<and> (x', y') \<in> ssr",
+                             OF _ _ hoare_TrueI hoare_TrueI])
    defer
    apply clarsimp
-   apply (rule corres_split' [where r'=dc, OF _ _ hoare_post_taut hoare_post_taut])
+   apply (rule corres_underlying_split [where r'=dc, OF _ _ hoare_TrueI hoare_TrueI])
     apply (simp add: corres_modify')
    apply clarsimp
   apply (simp add: corres_underlying_def select_f_def)
   apply fastforce
   done
 
-
+(* FIXME: move *)
 lemma corres_submonad3:
   "\<lbrakk>submonad f r g fn; submonad f' r' g' fn';
     \<forall>s s'. (s, s') \<in> sr \<and> g s \<and> g' s' \<longrightarrow> (f s, f' s') \<in> ssr;
@@ -1091,17 +1079,17 @@ lemma corres_submonad3:
    \<Longrightarrow> corres_underlying sr nf nf' rvr G G' (fn x) (fn' x')"
   apply (subst submonad.fn_is_sm, assumption)+
   apply (clarsimp simp: submonad_fn_def)
-  apply (rule corres_split' [OF _ _ stateAssert_sp stateAssert_sp])
+  apply (rule corres_underlying_split [OF _ _ stateAssert_sp stateAssert_sp])
    apply (fastforce simp: corres_underlying_def stateAssert_def get_def
                          assert_def return_def bind_def)
-  apply (rule corres_split' [where r'="\<lambda>x y. (x, y) \<in> ssr",
+  apply (rule corres_underlying_split [where r'="\<lambda>x y. (x, y) \<in> ssr",
                              OF _ _ gets_sp gets_sp])
-   apply (clarsimp simp: corres_gets)
-  apply (rule corres_split' [where r'="\<lambda>(x, x') (y, y'). rvr x y \<and> (x', y') \<in> ssr",
-                             OF _ _ hoare_post_taut hoare_post_taut])
+   apply clarsimp
+  apply (rule corres_underlying_split [where r'="\<lambda>(x, x') (y, y'). rvr x y \<and> (x', y') \<in> ssr",
+                             OF _ _ hoare_TrueI hoare_TrueI])
    defer
    apply clarsimp
-   apply (rule corres_split' [where r'=dc, OF _ _ hoare_post_taut hoare_post_taut])
+   apply (rule corres_underlying_split [where r'=dc, OF _ _ hoare_TrueI hoare_TrueI])
     apply (simp add: corres_modify')
    apply clarsimp
   apply (simp add: corres_underlying_def select_f_def)
@@ -1303,16 +1291,6 @@ lemma range_cover_compare_offset:
 lemma range_cover_sz':
   "range_cover (a :: 'a :: len word) b bits d \<Longrightarrow> bits < len_of TYPE('a)"
   by (clarsimp simp:range_cover_def)
-
-
-(* FIXME: move to GenericLib *)
-lemma if3_fold2:
-  "(if P then x else if Q then x else y) = (if P \<or> Q then x else y)" by simp
-
-(* FIXME: move *)
-lemma not_emptyI:
-  "\<And>x A B. \<lbrakk>x\<in>A; x\<in>B\<rbrakk> \<Longrightarrow> A \<inter> B\<noteq> {}"
-  by auto
 
 
 end

@@ -12,6 +12,9 @@ imports
 
 begin
 
+lemma invs_valid_ioc[elim!]: "invs s \<Longrightarrow> valid_ioc s"
+  by (clarsimp simp add: invs_def valid_state_def)
+
 lemma zip_map_rel:
   assumes "(x,y) \<in> set (zip xs ys)" "map f xs = map g ys"
   shows "f x = g y"
@@ -57,7 +60,14 @@ lemma unaligned_helper:
   apply (simp add: not_less power_overflow word_bits_conv)
   done
 
-declare word_unat_power[symmetric, simp del]
+lemma neq_out_intv:
+  "\<lbrakk> a \<noteq> b; b \<notin> {a..a + c - 1} - {a} \<rbrakk> \<Longrightarrow> b \<notin> {a..a + c - 1}"
+  by simp
+
+lemma ptr_range_mask_range:
+  "{ptr..ptr + 2 ^ bits - 1} = mask_range ptr bits"
+  unfolding mask_def
+  by simp
 
 lemma oblivious_mapM_x:
   "\<forall>x\<in>set xs. oblivious f (g x) \<Longrightarrow> oblivious f (mapM_x g xs)"
@@ -69,10 +79,10 @@ lemma hoare_vcg_if_lift3:
   \<lbrace>R\<rbrace> f \<lbrace>\<lambda>rv s. (if P rv s then X rv else Y rv) s\<rbrace>"
   by auto
 
-lemmas hoare_pre_post = hoare_pre_imp[where R="\<lambda>_. Q" and Q=Q for Q]
+lemmas hoare_pre_post = hoare_pre_imp[where Q="\<lambda>_. Q" and P'=Q for Q]
 
 lemmas corres_underlying_gets_pre_rhs =
-  corres_symb_exec_r[OF _ _ gets_inv no_fail_pre[OF non_fail_gets TrueI]]
+  corres_symb_exec_r[OF _ _ gets_inv no_fail_pre[OF no_fail_gets TrueI]]
 
 lemma corres_if_r':
   "\<lbrakk> G' \<Longrightarrow> corres_underlying sr nf nf' r P P' a c; \<not>G' \<Longrightarrow> corres_underlying sr nf nf' r P Q' a d \<rbrakk>
@@ -118,12 +128,12 @@ lemma corres_symb_exec_l':
   assumes y: "\<lbrace>Q\<rbrace> m \<lbrace>Q'\<rbrace>"
   shows      "corres_underlying sr nf nf' r (P and Q) P' (m >>= (\<lambda>rv. x rv)) y"
   apply (rule corres_guard_imp)
-    apply (subst gets_bind_ign[symmetric], rule corres_split_deprecated)
-       apply (rule z)
-      apply (rule corres_noop3)
-        apply (erule x)
-       apply (rule gets_wp)
-      apply (rule non_fail_gets)
+    apply (subst gets_bind_ign[symmetric], rule corres_split)
+       apply (rule corres_noop3)
+         apply (erule x)
+        apply (rule gets_wp)
+       apply (rule no_fail_gets)
+      apply (rule z)
      apply (rule y)
     apply (rule gets_wp)
    apply simp+
@@ -136,16 +146,16 @@ lemma corres_symb_exec_r':
   assumes nf: "nf' \<Longrightarrow> no_fail R' m"
   shows      "corres_underlying sr nf nf' r P (P' and Q' and R') x (m >>= (\<lambda>rv. y rv))"
   apply (rule corres_guard_imp)
-    apply (subst gets_bind_ign[symmetric], rule corres_split_deprecated)
-       apply (rule z)
-      apply (rule_tac P'="a' and a''" for a' a'' in corres_noop3)
-        apply (simp add: simpler_gets_def exs_valid_def)
+    apply (subst gets_bind_ign[symmetric], rule corres_split)
+       apply (rule_tac P'="a' and a''" for a' a'' in corres_noop3)
+         apply (simp add: simpler_gets_def exs_valid_def)
+        apply clarsimp
+        apply (erule x)
+       apply (rule no_fail_pre)
+        apply (erule nf)
        apply clarsimp
-       apply (erule x)
-      apply (rule no_fail_pre)
-       apply (erule nf)
-      apply clarsimp
-      apply assumption
+       apply assumption
+      apply (rule z)
      apply (rule gets_wp)
     apply (rule y)
    apply simp+
@@ -206,8 +216,8 @@ lemma get_mapM_x_lower:
   qed
 
 (* Move to DetSchedDomainTime_AI *)
-crunch domain_list_inv[wp]: do_user_op "\<lambda>s. P (domain_list s)"
-  (wp: select_wp)
+crunch do_user_op
+  for domain_list_inv[wp]: "\<lambda>s. P (domain_list s)"
 
 lemma next_child_child_set:
   "\<lbrakk>next_child slot (cdt_list s) = Some child; valid_list s\<rbrakk>
@@ -250,10 +260,9 @@ lemma check_active_irq_invs_just_idle:
         and (\<lambda>s. 0 < domain_time s) and valid_domain_list \<rbrace>"
   by (wpsimp simp: check_active_irq_def ct_in_state_def)
 
-lemma caps_of_state_kheap_ekheap[simp]:
-  "caps_of_state (kheap_update f (ekheap_update ef s))
-     = caps_of_state (kheap_update f s)"
-  apply (simp add: trans_state_update[symmetric] del: trans_state_update)
-  done
+lemma cns_of_heap_Some:
+  "(cns_of_heap kh a = Some n)
+   = (\<exists>cs. kh a = Some (CNode n cs) \<and> well_formed_cnode_n n cs)"
+  by (auto simp: cns_of_heap_def split: option.splits if_splits Structures_A.kernel_object.splits)
 
 end

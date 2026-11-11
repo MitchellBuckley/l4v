@@ -61,6 +61,9 @@ invokeIRQHandler :: IRQHandlerInvocation -> Kernel ()
 invokeIRQHandler (AckIRQ irq) = doMachineOp $ plic_complete_claim irq
 invokeIRQHandler _ = return ()
 
+handleSpuriousIRQ :: Kernel ()
+handleSpuriousIRQ = return ()
+
 handleReservedIRQ :: IRQ -> Kernel ()
 handleReservedIRQ _ = return ()
 
@@ -68,7 +71,7 @@ maskIrqSignal :: IRQ -> Kernel ()
 maskIrqSignal _ = return ()
 
 initInterruptController :: Kernel ()
-initInterruptController = error "Unimplemented. Init code."
+initInterruptController = error "Unimplemented init code"
 
 checkIRQ :: Word -> KernelF SyscallError ()
 checkIRQ irqW = when (irqW > fromIntegral (fromEnum maxIRQ) ||

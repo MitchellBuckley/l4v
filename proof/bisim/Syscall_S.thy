@@ -8,7 +8,7 @@ theory Syscall_S
 imports Separation
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 lemma syscall_bisim:
   assumes bs:
@@ -282,25 +282,21 @@ lemma send_fault_ipc_bisim:
        apply (clarsimp simp: handle_double_fault_def)
        apply (rule bisim_refl')
       apply (simp add: Let_def)
-      apply (rule hoare_vcg_seqE)
-       apply (rule hoare_vcg_seqE)
-        apply wpc
-                  apply wp+
+      apply (rule bindE_wp)
+       apply (rule bindE_wp)
+        apply (wpc; wp)
+       apply wp
        apply simp
-       apply (rule hoare_post_imp_R [OF lc_sep])
+       apply (rule hoare_strengthen_postE_R [OF lc_sep])
        apply (clarsimp simp: separate_cap_def)
       apply (wp | simp add: Let_def)+
-       apply (rule_tac P = "separate_cap handler_cap" in hoare_gen_asmE')
-       apply (erule separate_capE, simp_all)[1]
+        apply (rule_tac P = "separate_cap handler_cap" in hoare_gen_asmE')
+        apply (erule separate_capE, simp_all)[1]
          apply (wp | simp)+
-     apply clarsimp
-     apply assumption
-     \<comment> \<open>det_ont\<close>
-    apply (simp add: Let_def cong: cap.case_cong)
-    apply (wp not_empty_lc)
+       apply (wp not_empty_lc)
       apply (rule_tac P = "separate_cap xa" in not_empty_gen_asm)
       apply (erule separate_capE, simp_all)[1]
-        apply wpsimp+
+       apply wpsimp+
   done
 
 lemma handle_fault_bisim:
@@ -327,12 +323,12 @@ lemma bisim_liftME_same:
   shows "bisim (f \<oplus> (=)) P P' (liftME g m) (liftME g m')"
   unfolding liftME_def
   apply (rule bisim_guard_imp)
-  apply (rule bisim_splitE [OF bs])
-   apply simp
-   apply (rule bisim_returnOk)
-   apply simp
-   apply wp
-  apply simp+
+    apply (rule bisim_splitE [OF bs])
+      apply simp
+      apply (rule bisim_returnOk)
+      apply simp
+     apply wp+
+   apply simp+
   done
 
 lemma bisim_split_if:
@@ -421,7 +417,6 @@ lemma handle_invocation_bisim:
                  apply (rule handle_fault_bisim)
                 apply simp
                 apply (rule bisim_split_reflE_eq)
-                  apply simp
                   apply (rule decode_invocation_bisim)
                  apply wp+
                apply (simp, rule bisim_refl')
@@ -496,16 +491,6 @@ lemma bisim_injection:
       apply wpsimp+
   done
 
-lemma separate_state_cdt [simp]:
-  "separate_state (s\<lparr>cdt := x\<rparr>) = separate_state s"
-  unfolding separate_state_def
-  by (simp add: get_tcb_def)
-
-lemma separate_state_original [simp]:
-  "separate_state (s\<lparr>is_original_cap := x\<rparr>) = separate_state s"
-  unfolding separate_state_def
-  by (simp add: get_tcb_def)
-
 lemma separate_cap_NullCap [simp]: "separate_cap NullCap" by (simp add: separate_cap_def)
 
 lemma set_cap_NullCap_separate_state [wp]:
@@ -538,11 +523,6 @@ lemma separate_state_pres':
   apply wp
   apply simp
   done
-
-lemma separate_state_more_update[simp]:
-  "separate_state (trans_state f s) =
-   separate_state s"
-  by (simp add: separate_state_def)
 
 lemma cap_delete_one_sep [wp]:
   "\<lbrace>separate_state\<rbrace> cap_delete_one cptr \<lbrace>\<lambda>_. separate_state\<rbrace>"
@@ -601,10 +581,10 @@ lemma handle_recv_bisim:
                    apply (simp split del: if_split)
                    apply (rule bisim_refl [where P = \<top> and P' = \<top>])
                    apply (case_tac rc, simp_all)[1]
-                   apply (wp get_cap_wp' lsft_sep | simp add: lookup_cap_def split_def del:  hoare_True_E_R)+
+                   apply (wp get_cap_wp' lsft_sep | simp add: lookup_cap_def split_def)+
                    apply (rule handle_fault_bisim)
                    apply (wp get_simple_ko_wp | wpc | simp)+
-                   apply (rule_tac Q' = "\<lambda>_. separate_state and valid_objs and tcb_at r" in hoare_post_imp_R)
+                   apply (rule_tac Q' = "\<lambda>_. separate_state and valid_objs and tcb_at r" in hoare_strengthen_postE_R)
                     prefer 2
                     apply simp
                    apply (wp | simp add: cur_tcb_def)+
@@ -700,11 +680,21 @@ lemma activate_thread_separate_state [wp]:
   unfolding activate_thread_def
   by (wp separate_state_pres' | wpc | simp add: arch_activate_idle_thread_def |  strengthen imp_consequent)+
 
+crunch arch_prepare_next_domain
+  for separate_state[wp]: separate_state
+  (wp: separate_state_pres')
+
+crunch schedule_choose_new_thread
+  for separate_state[wp]: separate_state
+  and typ_at[wp]: "\<lambda>s. P (typ_at t p s)"
+  and caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
+  (wp: crunch_wps simp: crunch_simps)
+
 lemma schedule_separate_state [wp]:
   "\<lbrace>separate_state\<rbrace> schedule :: (unit,unit) s_monad \<lbrace>\<lambda>_. separate_state\<rbrace>"
   unfolding schedule_def switch_to_thread_def arch_switch_to_thread_def
-            switch_to_idle_thread_def arch_switch_to_idle_thread_def allActiveTCBs_def
-  by (wpsimp wp: select_inv separate_state_pres' alternative_valid
+            switch_to_idle_thread_def arch_switch_to_idle_thread_def
+  by (wpsimp wp: select_inv separate_state_pres' gts_wp
              simp: arch_activate_idle_thread_def |
       strengthen imp_consequent)+
 
@@ -728,7 +718,7 @@ lemma send_signal_separate_state [wp]:
   unfolding send_signal_def cancel_ipc_def
   apply (rule separate_state_pres)
   apply (rule hoare_pre)
-  apply (wp gts_wp get_simple_ko_wp hoare_pre_cont[where a = "reply_cancel_ipc x" for x]
+  apply (wp gts_wp get_simple_ko_wp hoare_pre_cont[where f="reply_cancel_ipc x" for x]
         | wpc | wps
         | simp add: update_waiting_ntfn_def)+
   apply (clarsimp)
@@ -737,9 +727,19 @@ lemma send_signal_separate_state [wp]:
   apply (clarsimp simp add: pred_tcb_at_def obj_at_def)
   done
 
-lemma dmo_separate_state [wp]:
-  "\<lbrace>separate_state\<rbrace> do_machine_op f \<lbrace>\<lambda>_. separate_state\<rbrace>"
-  by (rule separate_state_pres, rule hoare_pre, wps, wp, simp)
+lemma thread_set_time_slice_separate_state[wp]:
+  "thread_set_time_slice t time \<lbrace>separate_state\<rbrace>"
+  unfolding thread_set_time_slice_def
+  apply (rule separate_state_pres)
+  apply (wp_pre, wps)
+   apply (wpsimp wp: separate_state_pres thread_set_caps_of_state_trivial)+
+   apply (fastforce simp: ran_tcb_cap_cases)
+  apply clarsimp
+  done
+
+crunch timer_tick, do_machine_op
+  for separate_state[wp]: separate_state
+  (wp: crunch_wps set_object_wp simp: crunch_simps)
 
 lemma handle_interrupt_separate_state [wp]:
   "\<lbrace>separate_state\<rbrace> handle_interrupt irq \<lbrace>\<lambda>_. separate_state\<rbrace>"
@@ -755,16 +755,14 @@ lemma decode_invocation_separate_state [wp]:
   \<lbrace> \<lambda>_. separate_state \<rbrace>"
   unfolding decode_invocation_def by wpsimp
 
-lemma separate_state_machine_state:
-  "separate_state (s\<lparr>machine_state := ms\<rparr>) = separate_state s"
-  unfolding separate_state_def by simp
-
-crunch separate_state [wp]: set_thread_state, set_simple_ko "separate_state"
+crunch set_thread_state, set_simple_ko
+  for separate_state[wp]: "separate_state"
    (wp: separate_state_pres' crunch_wps simp: crunch_simps)
 
-crunch separate_state [wp]: "Syscall_SA.handle_event" "separate_state"
+crunch "Syscall_SA.handle_event"
+  for separate_state[wp]: "separate_state"
    (wp: crunch_wps syscall_valid
-    simp: crunch_simps separate_state_machine_state
+    simp: crunch_simps
     ignore: syscall)
 
 lemma call_kernel_separate_state:

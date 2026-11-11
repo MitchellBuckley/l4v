@@ -8,6 +8,8 @@ theory LevityCatch
 imports
   "BaseRefine.Include"
   "Lib.LemmaBucket"
+  "Lib.Corres_Method"
+  "Lib.AddUpdSimps"
 begin
 
 (* Try again, clagged from Include *)
@@ -19,12 +21,6 @@ lemma magnitudeCheck_assert:
             split: option.split)
   apply fastforce
   done
-context begin interpretation Arch . (*FIXME: arch_split*)
-lemmas makeObject_simps =
-  makeObject_endpoint makeObject_notification makeObject_cte
-  makeObject_tcb makeObject_user_data makeObject_pde makeObject_pte
-  makeObject_asidpool
-end
 
 lemma projectKO_inv : "\<lbrace>P\<rbrace> projectKO ko \<lbrace>\<lambda>rv. P\<rbrace>"
   by (simp add: projectKO_def fail_def valid_def return_def
@@ -39,14 +35,14 @@ lemma alignCheck_assert:
 
 lemma magnitudeCheck_inv:   "\<lbrace>P\<rbrace> magnitudeCheck x y n \<lbrace>\<lambda>rv. P\<rbrace>"
   apply (clarsimp simp add: magnitudeCheck_def split: option.splits)
-  apply (wp hoare_when_wp)
+  apply (wp when_wp)
   apply simp
   done
 
 lemma alignCheck_inv:
   "\<lbrace>P\<rbrace> alignCheck x n \<lbrace>\<lambda>rv. P\<rbrace>"
   apply (simp add: alignCheck_def unless_def alignError_def)
-  apply (wp hoare_when_wp)
+  apply (wp when_wp)
   apply simp
   done
 
@@ -54,9 +50,23 @@ lemma updateObject_default_inv:
   "\<lbrace>P\<rbrace> updateObject_default obj ko x y n \<lbrace>\<lambda>rv. P\<rbrace>"
   unfolding updateObject_default_def
   by (simp, wp magnitudeCheck_inv alignCheck_inv projectKO_inv, simp)
-context begin interpretation Arch . (*FIXME: arch_split*)
-lemma to_from_apiType [simp]: "toAPIType (fromAPIType x) = Some x"
-  by (cases x) (auto simp add: fromAPIType_def ARM_H.fromAPIType_def
-    toAPIType_def ARM_H.toAPIType_def)
+
+context Arch begin arch_global_naming
+
+lemmas makeObject_simps =
+  makeObject_endpoint makeObject_notification makeObject_cte
+  makeObject_tcb makeObject_user_data makeObject_pde makeObject_pte
+  makeObject_asidpool
+
+lemma to_from_apiType[simp]:
+  "toAPIType (fromAPIType x) = Some x"
+  by (cases x) (auto simp add: fromAPIType_def toAPIType_def)
+
 end
+
+arch_requalify_facts
+  to_from_apiType (* FIXME arch-split: LevityCatch not split yet *)
+
+lemmas [simp] = to_from_apiType
+
 end

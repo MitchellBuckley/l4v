@@ -14,7 +14,7 @@ theory Init_A
 imports Retype_A
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   This is not a specification of true kernel
@@ -22,11 +22,9 @@ text \<open>
   show that the invariants and refinement relation are consistent.
 \<close>
 
-(* Moved to Deterministic_A
 definition
   idle_thread_ptr :: word32 where
   "idle_thread_ptr = kernel_base + 0x1000"
-*)
 
 definition
   init_tcb_ptr :: word32 where
@@ -47,7 +45,7 @@ definition
   "init_arch_state \<equiv> \<lparr>
     arm_asid_table = Map.empty,
     arm_hwasid_table = Map.empty,
-    arm_next_asid = 0,
+    arm_next_asid = hw_asid_min,
     arm_asid_map = Map.empty,
     arm_current_vcpu = None,
     arm_gicvcpu_numlistregs = undefined,
@@ -76,9 +74,13 @@ definition
     tcb_fault = None,
     tcb_bound_notification = None,
     tcb_mcpriority = minBound,
+    tcb_priority = 0,
+    tcb_time_slice = timeSlice,
+    tcb_domain = default_domain,
+    tcb_flags = {},
     tcb_arch = init_arch_tcb
-  \<rparr>)
-  (us_global_pd_ptr \<mapsto> us_global_pd)"
+  \<rparr>,
+  us_global_pd_ptr \<mapsto> us_global_pd)"
 
 definition
   "init_cdt \<equiv> Map.empty"
@@ -95,6 +97,13 @@ definition
     is_original_cap = init_ioc,
     cur_thread = idle_thread_ptr,
     idle_thread = idle_thread_ptr,
+    scheduler_action = resume_cur_thread,
+    domain_list = [(0, -1), (0, 0)],
+    domain_index = 0,
+    domain_start_index = 0,
+    cur_domain = 0,
+    domain_time = 15,
+    ready_queues = const (const []),
     machine_state = init_machine_state,
     interrupt_irq_node = \<lambda>irq. init_irq_node_ptr + (ucast irq << cte_level_bits),
     interrupt_states = \<lambda>_. Structures_A.IRQInactive,
@@ -104,5 +113,6 @@ definition
 
 end
 
+arch_requalify_consts (A) idle_thread_ptr
 
 end

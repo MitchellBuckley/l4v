@@ -8,7 +8,7 @@ theory ExampleSystem
 imports ArchAccess_AC
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 definition
   nat_to_bl :: "nat \<Rightarrow> nat \<Rightarrow> bool list option"
@@ -21,7 +21,7 @@ where
 
 lemma nat_to_bl_id [simp]: "nat_to_bl (size (x :: (('a::len) word))) (unat x) = Some (to_bl x)"
   apply (clarsimp simp: nat_to_bl_def to_bl_def)
-  apply (auto simp: uint_nat le_def word_size)
+  apply (auto simp: le_def word_size)
   done
 
 
@@ -312,6 +312,10 @@ where
      tcb_fault              = undefined,
      tcb_bound_notification = None,
      tcb_mcpriority         = undefined,
+     tcb_priority           = undefined,
+     tcb_time_slice         = undefined,
+     tcb_domain             = 0,
+     tcb_flags              = undefined,
      tcb_arch               = \<lparr>tcb_context = undefined\<rparr> \<rparr>"
 
 
@@ -333,6 +337,10 @@ where
      tcb_fault              = undefined,
      tcb_bound_notification = None,
      tcb_mcpriority         = undefined,
+     tcb_priority           = undefined,
+     tcb_time_slice         = undefined,
+     tcb_domain             = 0,
+     tcb_flags              = undefined,
      tcb_arch               = \<lparr>tcb_context = undefined\<rparr>\<rparr>"
 
 definition
@@ -362,13 +370,6 @@ lemmas kh1_obj_def =
 
 definition exst1 :: "det_ext" where
   "exst1 \<equiv> \<lparr>work_units_completed_internal = undefined,
-             scheduler_action_internal = undefined,
-             ekheap_internal = \<lambda>x. None,
-             domain_list_internal = undefined,
-             domain_index_internal = undefined,
-             cur_domain_internal = undefined,
-             domain_time_internal = undefined,
-             ready_queues_internal = undefined,
              cdt_list_internal = undefined\<rparr>"
 
 definition
@@ -380,6 +381,13 @@ where
     is_original_cap = undefined,
     cur_thread = undefined,
     idle_thread = undefined,
+    scheduler_action = undefined,
+    domain_list = undefined,
+    domain_index = undefined,
+    domain_start_index = undefined,
+    cur_domain = undefined,
+    domain_time = undefined,
+    ready_queues = undefined,
     machine_state = undefined,
     interrupt_irq_node = (\<lambda>_. 10),
     interrupt_states = undefined,
@@ -455,9 +463,13 @@ where
          else if (asid_high_bits_of x = asid_high_bits_of asid1_3065)
           then T1 else undefined)"
 
+definition Sys1DomainMap :: "Sys1Labels agent_domain_map" where
+  "Sys1DomainMap \<equiv> (\<lambda>_. {}) (0 := {UT1, T1})"
+
 definition Sys1PAS :: "Sys1Labels PAS" where
   "Sys1PAS \<equiv> \<lparr> pasObjectAbs = Sys1AgentMap, pasASIDAbs = Sys1ASIDMap, pasIRQAbs = (\<lambda>_. IRQ1),
-              pasPolicy = Sys1AuthGraph, pasSubject = UT1, pasMayActivate = True, pasMayEditReadyQueues = True, pasMaySendIrqs = True, pasDomainAbs = undefined \<rparr>"
+               pasPolicy = Sys1AuthGraph, pasSubject = UT1, pasMayActivate = True, pasMayEditReadyQueues = True,
+               pasMaySendIrqs = True, pasDomainAbs = Sys1DomainMap \<rparr>"
 
 subsubsection \<open>Proof of pas_refined for Sys1\<close>
 
@@ -467,7 +479,7 @@ lemma caps1_7_well_formed: "well_formed_cnode_n 10 caps1_7"
  apply (clarsimp simp: empty_cnode_def dom_def)
  apply (rule set_eqI, clarsimp)
  apply (rule iffI)
-  apply (elim disjE, insert len_bin_to_bl, simp_all)[1]
+  apply (elim disjE, insert size_bin_to_bl, simp_all)[1]
  apply clarsimp
 done
 
@@ -477,15 +489,9 @@ lemma caps1_6_well_formed: "well_formed_cnode_n 10 caps1_6"
  apply (clarsimp simp: empty_cnode_def dom_def)
  apply (rule set_eqI, clarsimp)
  apply (rule iffI)
-  apply (elim disjE, insert len_bin_to_bl, simp_all)[1]
+  apply (elim disjE, insert size_bin_to_bl, simp_all)[1]
  apply clarsimp
 done
-
-(* clagged from KernelInit_R *)
-lemma empty_cnode_apply[simp]:
-  "(empty_cnode n xs = Some cap) = (length xs = n \<and> cap = NullCap)"
-  by (auto simp add: empty_cnode_def)
-
 
 lemma s1_caps_of_state :
   "caps_of_state s1 p = Some cap \<Longrightarrow>
@@ -548,22 +554,32 @@ lemma thread_bound_ntfns_1:
 
 declare AllowSend_def[simp] AllowRecv_def[simp]
 
-lemma domains_of_state_s1[simp]:
-  "domains_of_state s1 = {}"
-  apply (rule equalityI)
-   apply (rule subsetI)
-   apply clarsimp
-   apply (erule domains_of_state_aux.induct)
-   apply (simp add: s1_def exst1_def)
-  apply simp
-  done
+lemma etcbs_of_s1:
+  "etcbs_of s1 = [3079 \<mapsto> etcb_of (un_TCB obj1_3079), 3080 \<mapsto> etcb_of (un_TCB obj1_3080)]"
+  by (fastforce simp: etcbs_of'_def s1_def kh1_def kh1_obj_def)
+
+lemma domains_of_state_s1:
+  "domains_of_state s1 = {(3079, 0), (3080, 0)}"
+   by (fastforce simp: etcbs_of_s1 kh1_obj_def
+                 elim: domains_of_state_aux.cases
+                split: if_split_asm
+               intro!: domtcbs)
+
+lemma tcb_domain_map_wellformed_s1:
+  "tcb_domain_map_wellformed Sys1PAS s1"
+  by (clarsimp simp: tcb_domain_map_wellformed_aux_def Sys1PAS_def domains_of_state_s1
+                        Sys1AgentMap_simps Sys1DomainMap_def)
+
+lemma state_hyp_refs_of_s1_empty[simp]:
+  "state_hyp_refs_of s1 = (\<lambda>_. {})"
+  by (auto simp: state_hyp_refs_of_def hyp_refs_of_def split: option.splits kernel_object.splits)
 
 lemma "pas_refined Sys1PAS s1"
   apply (clarsimp simp: pas_refined_def)
   apply (intro conjI)
        subgoal by (simp add: Sys1_wellformed)
       subgoal by (simp add: irq_map_wellformed_aux_def s1_def Sys1AgentMap_simps Sys1PAS_def)
-     subgoal by (simp  add: tcb_domain_map_wellformed_aux_def)
+     subgoal by (simp add: tcb_domain_map_wellformed_s1)
     apply (clarsimp simp: auth_graph_map_def
                            Sys1PAS_def
                            state_objs_to_policy_def
@@ -574,7 +590,7 @@ lemma "pas_refined Sys1PAS s1"
           apply (elim disjE conjE; solves\<open>clarsimp simp: Sys1AgentMap_simps cap_auth_conferred_def cap_rights_to_auth_def\<close>)
          apply (drule s1_caps_of_state, clarsimp)
          apply (elim disjE; solves \<open>simp add: thread_bound_ntfns_def\<close>)
-        apply (clarsimp simp: state_refs_of_def thread_states_def tcb_states_of_state_1
+        apply (clarsimp simp: state_refs_of_def thread_st_auth_def tcb_states_of_state_1
                Sys1AuthGraph_def Sys1AgentMap_simps
                complete_AuthGraph_def
                Sys1AuthGraph_aux_def
@@ -582,7 +598,6 @@ lemma "pas_refined Sys1PAS s1"
        apply (simp add:  thread_bound_ntfns_1)
       apply (simp add: s1_def) (* this is OK because cdt is empty..*)
      apply (simp add: s1_def) (* this is OK because cdt is empty..*)
-
     apply (fastforce simp: state_vrefs_def
                            vs_refs_no_global_pts_def
                            s1_def kh1_def  Sys1AgentMap_simps
@@ -592,7 +607,6 @@ lemma "pas_refined Sys1PAS s1"
                            Sys1AuthGraph_aux_def
                      dest!: graph_ofD
                      split: if_splits)
-
    apply (rule subsetI, clarsimp)
    apply (erule state_asids_to_policy_aux.cases)
      apply clarsimp
@@ -614,10 +628,9 @@ lemma "pas_refined Sys1PAS s1"
   apply (erule state_irqs_to_policy_aux.cases)
   apply (simp add: Sys1AuthGraph_def complete_AuthGraph_def Sys1AuthGraph_aux_def Sys1PAS_def Sys1ASIDMap_def)
   apply (drule s1_caps_of_state)
-  apply (simp add: Sys1AuthGraph_def complete_AuthGraph_def Sys1AuthGraph_aux_def Sys1PAS_def Sys1ASIDMap_def)
-  apply (elim disjE conjE, simp_all add: Sys1AgentMap_simps cap_auth_conferred_def cap_rights_to_auth_def asid1_3065_def asid1_3063_def
-    asid_low_bits_def asid_high_bits_of_def )[1]
-   done
+  by (auto simp: Sys1AuthGraph_def complete_AuthGraph_def Sys1AuthGraph_aux_def Sys1PAS_def
+                    Sys1ASIDMap_def Sys1AgentMap_simps cap_auth_conferred_def cap_rights_to_auth_def
+                    asid1_3065_def asid1_3063_def asid_low_bits_def asid_high_bits_of_def)
 
 
 (*---------------------------------------------------------*)
@@ -851,6 +864,10 @@ where
      tcb_fault              = undefined,
      tcb_bound_notification = None,
      tcb_mcpriority         = undefined,
+     tcb_priority           = undefined,
+     tcb_time_slice         = undefined,
+     tcb_domain             = 0,
+     tcb_flags              = undefined,
      tcb_arch          = \<lparr>tcb_context = undefined\<rparr>\<rparr>"
 
 
@@ -872,6 +889,10 @@ where
      tcb_fault              = undefined,
      tcb_bound_notification = None,
      tcb_mcpriority         = undefined,
+     tcb_priority           = undefined,
+     tcb_time_slice         = undefined,
+     tcb_domain             = 0,
+     tcb_flags              = undefined,
      tcb_arch               = \<lparr>tcb_context = undefined\<rparr>\<rparr>"
 
 (* the boolean in BlockedOnReceive is True if the object can receive but not send.
@@ -904,6 +925,13 @@ where
     is_original_cap = undefined,
     cur_thread = undefined,
     idle_thread = undefined,
+    scheduler_action = undefined,
+    domain_list = undefined,
+    domain_index = undefined,
+    domain_start_index = undefined,
+    cur_domain = undefined,
+    domain_time = undefined,
+    ready_queues = undefined,
     machine_state = undefined,
     interrupt_irq_node = (\<lambda>_. 9001),
     interrupt_states = undefined,
@@ -964,10 +992,14 @@ where
      (asid2_3063 := UT2,
       asid2_3065 := T2 )"
 
+definition Sys2DomainMap :: "Sys2Labels agent_domain_map" where
+  "Sys2DomainMap \<equiv> (\<lambda>_. {}) (0 := {UT2, T2})"
+
 definition Sys2PAS :: "Sys2Labels PAS" where
   "Sys2PAS \<equiv> \<lparr> pasObjectAbs = Sys2AgentMap, pasASIDAbs = Sys2ASIDMap,
               pasIRQAbs = (\<lambda>_. IRQ2),
-              pasPolicy = Sys2AuthGraph, pasSubject = UT2, pasMayActivate = True, pasMayEditReadyQueues = True, pasMaySendIrqs = True, pasDomainAbs = undefined \<rparr>"
+              pasPolicy = Sys2AuthGraph, pasSubject = UT2, pasMayActivate = True, pasMayEditReadyQueues = True,
+              pasMaySendIrqs = True, pasDomainAbs = Sys2DomainMap \<rparr>"
 
 
 
@@ -979,7 +1011,7 @@ lemma caps2_7_well_formed: "well_formed_cnode_n 10 caps2_7"
  apply (clarsimp simp: empty_cnode_def dom_def)
  apply (rule set_eqI, clarsimp)
  apply (rule iffI)
-  apply (elim disjE, insert len_bin_to_bl, simp_all)[1]
+  apply (elim disjE, insert size_bin_to_bl, simp_all)[1]
  apply clarsimp
 done
 
@@ -989,15 +1021,9 @@ lemma caps2_6_well_formed: "well_formed_cnode_n 10 caps2_6"
  apply (clarsimp simp: empty_cnode_def dom_def)
  apply (rule set_eqI, clarsimp)
  apply (rule iffI)
-  apply (elim disjE, insert len_bin_to_bl, simp_all)[1]
+  apply (elim disjE, insert size_bin_to_bl, simp_all)[1]
  apply clarsimp
 done
-
-
-
-
-
-
 
 lemma s2_caps_of_state :
   "caps_of_state s2 p = Some cap \<Longrightarrow>
@@ -1029,7 +1055,7 @@ lemma s2_caps_of_state :
      apply (clarsimp simp: tcb_cap_cases_def split: if_splits)+
    apply (clarsimp simp: caps2_7_def split: if_splits)
   apply (clarsimp simp: caps2_6_def cte_wp_at_cases  split: if_splits)
-done
+  done
 
 lemma Sys2_wellformed: "pas_wellformed Sys2PAS"
   apply (clarsimp simp: Sys2PAS_def policy_wellformed_def)
@@ -1052,15 +1078,21 @@ lemma Sys2AgentMap_simps:
   "Sys2AgentMap 9001 = IRQ2"
   by (simp_all add: Sys2AgentMap_def)
 
-lemma domains_of_state_s2[simp]:
-  "domains_of_state s2 = {}"
-  apply (rule equalityI)
-   apply (rule subsetI)
-   apply clarsimp
-   apply (erule domains_of_state_aux.induct)
-   apply (simp add: s2_def exst1_def)
-  apply simp
-  done
+lemma etcbs_of_s2:
+  "etcbs_of s2 = [3079 \<mapsto> etcb_of (un_TCB obj2_3079), 3080 \<mapsto> etcb_of (un_TCB obj2_3080)]"
+  by (fastforce simp: etcbs_of'_def s2_def kh2_def kh2_obj_def)
+
+lemma domains_of_state_s2:
+  "domains_of_state s2 = {(3079, 0), (3080, 0)}"
+   by (fastforce simp: etcbs_of_s2 kh2_obj_def
+                 elim: domains_of_state_aux.cases
+                split: if_split_asm
+               intro!: domtcbs)
+
+lemma tcb_domain_map_wellformed_s2:
+  "tcb_domain_map_wellformed Sys2PAS s2"
+  by (clarsimp simp: tcb_domain_map_wellformed_aux_def Sys2PAS_def domains_of_state_s2
+                        Sys2AgentMap_simps Sys2DomainMap_def)
 
 lemma thread_bound_ntfns_2[simp]:
   "thread_bound_ntfns s2 = Map.empty"
@@ -1070,16 +1102,21 @@ lemma thread_bound_ntfns_2[simp]:
   apply (simp add: kh2_def kh2_obj_def)
   done
 
+lemma state_hyp_refs_of_s2_empty[simp]:
+  "state_hyp_refs_of s2 = (\<lambda>_. {})"
+  by (auto simp: state_hyp_refs_of_def hyp_refs_of_def split: option.splits kernel_object.splits)
+
 lemma "pas_refined Sys2PAS s2"
   apply (clarsimp simp: pas_refined_def)
   apply (intro conjI)
-      apply (simp add: Sys2_wellformed)
-     apply (simp add: Sys2PAS_def s2_def Sys2AgentMap_def
-                      irq_map_wellformed_aux_def)
+       apply (simp add: Sys2_wellformed)
+      apply (simp add: Sys2PAS_def s2_def Sys2AgentMap_def
+                       irq_map_wellformed_aux_def)
+     apply (clarsimp simp: tcb_domain_map_wellformed_s2)
     apply (clarsimp simp: auth_graph_map_def
                           Sys2PAS_def
                           state_objs_to_policy_def
-                          state_bits_to_policy_def tcb_domain_map_wellformed_aux_def)+
+                          state_bits_to_policy_def)
     apply (erule state_bits_to_policyp.cases, simp_all)
          apply (drule s2_caps_of_state, clarsimp)
          apply (elim disjE, simp_all add: cap_auth_conferred_def
@@ -1092,7 +1129,7 @@ lemma "pas_refined Sys2PAS s2"
        apply (clarsimp simp: state_refs_of_def s2_def kh2_def kh2_obj_def
                        split: if_splits)
        apply (clarsimp split:if_splits option.splits
-                       simp: thread_states_def tcb_states_of_state_def
+                       simp: thread_st_auth_def tcb_states_of_state_def
                              Sys2AgentMap_simps Sys2AuthGraph_def
                              complete_AuthGraph_def Sys2AuthGraph_aux_def
                       dest!: get_tcb_SomeD)

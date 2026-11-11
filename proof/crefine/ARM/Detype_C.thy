@@ -123,16 +123,6 @@ lemma h_t_valid_typ_region_bytes:
   by (simp add: valid_footprint_typ_region_bytes[OF neq_byte]
                 size_of_def)
 
-lemma proj_d_lift_state_hrs_htd_update [simp]:
-  "proj_d (lift_state (hrs_htd_update f hp)) = f (hrs_htd hp)"
-  by (cases hp) (simp add: hrs_htd_update_def proj_d_lift_state hrs_htd_def)
-
-lemma proj_d_lift_state_hrs_htd [simp]:
-  "proj_d (lift_state hp), g \<Turnstile>\<^sub>t x = hrs_htd hp, g \<Turnstile>\<^sub>t x"
-  apply (cases hp)
-  apply (simp add: proj_d_lift_state hrs_htd_def)
-  done
-
 lemma heap_list_s_heap_list':
   fixes p :: "'a :: c_type ptr"
   shows "hrs_htd hp,\<top> \<Turnstile>\<^sub>t p \<Longrightarrow>
@@ -253,7 +243,9 @@ proof -
   hence "?oran \<inter> ?ran = {}"
   proof (rule pspace_no_overlapD'[where p = ptr and bits = bits,simplified])
     from invs have "valid_pspace' s" ..
-    with vu al show "pspace_no_overlap' ptr bits ?s" by (rule valid_untyped_no_overlap)
+    with vu al show "pspace_no_overlap' ptr bits ?s"
+      using valid_untyped_no_overlap
+      by (clarsimp simp: mask_def add_diff_eq)
   qed
 
   hence "?oran' \<inter> ?ran' = {}" by simp
@@ -261,7 +253,7 @@ proof -
   proof (rule disjoint_subset [rotated])
     have "objBits (undefined :: 'a) = objBitsKO ko" using po
       apply (simp add: objBits_def)
-      apply (rule objBits_type)
+      apply (rule koType_objBitsKO)
       apply (subst iffD1 [OF project_koType])
       apply (fastforce simp add: project_inject)
       apply (erule tp)
@@ -317,13 +309,14 @@ proof -
       using vu unfolding valid_cap'_def valid_untyped'_def
       apply clarsimp
       apply (drule_tac x = x in spec)
-      apply (clarsimp simp:ko_wp_at'_def)
+      apply (clarsimp simp:ko_wp_at'_def add_mask_fold)
       done
 
     with koat have "\<not> {ptr..ptr + 2 ^ bits - 1} \<subset> {x..x + 2 ^ objBits ko - 1}"
       apply -
       apply (erule obj_atE')+
-      apply (simp add: ko_wp_at'_def projectKOs obj_range'_def not_less objBits_def project_inject)
+      apply (simp add: ko_wp_at'_def projectKOs obj_range'_def not_less objBits_def project_inject
+                       add_mask_fold)
       done
 
     thus ?thesis using subset1
@@ -346,7 +339,8 @@ proof -
 
   ultimately show ?thesis
     unfolding tcb_ptr_to_ctcb_ptr_def
-    by (simp add: ctcb_offset_defs objBits_simps' field_simps word_plus_mono_right)
+    by (simp add: ctcb_offset_defs objBits_simps' add.commute)
+       (subst word_plus_mono_right; simp)
 qed
 
 lemma tcb_ptr_to_ctcb_ptr_in_range':
@@ -380,10 +374,10 @@ proof -
       apply simp
      apply simp
     apply (rule word_plus_mono_right)
-   apply (simp add: word_le_nat_alt unat_of_nat)
-  apply (erule is_aligned_no_wrap')
-  apply simp
-  done
+     apply (simp add: word_le_nat_alt unat_of_nat)
+    apply (erule is_aligned_no_wrap')
+    apply simp
+    done
 qed
 
 lemma valid_untyped_cap_ctcb_member:
@@ -490,7 +484,7 @@ proof -
      apply simp
     apply clarsimp
     apply (drule_tac y = n in aligned_add_aligned [where m = 4])
-     apply (simp add: tcb_cte_cases_def is_aligned_def split: if_split_asm)
+     apply (simp add: tcb_cte_cases_def cteSizeBits_def is_aligned_def split: if_split_asm)
     apply (simp add: word_bits_conv)
     apply simp
     done
@@ -601,7 +595,9 @@ proof -
       unfolding objBits_def
     proof (rule pspace_no_overlapD'[where p = ptr and bits = bits,simplified])
       from invs have "valid_pspace' s" ..
-      with vu al show "pspace_no_overlap' ptr bits ?s" by (rule valid_untyped_no_overlap)
+      with vu al show "pspace_no_overlap' ptr bits ?s"
+        using valid_untyped_no_overlap
+        by (clarsimp simp: mask_def add_diff_eq)
     qed
     hence "?oran' \<inter> ?ran' = {}" by simp
     thus ?thesis by (simp add: objBits_simps' size_of_def)
@@ -701,7 +697,9 @@ proof -
   hence "?oran \<inter> ?ran = {}"
   proof (rule pspace_no_overlapD'[where p = ptr and bits = bits,simplified])
     from invs have "valid_pspace' s" ..
-    with vu al show "pspace_no_overlap' ptr bits ?s" by (rule valid_untyped_no_overlap)
+    with vu al show "pspace_no_overlap' ptr bits ?s"
+      using valid_untyped_no_overlap
+      by (clarsimp simp: mask_def add_diff_eq)
   qed
 
   hence "?oran' \<inter> ?ran' = {}" by simp
@@ -764,7 +762,9 @@ proof -
   hence "?oran \<inter> ?ran = {}"
   proof (rule pspace_no_overlapD'[where p = ptr and bits = bits,simplified])
     from invs have "valid_pspace' s" ..
-    with vu al show "pspace_no_overlap' ptr bits ?s" by (rule valid_untyped_no_overlap)
+    with vu al show "pspace_no_overlap' ptr bits ?s"
+      using valid_untyped_no_overlap
+      by (clarsimp simp: mask_def add_diff_eq)
   qed
 
   hence "?oran' \<inter> ?ran' = {}" by simp
@@ -1370,14 +1370,6 @@ lemma map_comp_restrict_map:
   "(f \<circ>\<^sub>m (restrict_map m S)) = (restrict_map (f \<circ>\<^sub>m m) S)"
   by (rule ext, simp add: restrict_map_def map_comp_def)
 
-lemma size_td_uinfo_array_tag_n_m[simp]:
-  "size_td (uinfo_array_tag_n_m (ta :: ('a :: c_type) itself) n m)
-    = size_of (TYPE('a)) * n"
-  apply (induct n)
-   apply (simp add: uinfo_array_tag_n_m_def)
-  apply (simp add: uinfo_array_tag_n_m_def size_of_def)
-  done
-
 lemma modify_machinestate_assert_cnodes_swap:
   "do x \<leftarrow> modify (ksMachineState_update f);
     y \<leftarrow> stateAssert (\<lambda>s. \<not> cNodePartialOverlap (gsCNodes s) S) []; g od
@@ -1445,18 +1437,18 @@ lemma deleteObjects_ccorres':
              doMachineOp_modify modify_modify o_def ksPSpace_ksMSu_comm
              bind_assoc modify_machinestate_assert_cnodes_swap
              modify_modify_bind)
-  apply (rule ccorres_stateAssert_fwd)
+  apply (rule ccorres_stateAssert_fwd)+
   apply (rule ccorres_stateAssert_after)
   apply (rule ccorres_from_vcg)
   apply (rule allI, rule conseqPre, vcg)
   apply (clarsimp simp: in_monad)
-  apply (rule bexI [rotated])
-   apply (rule iffD2 [OF in_monad(20)])
-   apply (rule conjI [OF refl refl])
+  apply (rule bexI[rotated])
+   apply (rule iffD2[OF in_modify])
+   apply (rule conjI[OF refl refl])
   apply (clarsimp simp: simpler_modify_def)
 proof -
   let ?mmu = "(\<lambda>h x. if ptr \<le> x \<and> x \<le> ptr + 2 ^ bits - 1 then 0 else h x)"
-  let ?psu = "(\<lambda>h x. if ptr \<le> x \<and> x \<le> ptr + 2 ^ bits - 1 then None else h x)"
+  let ?psu = "(\<lambda>h x. if ptr \<le> x \<and> x \<le> ptr + mask bits then None else h x)"
 
   fix s s'
   assume al: "is_aligned ptr bits"
@@ -1466,7 +1458,7 @@ proof -
     and "sch_act_simple s" and wb: "bits < word_bits" and b2: "2 \<le> bits"
     and "deletionIsSafe ptr bits s"
     and cNodePartial: "\<not> cNodePartialOverlap (gsCNodes s)
-        (\<lambda>x. ptr \<le> x \<and> x \<le> ptr + 2 ^ bits - 1)"
+        (\<lambda>x. ptr \<le> x \<and> x \<le> ptr + mask bits)"
     and sr: "(s, s') \<in> rf_sr"
     and safe_asids:
           "ksASIDMapSafe
@@ -1489,7 +1481,7 @@ proof -
   have psu_restrict: "\<forall>h. ?psu h = h |` (- {ptr..+2 ^ bits})"
     apply (intro allI ext)
     apply (subst upto_intvl_eq [OF al])
-    apply (clarsimp)
+    apply (clarsimp simp: mask_2pm1 add_diff_eq)
     done
 
   have ks': "?ks = ?ks'" by (simp add: psu_restrict)
@@ -1504,7 +1496,7 @@ proof -
      apply clarsimp
     apply (rule ext)
     apply (subst upto_intvl_eq [OF al])
-    apply clarsimp
+    apply (clarsimp simp: mask_2pm1 add_diff_eq)
     done
 
   note cm_disj = cmap_relation_disjoint [OF D.valid_untyped invs, atomize]
@@ -1517,8 +1509,8 @@ proof -
             (\<forall>ko. P ko \<longrightarrow> live' ko) \<longrightarrow> p \<notin> {ptr..ptr + 2 ^ bits - 1}"
     apply (intro allI impI conjI)
     apply (elim conjE)
-    apply (erule D.live_notRange [simplified field_simps])
-    apply clarsimp
+    using D.live_notRange
+    apply (clarsimp simp: mask_def add_diff_eq)
     done
 
   note cmaptcb = cmap_relation_tcb [OF sr]
@@ -1553,7 +1545,7 @@ proof -
   hence "cpspace_relation ?ks' (underlying_memory (ksMachineState s)) ?th_s"
     unfolding cpspace_relation_def
     using cendpoint_relation_restrict [OF D.valid_untyped invs rl]
-      cnotification_relation_restrict [OF D.valid_untyped invs rl]
+      cnotification_relation_restrict [OF D.valid_untyped invs rl] b2
     apply -
     apply (elim conjE)
     apply ((subst lift_t_typ_region_bytes,
@@ -1581,39 +1573,15 @@ proof -
       apply (clarsimp simp: restrict_map_Some_iff image_iff
                             map_comp_restrict_map_Some_iff)
      apply (simp add: cmap_relation_restrict_both_proj)
-    apply (rule cmap_array; simp add: pdeBits_def)
-   apply (rule cmap_array; simp add: pteBits_def)
+    apply (rule cmap_array; simp add: pdeBits_def word_size_bits_def)
+   apply (rule cmap_array; simp add: pteBits_def word_size_bits_def)
    done
   moreover
-  from invs have "valid_queues s" ..
-  hence "\<And>p. \<forall>t \<in> set (ksReadyQueues s p). tcb_at' t s \<and> ko_wp_at' live' t s"
-    apply (clarsimp simp: valid_queues_def valid_queues_no_bitmap_def)
-    apply (drule spec, drule spec)
-    apply clarsimp
-    apply (drule (1) bspec)
-    apply (rule conjI)
-    apply (erule obj_at'_weakenE)
-    apply simp
-    apply (simp add: obj_at'_real_def)
-    apply (erule ko_wp_at'_weakenE)
-    apply (clarsimp simp: projectKOs inQ_def)
-    done
-  hence tat: "\<And>p. \<forall>t \<in> set (ksReadyQueues s p). tcb_at' t s"
-    and  tlive: "\<And>p. \<forall>t \<in> set (ksReadyQueues s p). ko_wp_at' live' t s"
-    by auto
   from sr have
-    "cready_queues_relation (clift ?th_s)
-        (ksReadyQueues_' (globals s')) (ksReadyQueues s)"
+    "cready_queues_relation (ksReadyQueues s) (ksReadyQueues_' (globals s'))"
     unfolding cready_queues_relation_def rf_sr_def cstate_relation_def
               cpspace_relation_def
     apply (clarsimp simp: Let_def all_conj_distrib)
-    apply (drule spec, drule spec, drule mp)
-    apply fastforce
-    apply ((subst lift_t_typ_region_bytes, rule cm_disj_tcb, assumption+,
-      simp_all add: objBits_simps archObjSize_def pageBits_def projectKOs)[1])+
-      \<comment> \<open>waiting ...\<close>
-    apply (simp add: tcb_queue_relation_live_restrict
-                     [OF D.valid_untyped tat tlive rl])
     done
 
   moreover
@@ -1671,7 +1639,7 @@ proof -
       apply (drule pds)
       apply (subgoal_tac "pde_at' (pd_ptr + 0x3FC0) (s\<lparr>ksPSpace := ?ks\<rparr>)")
        apply (cut_tac p="pd_ptr + 0x3FC0" in D.typ_at' [of "ArchT PDET", simplified field_simps])
-       apply (simp add: upto_intvl_eq [OF al])
+       apply (simp add: upto_intvl_eq[simplified add_mask_fold, OF al])
       apply (clarsimp simp: page_directory_at'_def)
       apply (erule_tac x="0xFF0" in allE)
       apply simp
@@ -1698,6 +1666,7 @@ proof -
                           (?mmu (underlying_memory (ksMachineState s))) =
         heap_to_user_data (?psu (ksPSpace s))
                           (underlying_memory (ksMachineState s))"
+    supply mask_2pm1[simp] add_diff_eq[simp]
     apply (subst heap_to_user_data_update_region
                  [where S="{ptr..ptr + 2 ^ bits - 1}", simplified])
      prefer 2
@@ -1709,8 +1678,7 @@ proof -
     apply (case_tac "pageBits \<le> bits")
      apply (simp add: objBitsKO_def projectKOs  split: kernel_object.splits)
      apply clarsimp
-     apply (rule aligned_range_offset_mem
-       [where 'a=32, folded word_bits_def, simplified, OF _ _ al _ wb])
+     apply (rule aligned_range_offset_mem[simplified, OF _ _ al])
        apply assumption+
     apply (rule iffI[rotated], simp)
     apply (simp add: objBits_simps projectKOs)
@@ -1727,7 +1695,7 @@ proof -
     apply (frule pspace_distinctD'[OF _ pspace_distinct'])
     apply (clarsimp simp add: valid_cap'_def valid_untyped'_def2 capAligned_def)
     apply (drule_tac x=x in spec)
-    apply (simp add: obj_range'_def objBitsKO_def)
+    apply (simp add: obj_range'_def objBitsKO_def mask_def add_diff_eq)
     apply (simp only: not_le)
     apply (cut_tac is_aligned_no_overflow[OF al])
     apply (case_tac "ptr \<le> x + 2 ^ pageBits - 1",
@@ -1751,6 +1719,7 @@ proof -
                           (?mmu (underlying_memory (ksMachineState s))) =
         heap_to_device_data (?psu (ksPSpace s))
                           (underlying_memory (ksMachineState s))"
+    supply mask_2pm1[simp] add_diff_eq[simp]
     apply (subst heap_to_device_data_update_region
                  [where S="{ptr..ptr + 2 ^ bits - 1}", simplified])
      prefer 2
@@ -1762,11 +1731,10 @@ proof -
     apply (case_tac "pageBits \<le> bits")
      apply (simp add: objBitsKO_def projectKOs  split: kernel_object.splits)
      apply clarsimp
-     apply (rule aligned_range_offset_mem
-       [where 'a=32, folded word_bits_def, simplified, OF _ _ al _ wb])
+     apply (rule aligned_range_offset_mem[simplified, OF _ _ al])
        apply assumption+
     apply (rule iffI[rotated], simp)
-    apply (simp add: objBits_simps projectKOs)
+    apply (simp add: objBits_simps projectKOs mask_def add_diff_eq)
     apply (rule FalseE)
     apply (case_tac "ptr \<le> x", simp)
      apply clarsimp
@@ -1780,7 +1748,7 @@ proof -
     apply (frule pspace_distinctD'[OF _ pspace_distinct'])
     apply (clarsimp simp add: valid_cap'_def valid_untyped'_def2 capAligned_def)
     apply (drule_tac x=x in spec)
-    apply (simp add: obj_range'_def objBitsKO_def)
+    apply (simp add: obj_range'_def objBitsKO_def mask_def add_diff_eq)
     apply (simp only: not_le)
     apply (cut_tac is_aligned_no_overflow[OF al])
     apply (case_tac "ptr \<le> x + 2 ^ pageBits - 1",
@@ -1804,11 +1772,12 @@ proof -
       "\<And>p v. map_to_tcbs (ksPSpace s) p = Some v
         \<Longrightarrow> p \<notin> {ptr..+2 ^ bits}
         \<Longrightarrow> {p ..+ 2 ^ objBitsT TCBT} \<inter> {ptr..+2 ^ bits} = {}"
+      supply projectKOs[simp del]
       apply (clarsimp simp: valid_cap'_def)
       apply (drule(1) map_to_ko_atI')
-      apply (clarsimp simp: obj_at'_def valid_untyped'_def2)
+      apply (clarsimp simp: obj_at'_def valid_untyped'_def2 mask_2pm1 add_diff_eq)
       apply (elim allE, drule(1) mp)
-      apply (clarsimp simp only: obj_range'_def upto_intvl_eq[symmetric] al)
+      apply (clarsimp simp only: obj_range'_def upto_intvl_eq[symmetric] al add_mask_fold[symmetric])
       apply (subgoal_tac "objBitsKO ko = objBitsT TCBT")
        apply (subgoal_tac "p \<in> {p ..+ 2 ^ objBitsT TCBT}")
         apply simp
@@ -1819,12 +1788,13 @@ proof -
 
     note upto_rew = upto_intvl_eq[OF al, THEN eqset_imp_iff, symmetric, simplified]
 
-    from cNodePartial[simplified upto_rew] have cn_no_overlap:
+    from cNodePartial[folded add_mask_fold, simplified upto_rew]
+    have cn_no_overlap:
       "\<And>p n. gsCNodes s p = Some n \<Longrightarrow> p \<notin> {ptr..+2 ^ bits}
           \<Longrightarrow> {p ..+ 2 ^ (n + cte_level_bits)} \<inter> {ptr..+2 ^ bits} = {}"
       apply (simp add: cNodePartialOverlap_def)
       apply (elim allE, drule(1) mp)
-      apply clarsimp
+      apply (clarsimp simp flip: add_mask_fold)
       apply (frule base_member_set, simp add: word_bits_def)
       apply (clarsimp simp only: upto_intvl_eq[symmetric] field_simps)
       apply blast

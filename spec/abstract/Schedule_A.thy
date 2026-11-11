@@ -4,44 +4,19 @@
  * SPDX-License-Identifier: GPL-2.0-only
  *)
 
-(*
-Non-deterministic scheduler functionality.
-*)
-
 chapter "Scheduler"
 
 theory Schedule_A
 imports Arch_A
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   arch_switch_to_thread
   arch_switch_to_idle_thread
-
-end
+  arch_prepare_next_domain
 
 abbreviation
   "idle st \<equiv> st = Structures_A.IdleThreadState"
-
-text \<open>Gets the TCB at an address if the thread can be scheduled.\<close>
-definition
-  getActiveTCB :: "obj_ref \<Rightarrow> 'z::state_ext state \<Rightarrow> tcb option"
-where
-  "getActiveTCB tcb_ref state \<equiv>
-   case (get_tcb tcb_ref state)
-     of None           \<Rightarrow> None
-      | Some tcb       \<Rightarrow> if (runnable $ tcb_state tcb)
-                         then Some tcb else None"
-
-text \<open>Gets all schedulable threads in the system.\<close>
-definition
-  allActiveTCBs :: "(obj_ref set,'z::state_ext) s_monad" where
-  "allActiveTCBs \<equiv> do
-    state \<leftarrow> get;
-    return {x. getActiveTCB x state \<noteq> None}
-   od"
 
 text \<open>Switches the current thread to the specified one.\<close>
 definition
@@ -50,16 +25,17 @@ definition
      state \<leftarrow> get;
      assert (get_tcb t state \<noteq> None);
      arch_switch_to_thread t;
-     do_extended_op (tcb_sched_action (tcb_sched_dequeue) t);
+     tcb_sched_action (tcb_sched_dequeue) t;
      modify (\<lambda>s. s \<lparr> cur_thread := t \<rparr>)
    od"
 
 text \<open>Asserts that a thread is runnable before switching to it.\<close>
-definition guarded_switch_to :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad" where
-"guarded_switch_to thread \<equiv> do ts \<leftarrow> get_thread_state thread;
-                    assert (runnable ts);
-                    switch_to_thread thread
-                 od"
+definition guarded_switch_to :: "obj_ref \<Rightarrow> (unit, 'z::state_ext) s_monad" where
+  "guarded_switch_to thread \<equiv> do
+     ts \<leftarrow> get_thread_state thread;
+     assert (runnable ts);
+     switch_to_thread thread
+    od"
 
 text \<open>Switches to the idle thread.\<close>
 definition
@@ -70,47 +46,67 @@ definition
      modify (\<lambda>s. s \<lparr> cur_thread := thread \<rparr>)
    od"
 
-class state_ext_sched = state_ext +
-  fixes schedule :: "(unit,'a) s_monad"
+definition domain_end_marker :: "domain \<times> domain_duration" where
+  "domain_end_marker = (0, 0)"
 
-definition choose_thread :: "det_ext state \<Rightarrow> (unit \<times> det_ext state) set \<times> bool" where
-"choose_thread \<equiv>
-      do
-        d \<leftarrow> gets cur_domain;
-        queues \<leftarrow> gets (\<lambda>s. ready_queues s d);
-        if (\<forall>prio. queues prio = []) then (switch_to_idle_thread)
-        else (guarded_switch_to (hd (max_non_empty_queue queues)))
-      od"
+definition
+  next_domain :: "(unit, 'z::state_ext) s_monad" where
+  "next_domain \<equiv> do
+    modify (\<lambda>s.
+      let index_inc = domain_index s + 1;
+          index' = if domain_list s ! index_inc = domain_end_marker
+                   then domain_start_index s
+                   else index_inc;
+          dom_entry = domain_list s ! index'
+      in s\<lparr> domain_index := index',
+            cur_domain := fst dom_entry,
+            domain_time := ucast (snd dom_entry)\<rparr>);
+    do_extended_op $ modify (\<lambda>s. s \<lparr>work_units_completed := 0\<rparr>)
+  od"
+
+definition
+  dec_domain_time :: "(unit, 'z::state_ext) s_monad" where
+  "dec_domain_time = modify (\<lambda>s. s\<lparr>domain_time := domain_time s - 1\<rparr>)"
+
+definition max_non_empty_queue :: "(priority \<Rightarrow> ready_queue) \<Rightarrow> ready_queue" where
+  "max_non_empty_queue queues \<equiv> queues (Max {prio. queues prio \<noteq> []})"
+
+definition choose_thread :: "(unit, 'z::state_ext) s_monad" where
+  "choose_thread \<equiv> do
+     d \<leftarrow> gets cur_domain;
+     queues \<leftarrow> gets (\<lambda>s. ready_queues s d);
+     if \<forall>prio. queues prio = []
+     then switch_to_idle_thread
+     else guarded_switch_to (hd (max_non_empty_queue queues))
+   od"
 
 text \<open>
   Determine whether given priority is highest among queued ready threads in given domain.
   Trivially true if no threads are ready.\<close>
 definition
-  is_highest_prio :: "domain \<Rightarrow> priority \<Rightarrow> det_ext state \<Rightarrow> bool"
+  is_highest_prio :: "domain \<Rightarrow> priority \<Rightarrow> 'z::state_ext state \<Rightarrow> bool"
 where
   "is_highest_prio d p s \<equiv>
     (\<forall>prio. ready_queues s d prio = [])
     \<or> p \<ge> Max {prio. ready_queues s d prio \<noteq> []}"
 
-instantiation  det_ext_ext :: (type) state_ext_sched
-begin
-
 definition
   "schedule_switch_thread_fastfail ct it ct_prio target_prio \<equiv>
-     if ct \<noteq> it
-     then return (target_prio < ct_prio)
-     else return True"
+     return $ ct \<noteq> it \<longrightarrow> target_prio < ct_prio"
 
 definition
   "schedule_choose_new_thread \<equiv> do
      dom_time \<leftarrow> gets domain_time;
-     when (dom_time = 0) next_domain;
+     when (dom_time = 0) $ do
+       arch_prepare_next_domain;
+       next_domain
+     od;
      choose_thread;
      set_scheduler_action resume_cur_thread
    od"
 
 definition
-  "schedule_det_ext_ext \<equiv> do
+  "schedule \<equiv> do
      ct \<leftarrow> gets cur_thread;
      ct_st \<leftarrow> get_thread_state ct;
      ct_runnable \<leftarrow> return $ runnable ct_st;
@@ -129,10 +125,10 @@ definition
            when ct_runnable (tcb_sched_action tcb_sched_enqueue ct);
 
            it \<leftarrow> gets idle_thread;
-           target_prio \<leftarrow> ethread_get tcb_priority candidate;
+           target_prio \<leftarrow> thread_get tcb_priority candidate;
 
            \<comment> \<open>Infoflow does not like asking about the idle thread's priority or domain.\<close>
-           ct_prio \<leftarrow> ethread_get_when (ct \<noteq> it) tcb_priority ct;
+           ct_prio \<leftarrow> if ct \<noteq> it then thread_get tcb_priority ct else return 0;
            \<comment> \<open>When to look at the bitmaps. This optimisation is used in the C fast path,
               but there we know @{text cur_thread} is not idle.\<close>
            fastfail \<leftarrow> schedule_switch_thread_fastfail ct it ct_prio target_prio;
@@ -163,44 +159,20 @@ definition
         od)
     od"
 
-instance ..
-end
+definition domain_schedule_configure ::
+  "nat \<Rightarrow> domain \<Rightarrow> domain_duration \<Rightarrow> (unit,'z::state_ext) s_monad" where
+  "domain_schedule_configure index domain duration \<equiv>
+     modify (\<lambda>s. s\<lparr> domain_list := (domain_list s) [index := (domain, duration)]\<rparr>)"
 
-
-instantiation unit :: state_ext_sched
-begin
-
-
-text \<open>
-  The scheduler is heavily underspecified.
-  It is allowed to pick any active thread or the idle thread.
-  If the thread the scheduler picked is the current thread, it
-  may omit the call to @{const switch_to_thread}. Likewise it
-  may omit the call to @{const switch_to_idle_thread} if the
-  idle thread is the current thread.
-\<close>
-definition schedule_unit :: "(unit,unit) s_monad" where
-"schedule_unit \<equiv> (do
-   cur \<leftarrow> gets cur_thread;
-   threads \<leftarrow> allActiveTCBs;
-   thread \<leftarrow> select threads;
-   (if thread = cur then
-     return () \<sqinter> switch_to_thread thread
-   else
-     switch_to_thread thread)
- od) \<sqinter>
- (do
-   cur \<leftarrow> gets cur_thread;
-   idl \<leftarrow> gets idle_thread;
-   if idl = cur then
-     return () \<sqinter> switch_to_idle_thread
-   else switch_to_idle_thread
-  od)"
-
-instance ..
-end
-
-
-lemmas schedule_def = schedule_det_ext_ext_def schedule_unit_def
+definition domain_set_start :: "nat \<Rightarrow> (unit,'z::state_ext) s_monad" where
+  "domain_set_start index \<equiv> do
+     modify (\<lambda>s. s\<lparr>domain_start_index := index\<rparr>);
+     modify (\<lambda>s. s\<lparr>domain_time := 0\<rparr>);
+     \<comment> \<open>Set the index such that after increment in @{const next_domain}, it will point to
+         the last domain schedule item, which is reserved to be an end marker.\<close>
+     domain_list_len \<leftarrow> gets (length \<circ> domain_list);
+     modify (\<lambda>s. s\<lparr>domain_index := domain_list_len - 2\<rparr>);
+     reschedule_required
+   od"
 
 end

@@ -12,7 +12,7 @@ theory StateTranslationProofs_DR
 imports StateTranslation_D
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 declare transform_current_domain_def [simp]
 
@@ -26,7 +26,7 @@ lemma asid_low_bits [simp]:
 
 lemma asid_bits [simp]:
   "Types_D.asid_bits = asid_bits"
-  by (simp add:Types_D.asid_bits_def asid_bits_def)
+  by (simp add:Types_D.asid_bits_def asid_bits_def asid_high_bits_def asid_low_bits_def)
 
 lemma get_obj_simps [simp]:
   "get_obj (s\<lparr>cur_thread := a\<rparr>) = get_obj s"
@@ -54,10 +54,12 @@ abbreviation
 "update_kheap kh s \<equiv> kheap_update (\<lambda>_. kh) s"
 
 abbreviation
-"tcb_set_mi tcb msg \<equiv> tcb \<lparr>tcb_context := (tcb_context tcb)(msg_info_register := msg)\<rparr>"
+"tcb_set_mi tcb msg \<equiv>
+  tcb \<lparr>tcb_context := modify_registers (\<lambda>rs. rs(msg_info_register := msg)) (tcb_context tcb)\<rparr>"
 
 abbreviation
-"update_tcb_cxt_badge msg tcb\<equiv> tcb \<lparr>tcb_context := (tcb_context tcb)(badge_register := msg)\<rparr>"
+"update_tcb_cxt_badge msg tcb\<equiv>
+  tcb \<lparr>tcb_context := modify_registers (\<lambda>rs. rs(badge_register := msg)) (tcb_context tcb)\<rparr>"
 
 abbreviation
 "update_tcb_state state tcb \<equiv> tcb \<lparr>tcb_state := state\<rparr>"
@@ -66,7 +68,7 @@ abbreviation
 "update_tcb_boundntfn ntfn_opt tcb \<equiv> tcb \<lparr>tcb_bound_notification := ntfn_opt\<rparr>"
 
 abbreviation
-"dupdate_cdl_object ptr obj s \<equiv>  cdl_objects_update (\<lambda>_. cdl_objects s(ptr \<mapsto> obj)) s"
+"dupdate_cdl_object ptr obj s \<equiv>  cdl_objects_update (\<lambda>_. (cdl_objects s)(ptr \<mapsto> obj)) s"
 
 abbreviation
 "dupdate_tcb_intent intent tcb\<equiv> tcb \<lparr>cdl_tcb_intent := intent\<rparr>"
@@ -203,14 +205,14 @@ lemma transform_objects_update_kheap_same_caps:
   (if ptr = idle_thread s then
          transform_objects (update_kheap kh s)
   else
-         (transform_objects (update_kheap kh s))(ptr \<mapsto> transform_object (machine_state s) ptr (ekheap s ptr) ko'))"
+         (transform_objects (update_kheap kh s))(ptr \<mapsto> transform_object (machine_state s) ptr ko'))"
   unfolding transform_objects_def
   apply (rule ext)
   apply (simp add: map_option_case restrict_map_def map_add_def )
   done
 
 lemma transform_objects_update_same:
-  "\<lbrakk> kheap s ptr = Some ko; transform_object (machine_state s) ptr (ekheap s ptr) ko = ko'; ptr \<noteq> idle_thread s \<rbrakk>
+  "\<lbrakk> kheap s ptr = Some ko; transform_object (machine_state s) ptr ko = ko'; ptr \<noteq> idle_thread s \<rbrakk>
   \<Longrightarrow> (transform_objects s)(ptr \<mapsto> ko') = transform_objects s"
   unfolding transform_objects_def
   by (rule ext) (simp)
@@ -223,7 +225,7 @@ lemma map_lift_over_eq_Some:
                    \<and> m x' = Some y')"
 proof -
   have P: "inj_on f (dom m \<union> ran m) \<longrightarrow> inj_on f (dom m)"
-    by (auto elim: subset_inj_on)
+    by (auto elim: inj_on_subset)
   have Q: "\<And>x y. \<lbrakk> m x = Some y; inj_on f (dom m \<union> ran m) \<rbrakk>
                   \<Longrightarrow> inv_into (dom m) f (f x) = x"
     using P
@@ -238,7 +240,7 @@ lemma map_lift_over_eq_None:
                 (\<forall>x'. x = f x' \<longrightarrow> m x' = None))"
 proof -
   have P: "inj_on f (dom m \<union> ran m) \<Longrightarrow> inj_on f (dom m)"
-    by (auto elim: subset_inj_on)
+    by (auto elim: inj_on_subset)
   show ?thesis
     by (auto simp add: map_lift_over_def P[THEN inv_into_f_f] domI
                        inj_on_eq_iff[where f=f]
@@ -269,7 +271,7 @@ proof -
       "inj_on f (insert x (dom m))"
       "inj_on f (dom m - {x} \<union> ran (m(x := None)))"
       "inj_on f (dom m - {x})"
-    apply (safe intro!: subset_inj_on[OF inj_f])
+    apply (safe intro!: inj_on_subset[OF inj_f])
     apply (auto simp: ran_def split: if_split_asm)
     done
   show ?thesis
@@ -296,12 +298,12 @@ proof -
     by (auto split: if_split_asm)
   with inj_f
   have 2: "inj_on f (dom ?ifeq)"
-    by (auto elim!: subset_inj_on)
+    by (auto elim!: inj_on_subset)
   have "dom ?ifeq \<union> ran ?ifeq \<subseteq> dom m \<union> ran m \<union> set_option z \<union> set_option z'"
     by (auto simp: ran_def)
   with inj_f
   have "inj_on f (dom ?ifeq \<union> ran ?ifeq)"
-    by (auto elim!: subset_inj_on)
+    by (auto elim!: inj_on_subset)
   note Q = 1 2 this
   note if_split[split del] if_cong[cong]
   show ?thesis

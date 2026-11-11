@@ -8,9 +8,7 @@ theory ArchAInvsPre
 imports AInvsPre
 begin
 
-context Arch begin
-
-global_naming ARM_HYP
+context Arch begin arch_global_naming
 
 lemma get_pd_of_thread_reachable:
   "get_pd_of_thread (kheap s) (arch_state s) t \<noteq> 0
@@ -18,15 +16,6 @@ lemma get_pd_of_thread_reachable:
   by (auto simp: get_pd_of_thread_vs_lookup
           split: Structures_A.kernel_object.splits if_split_asm option.splits
                  cap.splits arch_cap.splits)
-
-lemma is_aligned_ptrFromPAddrD:
-"\<lbrakk>is_aligned (ptrFromPAddr b) a; a \<le> 25\<rbrakk> \<Longrightarrow> is_aligned b a"
-  apply (clarsimp simp: ptrFromPAddr_def pptrBaseOffset_def pptrBase_def physBase_def)
-  apply (erule is_aligned_addD2)
-  apply (rule is_aligned_weaken[where x = 25])
-   apply (simp add: is_aligned_def)
-  apply simp
-  done
 
 lemma obj_bits_data_at:
   "data_at sz (ptrFromPAddr b) s
@@ -69,8 +58,7 @@ lemma some_get_page_info_umapsD:
     apply (case_tac ao, simp_all add: a_type_simps obj_at_def)[1]
      apply (simp add: get_pt_info_def get_pt_entry_def)
      apply (drule_tac x="(ucast ((p >> 12) && mask 9))" in spec)
-     apply (clarsimp simp: obj_at_def
-      split: pte.splits,intro exI conjI,simp_all)[1]
+     apply (clarsimp simp: obj_at_def split: pte.splits,intro exI conjI,simp_all)[1]
       apply (frule obj_bits_data_at)
       apply (clarsimp simp: pspace_aligned_def data_at_def)
       apply (drule_tac x = "(ptrFromPAddr b)" in  bspec )
@@ -79,18 +67,16 @@ lemma some_get_page_info_umapsD:
      apply (frule (1) data_at_aligned)
      apply (intro exI conjI, simp_all add: is_aligned_ptrFromPAddrD)[1]
     apply (simp add: get_pt_info_def get_pt_entry_def)
-   apply clarsimp
    apply (frule obj_bits_data_at)
    apply (intro exI conjI, simp_all add: pageBits_def)[1]
    apply (clarsimp simp: pspace_aligned_def data_at_def)
-    apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
+   apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
     apply (fastforce simp: obj_at_def)
    apply (clarsimp dest!: is_aligned_ptrFromPAddrD)
-  apply clarsimp
   apply (frule obj_bits_data_at)
   apply (intro exI conjI, simp_all add: pageBits_def)[1]
   apply (clarsimp simp: pspace_aligned_def data_at_def)
-   apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
+  apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
    apply (fastforce simp: obj_at_def)
   apply (clarsimp dest!: is_aligned_ptrFromPAddrD)
   done
@@ -108,19 +94,14 @@ lemma device_frame_in_device_region:
   \<Longrightarrow> device_state (machine_state s) p \<noteq> None"
   by (auto simp add: pspace_respects_device_region_def dom_def device_mem_def)
 
-lemma is_aligned_pptrBaseOffset:
-"is_aligned pptrBaseOffset (pageBitsForSize sz)"
-  by (case_tac sz, simp_all add: pptrBaseOffset_def
-                   pptrBase_def physBase_def is_aligned_def)[1]
 
-global_naming Arch
-named_theorems AInvsPre_asms
+clear_named_theorems Arch_assms (* accumulate assumptions for AInvsPre locale *)
 
 lemma get_page_info_0[simp]:
   "get_page_info (\<lambda>obj. get_arch_obj (kheap s obj)) 0 x = None"
   by (simp add: get_page_info_def)
 
-lemma (* ptable_rights_imp_frame *)[AInvsPre_asms]:
+lemma (* ptable_rights_imp_frame *)[Arch_assms]:
   assumes "valid_state s"
   shows "ptable_rights t s x \<noteq> {} \<Longrightarrow>
          ptable_lift t s x = Some (addrFromPPtr y) \<Longrightarrow>
@@ -149,17 +130,14 @@ lemma (* ptable_rights_imp_frame *)[AInvsPre_asms]:
     apply (case_tac sz, simp_all add: word_bits_conv)[1]
   apply (clarsimp simp: field_simps simp: data_at_def)
   done
+
+lemmas AInvsPre_assms = Arch_assms (* extract accumulated assumptions *)
+
 end
 
 global_interpretation AInvsPre?: AInvsPre
   proof goal_cases
-  interpret Arch .
-  case 1 show ?case by (intro_locales; (unfold_locales, fact AInvsPre_asms)?)
+  case 1 show ?case by (intro_locales; (unfold_locales, fact ARM_HYP.AInvsPre_assms)?)
   qed
 
-requalify_facts
-  ARM_HYP.user_mem_dom_cong
-  ARM_HYP.device_mem_dom_cong
-  ARM_HYP.device_frame_in_device_region
-  ARM_HYP.is_aligned_pptrBaseOffset
 end

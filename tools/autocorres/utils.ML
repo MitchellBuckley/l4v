@@ -93,9 +93,9 @@ fun accumulate f acc xs = let
 (* Define a constant "name" of type "term" into the local theory "lthy". *)
 fun define_const name term lthy =
   let
-    val lthy = lthy |> Local_Theory.open_target |> snd
+    val lthy = lthy |> Local_Theory.begin_nested |> snd
     val ((_, (_, thm)), lthy) = Local_Theory.define ((Binding.name name, NoSyn), (Binding.empty_atts, term)) lthy
-    val lthy' = Local_Theory.close_target lthy
+    val lthy' = Local_Theory.end_nested lthy
     val thm' = Morphism.thm (Local_Theory.target_morphism lthy) thm
   in
     (thm', lthy')
@@ -116,13 +116,13 @@ fun define_const_args name hidden term args lthy =
     val new_term = Logic.mk_equals (head, term)
 
     (* Define the constant. *)
-   val lthy = lthy |> Local_Theory.open_target |> snd
+   val lthy = lthy |> Local_Theory.begin_nested |> snd
    val ((_, (_, thm)), lthy) =
         Specification.definition (SOME (maybe_hide (Binding.name name), NONE, NoSyn))
             [] [] (Binding.empty_atts, new_term) lthy
 
     (* Integrate into the current locale. *)
-    val lthy' = Local_Theory.close_target lthy
+    val lthy' = Local_Theory.end_nested lthy
     val thm' = Morphism.thm (Local_Theory.target_morphism lthy) thm
   in
     (Thm.prop_of thm' |> lhs_of |> Term.head_of, thm', lthy')
@@ -131,14 +131,14 @@ fun define_const_args name hidden term args lthy =
 (* Define lemmas into the local theory. *)
 fun define_lemmas name thm_list lthy =
   let
-    val lthy = lthy |> Local_Theory.open_target |> snd
+    val lthy = lthy |> Local_Theory.begin_nested |> snd
     val ((_, thms), lthy) = Local_Theory.note ((Binding.name name, []), thm_list) lthy
     (*
      * Restore the theory; not entirely sure why this is needed, but prevents
      * definitions from taking O(n^2) time (where "n" is the number of
      * definitions previously made).
      *)
-    val lthy' = Local_Theory.close_target lthy
+    val lthy' = Local_Theory.end_nested lthy
     val thms' = map (Morphism.thm (Local_Theory.target_morphism lthy)) thms
   in
     (thms', lthy')
@@ -147,9 +147,9 @@ fun define_lemmas name thm_list lthy =
 (* Define a single lemma into the local theory. *)
 fun define_lemma name thm lthy =
   let
-    val lthy = lthy |> Local_Theory.open_target |> snd
+    val lthy = lthy |> Local_Theory.begin_nested |> snd
     val (thms, lthy) = define_lemmas name [thm] lthy
-    val lthy = Local_Theory.close_target lthy
+    val lthy = Local_Theory.end_nested lthy
   in
     (hd thms, lthy)
   end
@@ -376,13 +376,6 @@ in
   betapplys (new_term, args)
 end
 
-(* Put commas between a list of strings. *)
-fun commas l =
-  map Pretty.str l
-  |> Pretty.commas
-  |> Pretty.enclose "" ""
-  |> Pretty.unformatted_string_of
-
 (* Make a list of conjunctions. *)
 fun mk_conj_list [] = @{term "HOL.True"}
   | mk_conj_list [x] = x
@@ -459,7 +452,7 @@ fun term_fold_map_top f x =
  *)
 fun simp_map f =
   Context.map_proof (
-    Local_Theory.declaration {syntax = false, pervasive = false} (
+    Local_Theory.declaration {syntax = false, pervasive = false, pos = @{here}} (
       K (Simplifier.map_ss f)))
   |> Context.proof_map
 
@@ -538,13 +531,13 @@ let
     val function_bodies = map (fn (a,b,c) => mk_fun_term a b c) func_defs
 
     (* Define the function. *)
-    val lthy = lthy |> Local_Theory.open_target |> snd
+    val lthy = lthy |> Local_Theory.begin_nested |> snd
     val ctxt' = Function.add_function
       function_bindings
       (map (fn x => ((Binding.empty_atts, x), [], [])) function_bodies)
       Function_Common.default_config pat_completeness_auto lthy
       |> snd
-      |> Local_Theory.close_target
+      |> Local_Theory.end_nested
       |> prove_termination
       |> snd
 
@@ -678,7 +671,7 @@ fun isa_str_list_to_ml t =
 fun chain_preds stateT [] = Abs ("s", stateT, @{term "HOL.True"})
   | chain_preds     _ [x] = x
   | chain_preds stateT (x::xs) =
-      Const (@{const_name "pred_conj"},
+      Const (@{const_name "inf_class.inf"},
           (stateT --> @{typ bool}) --> (stateT --> @{typ bool}) --> (stateT --> @{typ bool}))
         $ x $ (chain_preds stateT xs)
 
@@ -700,10 +693,9 @@ fun chain_preds stateT [] = Abs ("s", stateT, @{term "HOL.True"})
  *)
 fun concrete_abs' ctxt t =
 let
-  fun get_lambda_name (Abs (n, _, _)) = n
-    | get_lambda_name _ = "x"
+  val lambda_name = (case t of Abs (n, _, _) => n | _ => "x")
   val first_argT = domain_type (fastype_of t)
-  val [(n', _)] = Variable.variant_frees ctxt [t] [(get_lambda_name t, ())]
+  val (n', _) = Name.variant lambda_name (Variable.names_of (Variable.declare_names t ctxt))
   val free = Free (n', first_argT)
 in
   ((betapply (t, free)), free, n')
@@ -768,29 +760,10 @@ handle Pattern.MATCH => Seq.empty
 fun unfold_once_tac ctxt thm =
   CONVERSION (Conv.bottom_conv (K (Conv.try_conv (Conv.rewr_conv thm))) ctxt)
 
-(* Set a simpset as being hidden, so warnings are not printed from it. *)
-fun set_hidden_ctxt ctxt =
-  Context_Position.set_visible false ctxt
-
-(*
- * Get all facts currently defined.
- *
- * Clagged from "Find_Theorems.all_facts_of".
- *)
-fun all_facts_of ctxt =
-  let
-    val local_facts = Proof_Context.facts_of ctxt;
-    val global_facts = Global_Theory.facts_of (Proof_Context.theory_of ctxt);
-  in
-    maps Facts.selections
-     (Facts.dest_static false [global_facts] local_facts @
-      Facts.dest_static false [] global_facts)
-  end;
-
 (* Guess the name of a thm. *)
 fun guess_thm_name ctxt thm =
-  List.find (fn x => Thm.eq_thm (thm, snd x)) (all_facts_of ctxt)
-  |> Option.map (fst #> Facts.string_of_ref)
+  Find_Theorems.all_facts_of ctxt
+  |> get_first (fn (a, thm') => if Thm.eq_thm (thm, thm') then SOME (Thm_Name.print a) else NONE);
 
 (* Expand type abbreviations. *)
 fun expand_type_abbrevs ctxt t = Thm.typ_of (Thm.ctyp_of ctxt t)
@@ -808,7 +781,7 @@ let
   val typ_vals = Vartab.dest (Envir.type_env env)
 in
   (Drule.instantiate_normalize
-      (map prep_type typ_vals, map prep_term term_vals))
+      (TVars.make (map prep_type typ_vals), Vars.make (map prep_term term_vals)))
 end
 
 (*
@@ -912,7 +885,7 @@ fun THM_non_critical keep_going msg n thm =
 fun trace_rule ctxt goal rule =
   if Config.get ctxt Method.rule_trace then
   let
-    val _ = Goal_Display.string_of_goal ctxt goal |> tracing
+    val _ = Goal_Display.pretty_goal ctxt goal |> Pretty.string_of |> tracing
     val _ = (case guess_thm_name ctxt rule of
         SOME x => Pretty.str x
       | NONE => Thm.pretty_thm_item ctxt rule)
@@ -950,8 +923,9 @@ fun solved_tac thm =
 
 (* Convenience function for making simprocs. *)
 fun mk_simproc' ctxt (name : string, pats : string list, proc : Proof.context -> cterm -> thm option) = let
-  in Simplifier.make_simproc ctxt name
-       {lhss = map (Proof_Context.read_term_pattern ctxt) pats,
+  in Simplifier.make_simproc ctxt
+       {name=name, kind=Simproc, identifier=[],
+        lhss = map (Proof_Context.read_term_pattern ctxt) pats,
         proc = K proc} end
 
 (* Get named_theorems in reverse order. We use this for translation rulesets

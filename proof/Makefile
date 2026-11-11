@@ -9,10 +9,6 @@ images: BaseRefine CBaseRefine Refine CRefine
 default: images test
 test:
 all: images test
-report-regression:
-	@echo Refine Access CBaseRefine CRefine \
-	      DRefine InfoFlow InfoFlowCBase InfoFlowC DPolicy \
-		  DSpecProofs Bisim
 
 #
 # Setup heaps.
@@ -41,13 +37,20 @@ HEAPS += SepTactics
 
 # Additional dependencies
 
-BaseRefine Refine DBaseRefine DRefine: design-spec
+AInvs: design-spec ASpec-files
+
+BaseRefine Refine DBaseRefine DRefine: design-spec ASpec-files
 
 # CKernel uses the `machinety=machine_state` option for `install_C_file`,
 # and therefore depends on `design-spec`.
 CKernel CSpec : c-kernel design-spec
 
 CBaseRefine CRefine SimplExportAndRefine : c-kernel design-spec ASpec-files
+
+InfoFlowCBase InfoFlowC: CRefine
+
+InfoFlow: Access
+Access: AInvs
 
 # Preprocess the kernel's source code and bitfield theory files.
 c-kernel: .FORCE

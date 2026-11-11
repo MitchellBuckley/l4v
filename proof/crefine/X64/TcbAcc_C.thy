@@ -89,22 +89,22 @@ lemma archThreadGet_eq:
   apply simp
   done
 
-lemma get_tsType_ccorres [corres]:
+lemma get_tsType_ccorres[corres]:
   "ccorres (\<lambda>r r'. r' = thread_state_to_tsType r) ret__unsigned_longlong_' (tcb_at' thread)
-           (UNIV \<inter> {s. thread_state_ptr_' s = Ptr &(tcb_ptr_to_ctcb_ptr thread\<rightarrow>[''tcbState_C''])}) []
-  (getThreadState thread) (Call thread_state_ptr_get_tsType_'proc)"
+           ({s. f s = tcb_ptr_to_ctcb_ptr thread} \<inter>
+            {s. cslift s (Ptr &(f s\<rightarrow>[''tcbState_C''])) = Some (thread_state_' s)}) []
+  (getThreadState thread) (Call thread_state_get_tsType_'proc)"
   unfolding getThreadState_def
-  apply (rule ccorres_from_spec_modifies)
-      apply (rule thread_state_ptr_get_tsType_spec)
-     apply (rule thread_state_ptr_get_tsType_modifies)
-    apply simp
-   apply (frule (1) obj_at_cslift_tcb)
-   apply (clarsimp simp: typ_heap_simps)
+  apply (rule ccorres_from_spec_modifies [where P=\<top>, simplified])
+     apply (rule thread_state_get_tsType_spec)
+    apply (rule thread_state_get_tsType_modifies)
+   apply simp
   apply (frule (1) obj_at_cslift_tcb)
   apply (clarsimp simp: typ_heap_simps)
   apply (rule bexI [rotated, OF threadGet_eq], assumption)
   apply simp
-  apply (erule ctcb_relation_thread_state_to_tsType)
+  apply (drule ctcb_relation_thread_state_to_tsType)
+  apply simp
   done
 
 lemma threadGet_obj_at2:
@@ -177,7 +177,7 @@ lemma threadSet_corres_lemma:
   assumes spec: "\<forall>s. \<Gamma>\<turnstile> \<lbrace>s. P s\<rbrace> Call f {t. Q s t}"
   and      mod: "modifies_heap_spec f"
   and  rl: "\<And>\<sigma> x t ko. \<lbrakk>(\<sigma>, x) \<in> rf_sr; Q x t; x \<in> P'; ko_at' ko thread \<sigma>\<rbrakk>
-             \<Longrightarrow> (\<sigma>\<lparr>ksPSpace := ksPSpace \<sigma>(thread \<mapsto> KOTCB (g ko))\<rparr>,
+             \<Longrightarrow> (\<sigma>\<lparr>ksPSpace := (ksPSpace \<sigma>)(thread \<mapsto> KOTCB (g ko))\<rparr>,
                   t\<lparr>globals := globals x\<lparr>t_hrs_' := t_hrs_' (globals t)\<rparr>\<rparr>) \<in> rf_sr"
   and  g:  "\<And>s x. \<lbrakk>tcb_at' thread s; x \<in> P'; (s, x) \<in> rf_sr\<rbrakk> \<Longrightarrow> P x"
   shows "ccorres dc xfdc (tcb_at' thread) P' [] (threadSet g thread) (Call f)"
@@ -206,7 +206,7 @@ lemma threadSet_corres_lemma:
 
 
 lemma threadSet_ccorres_lemma4:
-  "\<lbrakk> \<And>s tcb. \<Gamma> \<turnstile> (Q s tcb) c {s'. (s \<lparr>ksPSpace := ksPSpace s(thread \<mapsto> injectKOS (F tcb))\<rparr>, s') \<in> rf_sr};
+  "\<lbrakk> \<And>s tcb. \<Gamma> \<turnstile> (Q s tcb) c {s'. (s \<lparr>ksPSpace := (ksPSpace s)(thread \<mapsto> injectKOS (F tcb))\<rparr>, s') \<in> rf_sr};
           \<And>s s' tcb tcb'. \<lbrakk> (s, s') \<in> rf_sr; P tcb; ko_at' tcb thread s;
                              cslift s' (tcb_ptr_to_ctcb_ptr thread) = Some tcb';
                              ctcb_relation tcb tcb'; P' s ; s' \<in> R\<rbrakk> \<Longrightarrow> s' \<in> Q s tcb \<rbrakk>
@@ -251,6 +251,33 @@ lemma sanitiseRegister_spec:
   apply (case_tac r; simp add: C_register_defs sanitiseRegister_def sanitiseOrFlags_def sanitiseAndFlags_def) (* long *)
   by word_bitwise
 
+lemma rf_sr_ksArchState_x64KSCurFPUOwner:
+  "(s, s') \<in> rf_sr \<Longrightarrow> cur_fpu_relation (x64KSCurFPUOwner (ksArchState s)) (ksCurFPUOwner_' (globals s'))"
+  by (clarsimp simp: rf_sr_def cstate_relation_def carch_state_relation_def Let_def)
+
+lemma ccorres_pre_getCurFPUOwner:
+  assumes cc: "\<And>rv. ccorres r xf (P rv) (P' rv) hs (f rv) c"
+  shows
+    "ccorres r xf
+       (\<lambda>s. (\<forall>rv. (x64KSCurFPUOwner \<circ> ksArchState) s = rv \<longrightarrow> P rv s))
+       {s. \<forall>rv fpu'. ksCurFPUOwner_' (globals s) = fpu' \<and> cur_fpu_relation rv fpu' \<longrightarrow> s \<in> P' rv} hs
+       (gets (x64KSCurFPUOwner \<circ> ksArchState) >>= (\<lambda>rv. f rv)) c"
+  apply (rule ccorres_guard_imp)
+    apply (rule ccorres_symb_exec_l)
+       defer
+       apply wp[1]
+      apply (rule gets_sp)
+     apply (clarsimp simp: empty_fail_def simpler_gets_def)
+    apply assumption
+   apply clarsimp
+   defer
+   apply (rule ccorres_guard_imp)
+     apply (rule cc)
+    apply clarsimp
+   apply assumption
+  apply (simp add: rf_sr_ksArchState_x64KSCurFPUOwner)
+  done
+
 lemma getObject_tcb_wp':
   "\<lbrace>\<lambda>s. \<forall>t. ko_at' (t :: tcb) p s \<longrightarrow> Q t s\<rbrace> getObject p \<lbrace>Q\<rbrace>"
   by (clarsimp simp: getObject_def valid_def in_monad
@@ -277,6 +304,18 @@ lemma ccorres_pre_getObject_tcb:
            erule ko_at_projectKO_opt)
   apply simp
   done
+
+lemma armKSCurFPUOwner_update_ccorres:
+  "ccorres dc xfdc (\<lambda>_. cur_fpu_relation fpu fpu') UNIV hs
+     (modifyArchState (x64KSCurFPUOwner_update (\<lambda>_. fpu)))
+     (Basic (\<lambda>s. globals_update (ksCurFPUOwner_'_update (\<lambda>_. fpu')) s))"
+  apply (clarsimp simp: modifyArchState_def)
+  apply (rule ccorres_from_vcg)
+  apply (rule allI, rule conseqPre, vcg)
+  apply (clarsimp simp: bind_def simpler_gets_def simpler_modify_def)
+  apply (clarsimp simp: rf_sr_def cstate_relation_def Let_def)
+  by (clarsimp simp: carch_state_relation_def carch_globals_def cur_fpu_relation_def
+                     cmachine_state_relation_def)
 
 (* FIXME: MOVE, probably to CSpace_RAB  *)
 lemma ccorres_gen_asm2_state:
@@ -309,9 +348,10 @@ lemma length_of_msgRegisters:
   by (auto simp: msgRegisters_unfold)
 
 lemma setMRs_single:
-  "setMRs thread buffer [val] = do y \<leftarrow> asUser thread (setRegister register.R10 val);
-       return 1
-    od"
+  "setMRs thread buffer [val] = do
+     _ \<leftarrow> asUser thread (setRegister register.R10 val);
+     return 1
+   od"
   apply (clarsimp simp: setMRs_def length_of_msgRegisters zipWithM_x_def zipWith_def split: option.splits)
   apply (subst zip_commute, subst zip_singleton)
    apply (simp add: length_of_msgRegisters length_0_conv[symmetric])

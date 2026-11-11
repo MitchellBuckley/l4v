@@ -1,0 +1,64 @@
+(*
+ * Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
+ * Copyright 2022, Proofcraft Pty Ltd
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ *)
+
+theory Hardware_H
+imports
+  MachineOps
+  State_H
+begin
+
+context Arch begin arch_global_naming (H)
+
+#INCLUDE_HASKELL SEL4/Machine/Hardware/AARCH64.hs Platform=Platform.AARCH64 CONTEXT AARCH64_H \
+  NOT PT_Type getMemoryRegions getDeviceRegions getKernelDevices \
+  loadWord storeWord storeWordVM getActiveIRQ ackInterrupt maskInterrupt deactivateInterrupt \
+  configureTimer resetTimer debugPrint getRestartPC setNextPC clearMemory \
+  clearMemoryVM initMemory freeMemory setHardwareASID wordFromPDE wordFromPTE \
+  VMFaultType HypFaultType VMPageSize pageBits pageBitsForSize toPAddr \
+  addrFromPPtr ptrFromPAddr sfence physBase paddrBase pptrBase pptrBaseOffset \
+  pptrUserTop kernelELFBase kernelELFBaseOffset kernelELFPAddrBase \
+  addrFromKPPtr ptTranslationBits vmFaultTypeFSR setVSpaceRoot \
+  setIRQTrigger \
+  config_ARM_PA_SIZE_BITS_40 numSGIs gicNumTargets \
+  readFpuState writeFpuState enableFpu disableFpu isFpuEnable \
+  hcrCommon hcrTWE hcrTWI hcrVCPU hcrNative sctlrDefault vgicHCREN vgicHCRTALL0 \
+  gicVCPUMaxNumLR sctlrEL1VM tcrEL1Native \
+  get_gic_vcpu_ctrl_hcr set_gic_vcpu_ctrl_hcr get_gic_vcpu_ctrl_vmcr \
+  set_gic_vcpu_ctrl_vmcr get_gic_vcpu_ctrl_apr set_gic_vcpu_ctrl_apr \
+  get_gic_vcpu_ctrl_vtr get_gic_vcpu_ctrl_eisr0 get_gic_vcpu_ctrl_eisr1 \
+  get_gic_vcpu_ctrl_misr get_gic_vcpu_ctrl_lr set_gic_vcpu_ctrl_lr \
+  check_export_arch_timer \
+  isb dsb dmb \
+  invalidateTranslationASID invalidateTranslationSingle \
+  cleanByVA_PoU cleanInvalidateCacheRange_RAM cleanCacheRange_RAM cleanCacheRange_PoU \
+  invalidateCacheRange_RAM invalidateCacheRange_I invalidate_I_PoU branchFlushRange \
+  enableFpuEL01 \
+  getFAR getDFSR getIFSR getHSR setHCR getESR  getSCTLR setSCTLR writeTCR \
+  addressTranslateS1 \
+  readVCPUHardwareReg writeVCPUHardwareReg vcpuBits \
+  config_DISABLE_WFI_WFE_TRAPS \
+  config_ARM_GIC_V3 \
+  sendSGI numSMCRegs doSMC_mop
+
+end
+
+arch_requalify_types (H)
+  vmrights
+
+context Arch begin arch_global_naming (H)
+
+#INCLUDE_HASKELL SEL4/Machine/Hardware/AARCH64.hs CONTEXT AARCH64_H instanceproofs NOT HardwareASID VMFaultType VMPageSize VMPageEntry HypFaultType
+
+#INCLUDE_HASKELL SEL4/Machine/Hardware/AARCH64.hs CONTEXT AARCH64_H ONLY wordFromPTE
+
+(* Platform provides a generic numeral, Haskell expects type irq *)
+abbreviation (input) maxIRQ :: irq where
+  "maxIRQ \<equiv> Platform.maxIRQ"
+
+end (* context AARCH64 *)
+
+end

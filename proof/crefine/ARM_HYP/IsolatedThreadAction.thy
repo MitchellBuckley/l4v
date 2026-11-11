@@ -1,44 +1,37 @@
 (*
+ * Copyright 2022, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
  *)
 
 theory IsolatedThreadAction
-imports "CLib.MonadicRewrite_C" Finalise_C CSpace_All SyscallArgs_C
+imports ArchMove_C
 begin
 
-datatype tcb_state_regs = TCBStateRegs "thread_state" "MachineTypes.register \<Rightarrow> machine_word"
+context begin interpretation Arch . (*FIXME: arch-split*)
 
-definition
- "tsrContext tsr \<equiv> case tsr of TCBStateRegs ts regs \<Rightarrow> regs"
+datatype tcb_state_regs =
+  TCBStateRegs (tsrState : thread_state) (tsrContext : "MachineTypes.register \<Rightarrow> machine_word")
 
-definition
- "tsrState tsr \<equiv> case tsr of TCBStateRegs ts regs \<Rightarrow> ts"
-
-lemma accessors_TCBStateRegs[simp]:
-  "TCBStateRegs (tsrState v) (tsrContext v) = v"
-  by (cases v, simp add: tsrState_def tsrContext_def)
-
-lemma tsrContext_simp[simp]:
-  "tsrContext (TCBStateRegs st con) = con"
-  by (simp add: tsrContext_def)
-
-lemma tsrState_simp[simp]:
-  "tsrState (TCBStateRegs st con) = st"
-  by (simp add: tsrState_def)
+definition get_tcb_state_regs_tcb :: "tcb \<Rightarrow> tcb_state_regs" where
+  "get_tcb_state_regs_tcb tcb \<equiv> TCBStateRegs (tcbState tcb) ((user_regs \<circ> atcbContextGet \<circ> tcbArch) tcb)"
 
 definition
   get_tcb_state_regs :: "kernel_object option \<Rightarrow> tcb_state_regs"
 where
- "get_tcb_state_regs oko \<equiv> case oko of
-    Some (KOTCB tcb) \<Rightarrow> TCBStateRegs (tcbState tcb) ((atcbContextGet o tcbArch) tcb)"
+ "get_tcb_state_regs oko \<equiv> case oko of Some (KOTCB tcb) \<Rightarrow> get_tcb_state_regs_tcb tcb"
+
+lemmas get_tcb_state_regs_defs = get_tcb_state_regs_def get_tcb_state_regs_tcb_def
 
 definition
   put_tcb_state_regs_tcb :: "tcb_state_regs \<Rightarrow> tcb \<Rightarrow> tcb"
 where
  "put_tcb_state_regs_tcb tsr tcb \<equiv> case tsr of
-     TCBStateRegs st regs \<Rightarrow> tcb \<lparr> tcbState := st, tcbArch := atcbContextSet regs (tcbArch tcb) \<rparr>"
+     TCBStateRegs st regs \<Rightarrow>
+        tcb \<lparr> tcbState := st,
+              tcbArch := atcbContextSet (UserContext regs)
+                         (tcbArch tcb) \<rparr>"
 
 definition
   put_tcb_state_regs :: "tcb_state_regs \<Rightarrow> kernel_object option \<Rightarrow> kernel_object option"
@@ -46,6 +39,8 @@ where
  "put_tcb_state_regs tsr oko = Some (KOTCB (put_tcb_state_regs_tcb tsr
     (case oko of
        Some (KOTCB tcb) \<Rightarrow> tcb | _ \<Rightarrow> makeObject)))"
+
+lemmas put_tcb_state_regs_defs = put_tcb_state_regs_def put_tcb_state_regs_tcb_def
 
 definition
  "partial_overwrite idx tcbs ps \<equiv>
@@ -73,12 +68,11 @@ definition
 lemma put_tcb_state_regs_twice[simp]:
   "put_tcb_state_regs tsr (put_tcb_state_regs tsr' tcb)
     = put_tcb_state_regs tsr tcb"
-  apply (simp add: put_tcb_state_regs_def put_tcb_state_regs_tcb_def
-                   makeObject_tcb
+  apply (simp add: put_tcb_state_regs_defs makeObject_tcb newArchTCB_def
             split: tcb_state_regs.split option.split
                    Structures_H.kernel_object.split)
-  apply (intro all_tcbI impI allI)
-  apply simp
+  using atcbContextSet_def atcbContext_set_set
+  apply (intro all_tcbI impI allI conjI; simp)
   done
 
 lemma partial_overwrite_twice[simp]:
@@ -91,9 +85,8 @@ lemma get_tcb_state_regs_partial_overwrite[simp]:
    get_tcb_state_regs (partial_overwrite idx tcbs f (idx x))
       = tcbs x"
   apply (simp add: partial_overwrite_def)
-  apply (simp add: put_tcb_state_regs_def
-                   get_tcb_state_regs_def
-                   put_tcb_state_regs_tcb_def
+  apply (simp add: put_tcb_state_regs_defs
+                   get_tcb_state_regs_defs
             split: tcb_state_regs.split)
   done
 
@@ -117,9 +110,23 @@ lemmas setEndpoint_obj_at_tcb' = setEndpoint_obj_at'_tcb
 
 lemmas setNotification_tcb = set_ntfn_tcb_obj_at'
 
-context kernel_m begin
-
-context begin interpretation Arch . (*FIXME: arch_split*)
+lemma setObject_modify:
+  fixes v :: "'a :: pspace_storable" shows
+  "\<lbrakk> obj_at' (P :: 'a \<Rightarrow> bool) p s; updateObject v = updateObject_default v;
+         (1 :: word32) < 2 ^ objBits v \<rbrakk>
+    \<Longrightarrow> setObject p v s
+      = modify (ksPSpace_update (\<lambda>ps. ps (p \<mapsto> injectKO v))) s"
+  apply (clarsimp simp: setObject_def split_def exec_gets
+                        obj_at'_def projectKOs lookupAround2_known1
+                        assert_opt_def updateObject_default_def
+                        bind_assoc)
+  apply (simp add: projectKO_def alignCheck_assert)
+  apply (simp add: project_inject objBits_def)
+  apply (frule in_magnitude_check[where s'=s]; simp)
+  apply (clarsimp simp only: objBitsT_koTypeOf[symmetric] koTypeOf_injectKO)
+  apply (simp add: magnitudeCheck_assert in_monad)
+  apply (simp add: simpler_modify_def)
+  done
 
 lemma getObject_return:
   fixes v :: "'a :: pspace_storable" shows
@@ -128,21 +135,19 @@ lemma getObject_return:
   apply (clarsimp simp: getObject_def split_def exec_gets
                         obj_at'_def projectKOs lookupAround2_known1
                         assert_opt_def loadObject_default_def)
+  apply (frule in_magnitude_check[where s'=s]; simp)
   apply (simp add: projectKO_def alignCheck_assert)
   apply (simp add: project_inject objBits_def)
-  apply (frule(2) in_magnitude_check[where s'=s])
   apply (simp add: magnitudeCheck_assert in_monad)
   done
 
-end
-
 lemmas getObject_return_tcb
     = getObject_return[OF meta_eq_to_obj_eq, OF loadObject_tcb,
-                       unfolded objBits_simps', simplified]
+                       unfolded gen_objBits_simps tcbBlockSizeBits_def, simplified]
 
 lemmas setObject_modify_tcb
     = setObject_modify[OF _ meta_eq_to_obj_eq, OF _ updateObject_tcb,
-                       unfolded objBits_simps', simplified]
+                       unfolded gen_objBits_simps tcbBlockSizeBits_def, simplified]
 
 lemma partial_overwrite_fun_upd:
   "inj idx \<Longrightarrow>
@@ -154,15 +159,14 @@ lemma partial_overwrite_fun_upd:
 
 lemma get_tcb_state_regs_ko_at':
   "ko_at' ko p s \<Longrightarrow> get_tcb_state_regs (ksPSpace s p)
-       = TCBStateRegs (tcbState ko) ((atcbContextGet o tcbArch) ko)"
-  by (clarsimp simp: obj_at'_def projectKOs get_tcb_state_regs_def)
+       = TCBStateRegs (tcbState ko) ((user_regs o atcbContextGet o tcbArch) ko)"
+  by (clarsimp simp: obj_at'_def get_tcb_state_regs_defs projectKOs)
 
 lemma put_tcb_state_regs_ko_at':
   "ko_at' ko p s \<Longrightarrow> put_tcb_state_regs tsr (ksPSpace s p)
        = Some (KOTCB (ko \<lparr> tcbState := tsrState tsr
-                         , tcbArch := atcbContextSet (tsrContext tsr) (tcbArch ko)\<rparr>))"
-  by (clarsimp simp: obj_at'_def projectKOs put_tcb_state_regs_def
-                     put_tcb_state_regs_tcb_def
+                         , tcbArch := atcbContextSet (UserContext (tsrContext tsr)) (tcbArch ko)\<rparr>))"
+  by (clarsimp simp: obj_at'_def put_tcb_state_regs_defs projectKOs
               split: tcb_state_regs.split)
 
 lemma partial_overwrite_get_tcb_state_regs:
@@ -173,8 +177,7 @@ lemma partial_overwrite_get_tcb_state_regs:
                       split: if_split)
   apply clarsimp
   apply (drule_tac x=xa in spec)
-  apply (clarsimp simp: obj_at'_def projectKOs put_tcb_state_regs_def
-                        get_tcb_state_regs_def put_tcb_state_regs_tcb_def)
+  apply (clarsimp simp: obj_at'_def put_tcb_state_regs_defs get_tcb_state_regs_defs projectKOs)
   apply (case_tac obj, simp)
   done
 
@@ -191,7 +194,7 @@ lemma ksPSpace_update_partial_id:
   done
 
 lemma isolate_thread_actions_asUser:
-  "\<lbrakk> idx t' = t; inj idx; f = (\<lambda>s. ({(v, g s)}, False)) \<rbrakk> \<Longrightarrow>
+  "\<lbrakk> idx t' = t; inj idx; f = (\<lambda>s. ({(v, modify_registers g s)}, False)) \<rbrakk> \<Longrightarrow>
    monadic_rewrite False True (\<lambda>s. \<forall>x. tcb_at' (idx x) s)
       (asUser t f)
       (isolate_thread_actions idx (return v)
@@ -212,14 +215,16 @@ lemma isolate_thread_actions_asUser:
   apply (clarsimp simp: partial_overwrite_get_tcb_state_regs
                         put_tcb_state_regs_ko_at')
   apply (case_tac ko, simp)
+  apply (rename_tac uc)
+  apply (case_tac uc, simp add: modify_registers_def atcbContextGet_def atcbContextSet_def)
   done
 
 lemma getRegister_simple:
-  "getRegister r = (\<lambda>con. ({(con r, con)}, False))"
+  "getRegister r = (\<lambda>con. ({(user_regs con r, con)}, False))"
   by (simp add: getRegister_def simpler_gets_def)
 
 lemma mapM_getRegister_simple:
-  "mapM getRegister rs = (\<lambda>con. ({(map con rs, con)}, False))"
+  "mapM getRegister rs = (\<lambda>con. ({(map (user_regs con) rs, con)}, False))"
   apply (induct rs)
    apply (simp add: mapM_Nil return_def)
   apply (simp add: mapM_Cons getRegister_def simpler_gets_def
@@ -227,18 +232,31 @@ lemma mapM_getRegister_simple:
   done
 
 lemma setRegister_simple:
-  "setRegister r v = (\<lambda>con. ({((), con (r := v))}, False))"
+  "setRegister r v = (\<lambda>con. ({((), UserContext ((user_regs con)(r := v)))}, False))"
   by (simp add: setRegister_def simpler_modify_def)
 
 lemma zipWithM_setRegister_simple:
   "zipWithM_x setRegister rs vs
-      = (\<lambda>con. ({((), foldl (\<lambda>con (r, v). con (r := v)) con (zip rs vs))}, False))"
+      = (\<lambda>con. ({((),
+                  UserContext (foldl (\<lambda>regs (r, v). ((regs)(r := v))) (user_regs con) (zip rs vs)))}, False))"
   apply (simp add: zipWithM_x_mapM_x)
   apply (induct ("zip rs vs"))
    apply (simp add: mapM_x_Nil return_def)
   apply (clarsimp simp add: mapM_x_Cons bind_def setRegister_def
                             simpler_modify_def fun_upd_def[symmetric])
   done
+
+(* this variant used in fastpath rewrite proof *)
+lemma setRegister_simple_modify_registers:
+  "setRegister r v = (\<lambda>con. ({((), modify_registers (\<lambda>f. f(r := v)) con)}, False))"
+  by (simp add: modify_registers_def setRegister_simple)
+
+(* this variant used in fastpath rewrite proof *)
+lemma zipWithM_setRegister_simple_modify_registers:
+  "zipWithM_x setRegister rs vs
+   = (\<lambda>con. ({((), modify_registers (\<lambda>regs. foldl (\<lambda>f (r,v). f(r := v)) regs (zip rs vs)) con)},
+              False))"
+  by (simp add: modify_registers_def zipWithM_setRegister_simple)
 
 lemma dom_partial_overwrite:
   "\<forall>x. tcb_at' (idx x) s \<Longrightarrow> dom (partial_overwrite idx tsrs (ksPSpace s))
@@ -253,6 +271,8 @@ lemma map_to_ctes_partial_overwrite:
   "\<forall>x. tcb_at' (idx x) s \<Longrightarrow>
    map_to_ctes (partial_overwrite idx tsrs (ksPSpace s))
      = ctes_of s"
+  supply if_split[split del]
+  supply if_cong[cong]
   apply (rule ext)
   apply (frule dom_partial_overwrite[where tsrs=tsrs])
   apply (simp add: map_to_ctes_def partial_overwrite_def
@@ -262,8 +282,7 @@ lemma map_to_ctes_partial_overwrite:
    apply (drule_tac x=xa in spec)
    apply (clarsimp simp: obj_at'_def projectKOs objBits_simps
                    cong: if_cong)
-   apply (simp add: put_tcb_state_regs_def put_tcb_state_regs_tcb_def
-                    objBits_simps
+   apply (simp add: put_tcb_state_regs_tcb_def objBits_simps
               cong: if_cong option.case_cong)
    apply (case_tac obj, simp split: tcb_state_regs.split if_split)
   apply simp
@@ -274,15 +293,14 @@ lemma map_to_ctes_partial_overwrite:
    apply (drule_tac x=xa in spec)
    apply (clarsimp simp: obj_at'_def projectKOs objBits_simps
                    cong: if_cong)
-   apply (simp add: put_tcb_state_regs_def put_tcb_state_regs_tcb_def
-                    objBits_simps'
+   apply (simp add: put_tcb_state_regs_tcb_def objBits_simps'
               cong: if_cong option.case_cong)
    apply (case_tac obj, simp split: tcb_state_regs.split if_split)
    apply (intro impI allI)
-   apply (subgoal_tac "x - idx xa = x && mask 9")
-    apply (clarsimp simp: tcb_cte_cases_def split: if_split)
+   apply (subgoal_tac "x - idx xa = x && mask tcbBlockSizeBits")
+    apply (clarsimp simp: tcb_cte_cases_def objBits_defs split: if_split)
    apply (drule_tac t = "idx xa" in sym)
-    apply simp
+    apply (simp add: objBits_defs)
   apply (simp cong: if_cong)
   done
 
@@ -409,7 +427,7 @@ lemma modify_isolatable:
                    liftM_def bind_assoc)
   apply (clarsimp simp: monadic_rewrite_def exec_gets
                    getSchedulerAction_def)
-  apply (simp add: simpler_modify_def o_def)
+  apply (simp add: simpler_modify_def)
   apply (subst swap)
    apply (simp add: obj_at_partial_overwrite_If)
   apply (simp add: ksPSpace_update_partial_id o_def)
@@ -466,15 +484,15 @@ lemma thread_actions_isolatable_bind:
        \<And>t. \<lbrace>tcb_at' t\<rbrace> f \<lbrace>\<lambda>rv. tcb_at' t\<rbrace> \<rbrakk>
      \<Longrightarrow> thread_actions_isolatable idx (f >>= g)"
   apply (clarsimp simp: thread_actions_isolatable_def)
-  apply (rule monadic_rewrite_imp)
+  apply (rule monadic_rewrite_guard_imp)
    apply (rule monadic_rewrite_trans)
-    apply (erule monadic_rewrite_bind2, assumption)
+    apply (erule monadic_rewrite_bind_l, assumption)
     apply (rule hoare_vcg_all_lift, assumption)
    apply (subst isolate_thread_actions_wrap_bind, simp)
    apply simp
    apply (rule monadic_rewrite_in_isolate_thread_actions, assumption)
    apply (rule monadic_rewrite_transverse)
-    apply (erule monadic_rewrite_bind2, assumption)
+    apply (erule monadic_rewrite_bind_l, assumption)
     apply (rule hoare_vcg_all_lift, assumption)
    apply (simp add: bind_assoc id_def)
    apply (rule monadic_rewrite_refl)
@@ -539,7 +557,7 @@ lemma select_f_isolatable:
   apply (clarsimp simp: thread_actions_isolatable_def
                         isolate_thread_actions_def
                         split_def select_f_selects liftM_def bind_assoc)
-  apply (rule monadic_rewrite_imp, rule monadic_rewrite_transverse)
+  apply (rule monadic_rewrite_guard_imp, rule monadic_rewrite_transverse)
     apply (rule monadic_rewrite_drop_modify monadic_rewrite_bind_tail)+
        apply wp+
    apply (simp add: gets_bind_ign getSchedulerAction_def)
@@ -556,7 +574,7 @@ lemma thread_actions_isolatable_assert[simp]:
 lemma doMachineOp_isolatable:
   "thread_actions_isolatable idx (doMachineOp m)"
   apply (simp add: doMachineOp_def split_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                gets_isolatable thread_actions_isolatable_returns
                modify_isolatable select_f_isolatable)
   apply (simp | wp)+
@@ -571,12 +589,13 @@ lemma page_directory_at_partial_overwrite:
 
 lemma findPDForASID_isolatable:
   "thread_actions_isolatable idx (findPDForASID asid)"
+  supply if_split[split del]
   apply (simp add: findPDForASID_def liftE_bindE liftME_def bindE_assoc
                    case_option_If2 assertE_def liftE_def checkPDAt_def
                    stateAssert_def2
              cong: if_cong)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_bindE[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_bindE[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable getObject_isolatable)
@@ -597,9 +616,9 @@ lemma getHWASID_isolatable:
                    invalidateHWASIDEntry_def
                    storeHWASID_def
              cong: if_cong)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_bindE[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_catch[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_bindE[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_catch[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable modify_isolatable
@@ -642,7 +661,7 @@ lemma setVCPU_isolatable:
   apply (subst setObject_assert_modify;
          simp add: projectKOs objBits_simps archObjSize_def vcpuBits_def vcpu_bits_def pageBits_def)+
   apply (clarsimp simp: select_f_asserts assert_def obj_at_partial_overwrite_id2 split: if_splits)
-  apply (clarsimp simp: select_f_def simpler_modify_def bind_def o_def)
+  apply (clarsimp simp: select_f_def simpler_modify_def bind_def)
   apply (case_tac s)
   apply simp
   apply (rule ext)
@@ -655,7 +674,7 @@ lemma setVCPU_isolatable:
   apply (clarsimp simp: put_tcb_state_regs_tcb_def get_tcb_state_regs_def)
   apply (rename_tac p')
   apply (erule_tac x=p' in allE)
-  apply (clarsimp simp: obj_at'_def projectKOs atcbContextSet_def atcbContextGet_def split: tcb_state_regs.splits)
+  apply (clarsimp simp: obj_at'_def projectKOs get_tcb_state_regs_defs atcbContextSet_def atcbContextGet_def split: tcb_state_regs.splits)
   apply (rename_tac tcb)
   apply (case_tac tcb, simp)
   apply (rename_tac arch_tcb)
@@ -665,7 +684,7 @@ lemma setVCPU_isolatable:
 lemma vcpuUpdate_isolatable:
   "thread_actions_isolatable idx (vcpuUpdate p f)"
   apply (clarsimp simp: vcpuUpdate_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                getVCPU_isolatable setVCPU_isolatable
          |wp|assumption|clarsimp)+
   done
@@ -681,7 +700,7 @@ lemma vgicUpdateLR_isolatable:
 lemma vcpuWriteReg_isolatable:
   "thread_actions_isolatable idx (vcpuWriteReg v p val)"
   apply (clarsimp simp: vcpuWriteReg_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuUpdate_isolatable doMachineOp_isolatable
          | wpsimp)+
   done
@@ -689,7 +708,7 @@ lemma vcpuWriteReg_isolatable:
 lemma vcpuReadReg_isolatable:
   "thread_actions_isolatable idx (vcpuReadReg v p)"
   apply (clarsimp simp: vcpuReadReg_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuUpdate_isolatable getVCPU_isolatable thread_actions_isolatable_return
          | wpsimp)+
   done
@@ -697,7 +716,7 @@ lemma vcpuReadReg_isolatable:
 lemma vcpuSaveReg_isolatable:
   "thread_actions_isolatable idx (vcpuSaveReg p v)"
   apply (clarsimp simp: vcpuSaveReg_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuUpdate_isolatable doMachineOp_isolatable
          |wpsimp)+
   done
@@ -705,7 +724,7 @@ lemma vcpuSaveReg_isolatable:
 lemma vcpuRestoreReg_isolatable:
   "thread_actions_isolatable idx (vcpuRestoreReg p v)"
   apply (clarsimp simp: vcpuRestoreReg_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuUpdate_isolatable doMachineOp_isolatable getVCPU_isolatable
          |wpsimp)+
   done
@@ -714,14 +733,14 @@ lemma thread_actions_isolatable_mapM_x:
   "\<lbrakk> \<And>x. thread_actions_isolatable idx (f x);
      \<And>x t. f x \<lbrace>tcb_at' t\<rbrace> \<rbrakk> \<Longrightarrow> thread_actions_isolatable idx (mapM_x f xs)"
   apply (induct xs; clarsimp simp: mapM_x_Nil mapM_x_Cons thread_actions_isolatable_returns)
-  apply (rule thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]; clarsimp?)
+  apply (rule thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]; clarsimp?)
    apply assumption+
   done
 
 lemma vcpuSaveRegRange_isolatable:
   "thread_actions_isolatable idx (vcpuSaveRegRange p r rt)"
   apply (clarsimp simp: vcpuSaveRegRange_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuSaveReg_isolatable thread_actions_isolatable_mapM_x
          | wpsimp)+
   done
@@ -729,15 +748,15 @@ lemma vcpuSaveRegRange_isolatable:
 lemma vcpuRestoreRegRange_isolatable:
   "thread_actions_isolatable idx (vcpuRestoreRegRange p r rt)"
   apply (clarsimp simp: vcpuRestoreRegRange_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuRestoreReg_isolatable thread_actions_isolatable_mapM_x
          | wpsimp)+
   done
 
-lemma saveVirtTimer_isolatable:
-  "thread_actions_isolatable idx (saveVirtTimer v)"
-  apply (clarsimp simp: saveVirtTimer_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+lemma disableVirtTimer_isolatable:
+  "thread_actions_isolatable idx (disableVirtTimer vcpu_ptr_opt)"
+  apply (cases vcpu_ptr_opt; clarsimp simp: disableVirtTimer_def)
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable doMachineOp_isolatable vcpuSaveReg_isolatable
@@ -748,7 +767,7 @@ lemma saveVirtTimer_isolatable:
 lemma getIRQState_isolatable:
   "thread_actions_isolatable idx (getIRQState irq)"
   apply (clarsimp simp: getIRQState_def liftM_def getInterruptState_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                 thread_actions_isolatable_returns gets_isolatable
          | wpsimp | fastforce)+
   done
@@ -756,7 +775,7 @@ lemma getIRQState_isolatable:
 lemma restoreVirtTimer_isolatable:
   "thread_actions_isolatable idx (restoreVirtTimer v)"
   apply (clarsimp simp: restoreVirtTimer_def when_def isIRQActive_def liftM_bind)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable doMachineOp_isolatable vcpuSaveReg_isolatable
@@ -767,14 +786,15 @@ lemma restoreVirtTimer_isolatable:
 
 lemma vcpuSave_isolatable:
   "thread_actions_isolatable idx (vcpuSave v)"
+  supply if_split[split del]
   apply (clarsimp simp: vcpuSave_def armvVCPUSave_def thread_actions_isolatable_fail when_def
                   split: option.splits)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable doMachineOp_isolatable vcpuSaveReg_isolatable
                vgicUpdateLR_isolatable vgicUpdate_isolatable vcpuSaveRegRange_isolatable
-               saveVirtTimer_isolatable
+               disableVirtTimer_isolatable
                thread_actions_isolatable_mapM_x
          | wpsimp wp: mapM_x_wp|fastforce)+
   done
@@ -782,7 +802,7 @@ lemma vcpuSave_isolatable:
 lemma vcpuEnable_isolatable:
   "thread_actions_isolatable idx (vcpuEnable v)"
   apply (clarsimp simp: vcpuEnable_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                vcpuRestoreReg_isolatable doMachineOp_isolatable getVCPU_isolatable
                restoreVirtTimer_isolatable
          | wpsimp)+
@@ -791,7 +811,7 @@ lemma vcpuEnable_isolatable:
 lemma vcpuRestore_isolatable:
   "thread_actions_isolatable idx (vcpuRestore v)"
   apply (clarsimp simp: vcpuRestore_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                getVCPU_isolatable gets_isolatable doMachineOp_isolatable vcpuEnable_isolatable
                vcpuRestoreRegRange_isolatable
          | wpsimp)+
@@ -800,9 +820,9 @@ lemma vcpuRestore_isolatable:
 lemma vcpuDisable_isolatable:
   "thread_actions_isolatable idx (vcpuDisable v)"
   apply (clarsimp simp: vcpuDisable_def split: option.splits, intro conjI)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                doMachineOp_isolatable vcpuEnable_isolatable
-               vgicUpdate_isolatable vcpuSaveReg_isolatable saveVirtTimer_isolatable
+               vgicUpdate_isolatable vcpuSaveReg_isolatable disableVirtTimer_isolatable
          | wpsimp)+
   done
 
@@ -811,16 +831,16 @@ lemma vcpuSwitch_isolatable:
   supply if_cong[cong] option.case_cong[cong]
   apply (clarsimp simp: vcpuSwitch_def when_def split: option.splits)
   apply (safe intro!:
-               thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_bindE[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_catch[OF _ _ hoare_pre(1)]
+               thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_bindE[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_catch[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable)
    apply (clarsimp simp: thread_actions_isolatable_returns
                   split: option.splits
          |intro thread_actions_isolatable_if thread_actions_isolatable_returns
-                thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+                thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                 vcpuSave_isolatable vcpuRestore_isolatable
                 vcpuDisable_isolatable vcpuEnable_isolatable
                 modifyArchState_isolatable conjI doMachineOp_isolatable
@@ -834,6 +854,7 @@ lemma liftM_getObject_return_tcb:
 
 lemma threadGet_vcpu_isolatable:
   "thread_actions_isolatable idx (threadGet (atcbVCPUPtr o tcbArch) t)"
+  supply if_split[split del]
   apply (clarsimp simp: threadGet_def thread_actions_isolatable_def)
   apply (clarsimp simp: isolate_thread_actions_def)
   apply (clarsimp simp: monadic_rewrite_def)
@@ -875,14 +896,16 @@ lemma getTCB_threadGet:
 
 lemma setVMRoot_isolatable:
   "thread_actions_isolatable idx (setVMRoot t)"
+  supply if_split[split del]
   apply (simp add: setVMRoot_def getThreadVSpaceRoot_def locateSlot_conv getSlotCap_def
                    cap_case_isPageDirectoryCap if_bool_simps whenE_def liftE_def
                    checkPDNotInASIDMap_def stateAssert_def2
                    checkPDASIDMapMembership_def armv_contextSwitch_def
+                   setGlobalPD_def
              cong: if_cong)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_bindE[OF _ _ hoare_pre(1)]
-               thread_actions_isolatable_catch[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_bindE[OF _ _ hoare_weaken_pre]
+               thread_actions_isolatable_catch[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if thread_actions_isolatable_returns
                thread_actions_isolatable_fail
                gets_isolatable getCTE_isolatable getHWASID_isolatable
@@ -909,12 +932,10 @@ lemma transferCaps_simple_rewrite:
    (transferCaps mi caps ep r rBuf)
    (return (mi \<lparr> msgExtraCaps := 0, msgCapsUnwrapped := 0 \<rparr>))"
   including no_pre
+  supply empty_fail_getReceiveSlots[wp] (* FIXME *)
   apply (rule monadic_rewrite_gen_asm)
-  apply (rule monadic_rewrite_imp)
-   apply (rule monadic_rewrite_trans)
-    apply (simp add: transferCaps_simple, rule monadic_rewrite_refl)
-   apply (rule monadic_rewrite_symb_exec2, (wp empty_fail_getReceiveSlots)+)
-   apply (rule monadic_rewrite_refl)
+  apply (simp add: transferCaps_simple)
+  apply (monadic_rewrite_symb_exec_l_drop, rule monadic_rewrite_refl)
   apply simp
   done
 
@@ -928,25 +949,19 @@ lemma lookupExtraCaps_simple_rewrite:
 lemma lookupIPC_inv: "\<lbrace>P\<rbrace> lookupIPCBuffer f t \<lbrace>\<lambda>rv. P\<rbrace>"
   by wp
 
-lemmas empty_fail_user_getreg = empty_fail_asUser[OF empty_fail_getRegister]
-
-lemma user_getreg_rv:
-  "\<lbrace>obj_at' (\<lambda>tcb. P ((atcbContextGet o tcbArch) tcb r)) t\<rbrace> asUser t (getRegister r) \<lbrace>\<lambda>rv s. P rv\<rbrace>"
-  apply (simp add: asUser_def split_def)
-  apply (wp threadGet_wp)
-  apply (clarsimp simp: obj_at'_def projectKOs getRegister_def in_monad atcbContextGet_def)
-  done
+(* FIXME move *)
+lemmas empty_fail_user_getreg[intro!, wp, simp] = empty_fail_asUser[OF empty_fail_getRegister]
 
 lemma copyMRs_simple:
-  "msglen \<le> of_nat (length ARM_HYP_H.msgRegisters) \<longrightarrow>
+  "msglen \<le> of_nat (length msgRegisters) \<longrightarrow>
     copyMRs sender sbuf receiver rbuf msglen
-        = forM_x (take (unat msglen) ARM_HYP_H.msgRegisters)
+        = forM_x (take (unat msglen) msgRegisters)
              (\<lambda>r. do v \<leftarrow> asUser sender (getRegister r);
                     asUser receiver (setRegister r v) od)
            >>= (\<lambda>rv. return msglen)"
   apply (clarsimp simp: copyMRs_def mapM_discarded)
   apply (rule bind_cong[OF refl])
-  apply (simp add: length_msgRegisters n_msgRegisters_def min_def
+  apply (simp add: length_msgRegisters min_def
                    word_le_nat_alt
             split: option.split)
   apply (simp add: upto_enum_def mapM_Nil)
@@ -956,41 +971,39 @@ lemma doIPCTransfer_simple_rewrite:
   "monadic_rewrite True True
    ((\<lambda>_. msgExtraCaps (messageInfoFromWord msgInfo) = 0
                \<and> msgLength (messageInfoFromWord msgInfo)
-                      \<le> of_nat (length ARM_HYP_H.msgRegisters))
+                      \<le> of_nat (length msgRegisters))
       and obj_at' (\<lambda>tcb. tcbFault tcb = None
-               \<and> (atcbContextGet o tcbArch) tcb msgInfoRegister = msgInfo) sender)
+               \<and> (user_regs o atcbContextGet o tcbArch) tcb msgInfoRegister = msgInfo) sender)
    (doIPCTransfer sender ep badge grant rcvr)
    (do rv \<leftarrow> mapM_x (\<lambda>r. do v \<leftarrow> asUser sender (getRegister r);
                              asUser rcvr (setRegister r v)
                           od)
-               (take (unat (msgLength (messageInfoFromWord msgInfo))) ARM_HYP_H.msgRegisters);
+               (take (unat (msgLength (messageInfoFromWord msgInfo))) msgRegisters);
          y \<leftarrow> setMessageInfo rcvr ((messageInfoFromWord msgInfo) \<lparr>msgCapsUnwrapped := 0\<rparr>);
-         asUser rcvr (setRegister ARM_HYP_H.badgeRegister badge)
+         asUser rcvr (setRegister badgeRegister badge)
       od)"
   supply if_cong[cong]
   apply (rule monadic_rewrite_gen_asm)
   apply (simp add: doIPCTransfer_def bind_assoc doNormalTransfer_def
                    getMessageInfo_def
              cong: option.case_cong)
-  apply (rule monadic_rewrite_imp)
+  apply (rule monadic_rewrite_guard_imp)
    apply (rule monadic_rewrite_trans)
-    apply (rule monadic_rewrite_bind_tail)+
-      apply (rule_tac P="fault = None" in monadic_rewrite_gen_asm, simp)
+    apply (rule monadic_rewrite_bind_tail)
+      apply (monadic_rewrite_symb_exec_l_known None, simp)
       apply (rule monadic_rewrite_bind_tail)
-       apply (rule_tac x=msgInfo in monadic_rewrite_symb_exec,
-              (wp empty_fail_user_getreg user_getreg_rv)+)
-       apply (simp add: lookupExtraCaps_simple_rewrite returnOk_catch_bind)
-       apply (rule monadic_rewrite_bind)
-         apply (rule monadic_rewrite_from_simple, rule copyMRs_simple)
-        apply (rule monadic_rewrite_bind_head)
-        apply (rule transferCaps_simple_rewrite)
-       apply (wp threadGet_const)+
+       apply (monadic_rewrite_symb_exec_l_known msgInfo)
+          apply (simp add: lookupExtraCaps_simple_rewrite returnOk_catch_bind)
+          apply (rule monadic_rewrite_bind)
+            apply (rule monadic_rewrite_from_simple, rule copyMRs_simple)
+           apply (rule monadic_rewrite_bind_head)
+           apply (rule transferCaps_simple_rewrite)
+          apply (wp threadGet_const user_getreg_rv asUser_inv)+
    apply (simp add: bind_assoc)
-   apply (rule monadic_rewrite_symb_exec2[OF lookupIPC_inv empty_fail_lookupIPCBuffer]
-               monadic_rewrite_symb_exec2[OF threadGet_inv empty_fail_threadGet]
-               monadic_rewrite_symb_exec2[OF user_getreg_inv' empty_fail_user_getreg]
-               monadic_rewrite_bind_head monadic_rewrite_bind_tail
-                  | wp)+
+   apply (rule monadic_rewrite_symb_exec_l_drop[OF _ lookupIPC_inv empty_fail_lookupIPCBuffer]
+               monadic_rewrite_symb_exec_l_drop[OF _ threadGet_inv empty_fail_threadGet]
+               monadic_rewrite_symb_exec_l_drop[OF _ user_getreg_inv' empty_fail_user_getreg]
+               monadic_rewrite_bind_head monadic_rewrite_bind_tail)+
     apply (case_tac "messageInfoFromWord msgInfo")
     apply simp
     apply (rule monadic_rewrite_refl)
@@ -1002,7 +1015,7 @@ lemma doIPCTransfer_simple_rewrite:
 lemma monadic_rewrite_setSchedulerAction_noop:
   "monadic_rewrite F E (\<lambda>s. ksSchedulerAction s = act) (setSchedulerAction act) (return ())"
   unfolding setSchedulerAction_def
-  apply (rule monadic_rewrite_imp, rule monadic_rewrite_modify_noop)
+  apply (rule monadic_rewrite_guard_imp, rule monadic_rewrite_modify_noop)
   apply simp
   done
 
@@ -1016,9 +1029,10 @@ lemma rescheduleRequired_simple_rewrite:
   apply auto
   done
 
-lemma empty_fail_isRunnable:
+(* FIXME move *)
+lemma empty_fail_isRunnable[intro!, wp, simp]:
   "empty_fail (isRunnable t)"
-  by (simp add: isRunnable_def isStopped_def)
+  by (simp add: isRunnable_def isStopped_def empty_fail_cond)
 
 lemma setupCallerCap_rewrite:
   "monadic_rewrite True True (\<lambda>s. reply_masters_rvk_fb (ctes_of s))
@@ -1037,23 +1051,19 @@ lemma setupCallerCap_rewrite:
   apply (simp add: setupCallerCap_def getThreadCallerSlot_def
                    getThreadReplySlot_def locateSlot_conv
                    getSlotCap_def)
-  apply (rule monadic_rewrite_imp)
-   apply (rule monadic_rewrite_bind_tail)+
-     apply (rule monadic_rewrite_assert)+
-     apply (rule_tac P="mdbFirstBadged (cteMDBNode masterCTE)
-                        \<and> mdbRevocable (cteMDBNode masterCTE)"
-                 in monadic_rewrite_gen_asm)
-     apply simp
-     apply (rule monadic_rewrite_trans)
-      apply (rule monadic_rewrite_bind_tail)
-       apply (rule monadic_rewrite_symb_exec2, (wp | simp)+)+
-       apply (rule monadic_rewrite_refl)
-      apply wp+
-     apply (rule monadic_rewrite_symb_exec2, (wp empty_fail_getCTE)+)+
-     apply (rule monadic_rewrite_refl)
-    apply (wp getCTE_wp' | simp add: cte_wp_at_ctes_of)+
-  apply (clarsimp simp: reply_masters_rvk_fb_def)
-  apply fastforce
+  apply (rule monadic_rewrite_bind_tail)+
+    apply (rule monadic_rewrite_assert)+
+    apply (rule_tac P="mdbFirstBadged (cteMDBNode masterCTE)
+                       \<and> mdbRevocable (cteMDBNode masterCTE)"
+                in monadic_rewrite_gen_asm)
+    apply (rule monadic_rewrite_trans)
+     apply monadic_rewrite_symb_exec_l
+      apply monadic_rewrite_symb_exec_l_drop
+      apply (rule monadic_rewrite_refl)
+     apply wpsimp+
+    apply (rule monadic_rewrite_refl)
+   apply (wpsimp wp: getCTE_wp' simp: cte_wp_at_ctes_of)+
+  apply (fastforce simp: reply_masters_rvk_fb_def)
   done
 
 lemma oblivious_getObject_ksPSpace_default:
@@ -1133,7 +1143,7 @@ lemma oblivious_setVMRoot_schact:
                              checkPDASIDMapMembership_def
                              findFreeHWASID_def invalidateASID_def
                              invalidateHWASIDEntry_def storeHWASID_def
-                             checkPDNotInASIDMap_def armv_contextSwitch_def
+                             checkPDNotInASIDMap_def armv_contextSwitch_def setGlobalPD_def
                       split: if_split capability.split arch_capability.split option.split)+
 
 lemma oblivious_vcpuSwitch_schact:
@@ -1145,57 +1155,44 @@ lemma oblivious_vcpuSwitch_schact:
                          vcpuUpdate_def vgicUpdate_def vgicUpdateLR_def
                          vcpuSaveReg_def vcpuSaveRegRange_def
                          vcpuRestoreReg_def vcpuRestoreRegRange_def
-                         saveVirtTimer_def vcpuWriteReg_def restoreVirtTimer_def vcpuReadReg_def
-                         armvVCPUSave_def isIRQActive_def liftM_bind getIRQState_def
-                         getInterruptState_def
+                         disableVirtTimer_def vcpuWriteReg_def restoreVirtTimer_def
+                         vcpuReadReg_def armvVCPUSave_def isIRQActive_def
+                         liftM_bind getIRQState_def getInterruptState_def
                   split: if_split option.split)+
   done
 
 lemma oblivious_switchToThread_schact:
   "oblivious (ksSchedulerAction_update f) (ThreadDecls_H.switchToThread t)"
-  apply (simp add: Thread_H.switchToThread_def ARM_HYP_H.switchToThread_def bind_assoc
+  apply (simp add: Thread_H.switchToThread_def switchToThread_def bind_assoc
                    getCurThread_def setCurThread_def threadGet_def liftM_def
                    threadSet_def tcbSchedEnqueue_def unless_when asUser_def
                    getQueue_def setQueue_def storeWordUser_def setRegister_def
                    pointerInUserData_def isRunnable_def isStopped_def
-                   getThreadState_def tcbSchedDequeue_def bitmap_fun_defs)
+                   getThreadState_def tcbSchedDequeue_def bitmap_fun_defs
+                   tcbQueueRemove_def ksReadyQueues_asrt_def
+              cong: if_cong)
   apply (safe intro!: oblivious_bind
-         | simp_all add: oblivious_setVMRoot_schact  oblivious_vcpuSwitch_schact)+
+         | simp_all add: ready_qs_runnable_def idleThreadNotQueued_def oblivious_setVMRoot_schact
+                         oblivious_vcpuSwitch_schact)+
   done
 
-lemma empty_fail_getCurThread[iff]:
+(* FIXME move *)
+lemma empty_fail_getCurThread[intro!, wp, simp]:
   "empty_fail getCurThread" by (simp add: getCurThread_def)
+
 lemma activateThread_simple_rewrite:
   "monadic_rewrite True True (ct_in_state' ((=) Running))
        (activateThread) (return ())"
   apply (simp add: activateThread_def)
-  apply (rule monadic_rewrite_imp)
-   apply (rule monadic_rewrite_trans, rule monadic_rewrite_bind_tail)+
-       apply (rule_tac P="state = Running" in monadic_rewrite_gen_asm)
-       apply simp
+  apply wp_pre
+  apply (monadic_rewrite_symb_exec_l)
+  apply (monadic_rewrite_symb_exec_l_known Running, simp)
        apply (rule monadic_rewrite_refl)
-      apply wp
-     apply (rule monadic_rewrite_symb_exec2, (wp empty_fail_getThreadState)+)
-     apply (rule monadic_rewrite_refl)
-    apply wp
-   apply (rule monadic_rewrite_symb_exec2,
-          simp_all add: getCurThread_def)
-   apply (rule monadic_rewrite_refl)
+     apply wpsimp+
   apply (clarsimp simp: ct_in_state'_def elim!: pred_tcb'_weakenE)
   done
 
 end
-
-lemma setCTE_obj_at_prio[wp]:
-  "\<lbrace>obj_at' (\<lambda>tcb. P (tcbPriority tcb)) t\<rbrace> setCTE p v \<lbrace>\<lambda>rv. obj_at' (\<lambda>tcb. P (tcbPriority tcb)) t\<rbrace>"
-  unfolding setCTE_def
-  by (rule setObject_cte_obj_at_tcb', simp+)
-
-crunch obj_at_prio[wp]: cteInsert "obj_at' (\<lambda>tcb. P (tcbPriority tcb)) t"
-  (wp: crunch_wps)
-
-crunch ctes_of[wp]: asUser "\<lambda>s. P (ctes_of s)"
-  (wp: crunch_wps)
 
 lemma tcbSchedEnqueue_tcbPriority[wp]:
   "\<lbrace>obj_at' (\<lambda>tcb. P (tcbPriority tcb)) t\<rbrace>
@@ -1205,21 +1202,19 @@ lemma tcbSchedEnqueue_tcbPriority[wp]:
   apply (wp | simp cong: if_cong)+
   done
 
-crunch obj_at_prio[wp]: cteDeleteOne "obj_at' (\<lambda>tcb. P (tcbPriority tcb)) t"
-  (wp: crunch_wps setEndpoint_obj_at_tcb'
-       setThreadState_obj_at_unchanged setNotification_tcb setBoundNotification_obj_at_unchanged
-        simp: crunch_simps unless_def)
-
-context kernel_m begin
+crunch cteDeleteOne
+  for obj_at_prio[wp]: "obj_at' (\<lambda>tcb. P (tcbPriority tcb)) t"
+  (wp: crunch_wps setEndpoint_obj_at'_tcb setNotification_tcb
+   simp: crunch_simps unless_def setBoundNotification_def doUnbindNotification_def)
 
 lemma setThreadState_no_sch_change:
   "\<lbrace>\<lambda>s. P (ksSchedulerAction s) \<and> (runnable' st \<or> t \<noteq> ksCurThread s)\<rbrace>
       setThreadState st t
    \<lbrace>\<lambda>rv s. P (ksSchedulerAction s)\<rbrace>"
-  (is "NonDetMonad.valid ?P ?f ?Q")
+  (is "Nondet_VCG.valid ?P ?f ?Q")
   apply (simp add: setThreadState_def setSchedulerAction_def)
-  apply (wp hoare_pre_cont[where a=rescheduleRequired])
-  apply (rule_tac Q="\<lambda>_. ?P and st_tcb_at' ((=) st) t" in hoare_post_imp)
+  apply (wp hoare_pre_cont[where f=rescheduleRequired])
+  apply (rule_tac Q'="\<lambda>_. ?P and st_tcb_at' ((=) st) t" in hoare_post_imp)
    apply (clarsimp split: if_split)
    apply (clarsimp simp: obj_at'_def st_tcb_at'_def projectKOs)
   apply (wp threadSet_pred_tcb_at_state)
@@ -1243,30 +1238,30 @@ lemma bind_assoc:
      = do x \<leftarrow> m; y \<leftarrow> f x; g y od"
   by (rule bind_assoc)
 
+context begin interpretation Arch . (*FIXME: arch-split*)
+
 lemma setObject_modify_assert:
   "\<lbrakk> updateObject v = updateObject_default v \<rbrakk>
     \<Longrightarrow> setObject p v = do f \<leftarrow> gets (obj_at' (\<lambda>v'. v = v' \<or> True) p);
                          assert f; modify (ksPSpace_update (\<lambda>ps. ps(p \<mapsto> injectKO v))) od"
-  using objBits_2n[where obj=v]
   apply (simp add: setObject_def split_def updateObject_default_def
                    bind_assoc projectKO_def2 alignCheck_assert)
   apply (rule ext, simp add: exec_gets)
   apply (case_tac "obj_at' (\<lambda>v'. v = v' \<or> True) p x")
-   apply (clarsimp simp: obj_at'_def projectKOs lookupAround2_known1
-                         assert_opt_def)
+   apply (clarsimp simp: obj_at'_def lookupAround2_known1 assert_opt_def)
    apply (clarsimp simp: project_inject)
-   apply (simp only: objBits_def objBitsT_koTypeOf[symmetric] koTypeOf_injectKO)
-   apply (simp add: magnitudeCheck_assert2 simpler_modify_def)
+   apply (subst magnitudeCheck_assert2; simp?;
+          simp add: objBits_def objBitsT_koTypeOf[symmetric] koTypeOf_injectKO simpler_modify_def)
   apply (clarsimp simp: assert_opt_def assert_def magnitudeCheck_assert2
                  split: option.split if_split)
-  apply (clarsimp simp: obj_at'_def projectKOs)
+  apply (clarsimp simp: obj_at'_def)
   apply (clarsimp simp: project_inject)
-  apply (simp only: objBits_def objBitsT_koTypeOf[symmetric]
-                    koTypeOf_injectKO simp_thms)
+  apply (simp add: objBits_def objBitsT_koTypeOf[symmetric] koTypeOf_injectKO)
   done
 
 lemma setEndpoint_isolatable:
   "thread_actions_isolatable idx (setEndpoint p e)"
+  supply if_split[split del]
   apply (simp add: setEndpoint_def setObject_modify_assert
                    assert_def)
   apply (case_tac "p \<in> range idx")
@@ -1278,7 +1273,7 @@ lemma setEndpoint_isolatable:
    apply (simp add: obj_at_partial_overwrite_id2)
    apply (drule_tac x=x in spec)
    apply (clarsimp simp: obj_at'_def projectKOs select_f_asserts)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if
                thread_actions_isolatable_return
                thread_actions_isolatable_fail)
@@ -1319,14 +1314,11 @@ lemma setCTE_assert_modify:
      apply (subst updateObject_cte_tcb)
       apply (fastforce simp add: subtract_mask)
      apply (simp add: assert_opt_def alignCheck_assert bind_assoc
-                      magnitudeCheck_assert
-                      is_aligned_neg_mask2 objBits_def)
+                      magnitudeCheck_assert objBits_def)
      apply (rule ps_clear_lookupAround2, assumption+)
        apply (rule word_and_le2)
       apply (simp add: objBits_simps mask_def field_simps)
      apply (simp add: simpler_modify_def cong: option.case_cong if_cong)
-     apply (rule kernel_state.fold_congs[OF refl refl])
-     apply (clarsimp simp: projectKO_opt_tcb cong: if_cong)
     apply (clarsimp simp: lookupAround2_char1 word_and_le2)
     apply (rule ccontr, clarsimp)
     apply (erule(2) ps_clearD)
@@ -1358,12 +1350,17 @@ lemma partial_overwrite_fun_upd2:
                 else y)"
   by (simp add: fun_eq_iff partial_overwrite_def split: if_split)
 
+lemma atcbContextSetSetGet_eq[simp]:
+  "atcbContextSet (UserContext (user_regs (atcbContextGet t))) t = t"
+  by (cases t, simp add: atcbContextSet_def atcbContextGet_def)
+
 lemma setCTE_isolatable:
   "thread_actions_isolatable idx (setCTE p v)"
+  supply if_split[split del]
   apply (simp add: setCTE_assert_modify)
   apply (clarsimp simp: thread_actions_isolatable_def
                         monadic_rewrite_def fun_eq_iff
-                        liftM_def exec_gets
+                        liftM_def
                         isolate_thread_actions_def
                         bind_assoc exec_gets getSchedulerAction_def
                         bind_select_f_bind[symmetric]
@@ -1380,8 +1377,7 @@ lemma setCTE_isolatable:
     apply (rule ext)
     apply (clarsimp simp: partial_overwrite_get_tcb_state_regs
                    split: if_split)
-    apply (clarsimp simp: projectKOs get_tcb_state_regs_def
-                          put_tcb_state_regs_def put_tcb_state_regs_tcb_def
+    apply (clarsimp simp: projectKOs get_tcb_state_regs_defs put_tcb_state_regs_defs
                           partial_overwrite_def
                    split: tcb_state_regs.split)
     apply (case_tac obj, simp add: projectKO_opt_tcb)
@@ -1391,8 +1387,7 @@ lemma setCTE_isolatable:
    apply (erule notE[rotated], erule (3) tcb_ctes_clear[rotated])
   apply (simp add: select_f_returns select_f_asserts split: if_split)
   apply (intro conjI impI)
-    apply (clarsimp simp: simpler_modify_def fun_eq_iff
-                          partial_overwrite_fun_upd2 o_def
+    apply (clarsimp simp: simpler_modify_def fun_eq_iff partial_overwrite_fun_upd2
                   intro!: kernel_state.fold_congs[OF refl refl])
     apply (clarsimp simp: obj_at'_def projectKOs objBits_simps)
     apply (erule notE[rotated], rule tcb_ctes_clear[rotated 2], assumption+)
@@ -1420,15 +1415,30 @@ lemma assert_isolatable:
                 thread_actions_isolatable_returns
                 thread_actions_isolatable_fail)
 
+lemma archMDBAssertions_isolatable:
+  "thread_actions_isolatable idx (stateAssert archMDBAssertions [])"
+  unfolding stateAssert_def archMDBAssertions_def
+  apply (clarsimp simp: thread_actions_isolatable_def)
+  apply (simp add: isolate_thread_actions_def bind_assoc split_def)
+  apply (simp add: bind_select_f_bind[symmetric] select_f_returns)
+  apply (clarsimp simp: monadic_rewrite_def exec_gets getSchedulerAction_def
+                        map_to_ctes_partial_overwrite)
+  apply (simp add: select_f_asserts)
+  apply (clarsimp simp: exec_modify o_def return_def)
+  apply (simp add: ksPSpace_update_partial_id)
+  apply (simp add: return_def fail_def modify_def get_def put_def assert_def bind_def)
+  done
+
 lemma cteInsert_isolatable:
   "thread_actions_isolatable idx (cteInsert cap src dest)"
-  supply if_cong[cong]
+  supply if_split[split del] if_cong[cong]
   apply (simp add: cteInsert_def updateCap_def updateMDB_def
                    Let_def setUntypedCapAsFull_def)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                thread_actions_isolatable_if
                thread_actions_isolatable_returns assert_isolatable
-               getCTE_isolatable setCTE_isolatable)
+               getCTE_isolatable setCTE_isolatable
+               archMDBAssertions_isolatable)
   apply (wp | simp)+
   done
 
@@ -1449,8 +1459,7 @@ lemma isolate_thread_actions_threadSet_tcbState:
                 intro!: kernel_state.fold_congs[OF refl refl])
   apply (simp add: partial_overwrite_fun_upd
                    partial_overwrite_get_tcb_state_regs)
-  apply (clarsimp simp: put_tcb_state_regs_def put_tcb_state_regs_tcb_def
-                        projectKOs get_tcb_state_regs_def
+  apply (clarsimp simp: put_tcb_state_regs_defs projectKOs get_tcb_state_regs_defs
                  elim!: obj_atE')
   apply (case_tac ko)
   apply (simp add: projectKO_opt_tcb)
@@ -1465,37 +1474,24 @@ lemma thread_actions_isolatableD:
 lemma tcbSchedDequeue_rewrite:
   "monadic_rewrite True True (obj_at' (Not \<circ> tcbQueued) t) (tcbSchedDequeue t) (return ())"
   apply (simp add: tcbSchedDequeue_def)
-  apply (rule monadic_rewrite_imp)
-   apply (rule monadic_rewrite_trans)
-    apply (rule monadic_rewrite_bind_tail)
-     apply (rule_tac P="\<not> queued" in monadic_rewrite_gen_asm)
-     apply (simp add: when_def)
+  apply wp_pre
+  apply monadic_rewrite_symb_exec_l
+    apply (monadic_rewrite_symb_exec_l_known False, simp)
      apply (rule monadic_rewrite_refl)
-    apply (wp threadGet_const)
-   apply (rule monadic_rewrite_symb_exec2)
-      apply wp+
-   apply (rule monadic_rewrite_refl)
-  apply (clarsimp)
+    apply (wpsimp wp: threadGet_const)+
   done
 
+(* FIXME: improve automation here *)
 lemma switchToThread_rewrite:
   "monadic_rewrite True True
        (ct_in_state' (Not \<circ> runnable') and cur_tcb' and obj_at' (Not \<circ> tcbQueued) t)
        (switchToThread t)
        (do Arch.switchToThread t; setCurThread t od)"
   apply (simp add: switchToThread_def Thread_H.switchToThread_def)
-  apply (rule monadic_rewrite_imp)
-   apply (rule monadic_rewrite_trans)
-    apply (rule monadic_rewrite_bind_tail)
-     apply (rule monadic_rewrite_bind)
-     apply (rule tcbSchedDequeue_rewrite)
-      apply (rule monadic_rewrite_refl)
-     apply (wp Arch_switchToThread_obj_at_pre)+
-   apply (rule monadic_rewrite_bind_tail)
-    apply (rule monadic_rewrite_symb_exec)
-       apply (wp+, simp)
-    apply (rule monadic_rewrite_refl)
-   apply (wp)
+  apply (monadic_rewrite_l tcbSchedDequeue_rewrite \<open>wpsimp simp: o_def\<close>, simp)
+   (* strip LHS of getters and asserts until LHS and RHS are the same *)
+   apply (repeat_unless \<open>rule monadic_rewrite_refl\<close> monadic_rewrite_symb_exec_l)
+      apply wpsimp+
   apply (clarsimp simp: comp_def)
   done
 
@@ -1522,30 +1518,43 @@ lemma threadGet_isolatable:
 
 lemma switchToThread_isolatable:
   "thread_actions_isolatable idx (Arch.switchToThread t)"
-  apply (simp add: ARM_HYP_H.switchToThread_def getTCB_threadGet
-                   storeWordUser_def stateAssert_def2)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
-               gets_isolatable setVMRoot_isolatable
-               thread_actions_isolatable_if
+  apply (simp add: switchToThread_def getTCB_threadGet)
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
+               setVMRoot_isolatable
                doMachineOp_isolatable
                threadGet_isolatable [OF all_tcbI]
-               thread_actions_isolatable_returns
-               thread_actions_isolatable_fail
-               threadGet_vcpu_isolatable
                vcpuSwitch_isolatable)
         apply (wpsimp simp: put_tcb_state_regs_tcb_def atcbContextSet_def
                      split: tcb_state_regs.split)+
   done
 
-lemma monadic_rewrite_trans_dup:
-  "\<lbrakk> monadic_rewrite F E P f g; monadic_rewrite F E P g h \<rbrakk>
-      \<Longrightarrow> monadic_rewrite F E P f h"
-  by (auto simp add: monadic_rewrite_def)
+lemma tcbQueued_put_tcb_state_regs_tcb:
+  "tcbQueued (put_tcb_state_regs_tcb tsr tcb) = tcbQueued tcb"
+  apply (clarsimp simp: put_tcb_state_regs_tcb_def)
+  by (cases tsr; clarsimp)
 
+lemma idleThreadNotQueued_isolatable:
+  "thread_actions_isolatable idx (stateAssert idleThreadNotQueued [])"
+  apply (simp add: stateAssert_def2 stateAssert_def)
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
+               gets_isolatable
+               thread_actions_isolatable_if
+               thread_actions_isolatable_returns
+               thread_actions_isolatable_fail)
+    unfolding idleThreadNotQueued_def
+    apply (clarsimp simp: obj_at_partial_overwrite_If)
+    apply (clarsimp simp: obj_at'_def tcbQueued_put_tcb_state_regs_tcb)
+   apply wpsimp+
+  done
 
 lemma setCurThread_isolatable:
   "thread_actions_isolatable idx (setCurThread t)"
-  by (simp add: setCurThread_def modify_isolatable)
+  unfolding setCurThread_def
+  apply (rule thread_actions_isolatable_bind)
+    apply (rule idleThreadNotQueued_isolatable)
+   apply (fastforce intro: modify_isolatable)
+  apply wpsimp
+  done
 
 lemma isolate_thread_actions_tcbs_at:
   assumes f: "\<And>x. \<lbrace>tcb_at' (idx x)\<rbrace> f \<lbrace>\<lambda>rv. tcb_at' (idx x)\<rbrace>" shows
@@ -1568,7 +1577,7 @@ lemma isolate_thread_actions_rewrite_bind:
     \<Longrightarrow> monadic_rewrite False True (\<lambda>s. \<forall>x. tcb_at' (idx x) s)
                (f >>= g) (isolate_thread_actions idx
                                   (f' >>= g') (g'' o f'') (g''' o f'''))"
-  apply (rule monadic_rewrite_imp)
+  apply (rule monadic_rewrite_guard_imp)
    apply (rule monadic_rewrite_trans)
     apply (rule monadic_rewrite_bind, assumption+)
     apply (wp isolate_thread_actions_tcbs_at)
@@ -1576,7 +1585,7 @@ lemma isolate_thread_actions_rewrite_bind:
    apply (subst isolate_thread_actions_wrap_bind, assumption)
    apply (rule monadic_rewrite_in_isolate_thread_actions, assumption)
    apply (rule monadic_rewrite_transverse)
-    apply (rule monadic_rewrite_bind2)
+    apply (rule monadic_rewrite_bind_l)
       apply (erule(1) thread_actions_isolatableD)
      apply (rule thread_actions_isolatableD, assumption+)
     apply (rule hoare_vcg_all_lift, assumption)
@@ -1596,7 +1605,7 @@ lemma tcb_at_KOTCB_upd:
         = tcb_at' p s"
   apply (clarsimp simp: obj_at'_def projectKOs objBits_simps
                  split: if_split)
-  apply (simp add: ps_clear_def)
+  apply (fastforce simp add: ps_clear_def)
   done
 
 definition
@@ -1630,8 +1639,8 @@ lemma set_register_isolate:
   apply (clarsimp simp: obj_at'_def projectKOs objBits_simps
                   cong: if_cong)
   apply (case_tac obj)
-  apply (simp add: projectKO_opt_tcb put_tcb_state_regs_def
-                   put_tcb_state_regs_tcb_def get_tcb_state_regs_def
+  apply (simp add: projectKO_opt_tcb put_tcb_state_regs_defs
+                   get_tcb_state_regs_defs
              cong: if_cong)
   done
 
@@ -1643,6 +1652,7 @@ lemma copy_register_isolate:
                    asUser dest (setRegister r' (rf v)) od)
            (isolate_thread_actions idx (return ())
                  (copy_register_tsrs x y r r' rf) id)"
+  supply if_split[split del]
   apply (simp add: asUser_def split_def bind_assoc
                    getRegister_def setRegister_def
                    select_f_returns isolate_thread_actions_def
@@ -1661,15 +1671,11 @@ lemma copy_register_isolate:
   apply (clarsimp simp: obj_at'_def projectKOs objBits_simps
                   cong: if_cong)
   apply (case_tac obj, case_tac obja)
-  apply (simp add: projectKO_opt_tcb put_tcb_state_regs_def
-                   put_tcb_state_regs_tcb_def get_tcb_state_regs_def
+  apply (simp add: projectKO_opt_tcb put_tcb_state_regs_defs
+                   get_tcb_state_regs_defs atcbContextGet_def
              cong: if_cong)
   apply (auto simp: fun_eq_iff split: if_split)
   done
-
-lemmas monadic_rewrite_bind_alt
-    = monadic_rewrite_trans[OF monadic_rewrite_bind_tail monadic_rewrite_bind_head, rotated -1]
-
 
 lemma monadic_rewrite_isolate_final2:
   assumes  mr: "monadic_rewrite F E Q f g"
@@ -1684,7 +1690,7 @@ lemma monadic_rewrite_isolate_final2:
          (isolate_thread_actions idx f f' f'')
          (isolate_thread_actions idx g g' g'')"
   apply (simp add: isolate_thread_actions_def split_def)
-  apply (rule monadic_rewrite_imp)
+  apply (rule monadic_rewrite_guard_imp)
    apply (rule monadic_rewrite_bind_tail)+
       apply (rule_tac P="\<lambda> s'. Q s" in monadic_rewrite_bind)
         apply (insert mr)[1]
@@ -1692,14 +1698,14 @@ lemma monadic_rewrite_isolate_final2:
         apply auto[1]
        apply (rule_tac P="P and (\<lambda>s. tcbs = get_tcb_state_regs o ksPSpace s o idx
                                              \<and> sa = ksSchedulerAction s)"
-                    in monadic_rewrite_refl3)
+                    in monadic_rewrite_pre_imp_eq)
        apply (clarsimp simp: exec_modify eqs return_def)
       apply wp+
   apply (clarsimp simp: o_def eqs)
   done
 
 lemmas monadic_rewrite_isolate_final
-    = monadic_rewrite_isolate_final2[where R=\<top>, OF monadic_rewrite_refl2, simplified]
+    = monadic_rewrite_isolate_final2[where R=\<top>, OF monadic_rewrite_is_refl, simplified]
 
 lemma copy_registers_isolate_general:
   "\<lbrakk> inj idx; idx x = t; idx y = t' \<rbrakk> \<Longrightarrow>
@@ -1719,7 +1725,7 @@ lemma copy_registers_isolate_general:
                          select_f_returns o_def ksPSpace_update_partial_id)
    apply (simp add: return_def simpler_modify_def)
   apply (simp add: mapM_x_Cons)
-  apply (rule monadic_rewrite_imp)
+  apply (rule monadic_rewrite_guard_imp)
    apply (rule monadic_rewrite_trans)
     apply (rule isolate_thread_actions_rewrite_bind, assumption)
         apply (rule copy_register_isolate, assumption+)
@@ -1746,7 +1752,7 @@ lemma updateMDB_isolatable:
   "thread_actions_isolatable idx (updateMDB slot f)"
   apply (simp add: updateMDB_def thread_actions_isolatable_return
             split: if_split)
-  apply (intro impI thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro impI thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                getCTE_isolatable setCTE_isolatable,
            (wp | simp)+)
   done
@@ -1768,7 +1774,7 @@ lemma emptySlot_isolatable:
   "thread_actions_isolatable idx (emptySlot slot NullCap)"
   apply (simp add: emptySlot_def updateCap_def case_Null_If Retype_H.postCapDeletion_def
              cong: if_cong)
-  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_pre(1)]
+  apply (intro thread_actions_isolatable_bind[OF _ _ hoare_weaken_pre]
                clearUntypedFreeIndex_isolatable
                thread_actions_isolatable_if
                getCTE_isolatable setCTE_isolatable
@@ -1785,13 +1791,14 @@ lemmas fastpath_isolatables
       thread_actions_isolatable_returns
 
 lemmas fastpath_isolate_rewrites
-    = isolate_thread_actions_threadSet_tcbState isolate_thread_actions_asUser
+    = isolate_thread_actions_threadSet_tcbState
+      isolate_thread_actions_asUser
       copy_registers_isolate setSchedulerAction_isolate
       fastpath_isolatables[THEN thread_actions_isolatableD]
 
 lemma lookupIPCBuffer_isolatable:
   "thread_actions_isolatable idx (lookupIPCBuffer w t)"
-  supply if_cong[cong]
+  supply if_split[split del] if_cong[cong]
   apply (simp add: lookupIPCBuffer_def)
   apply (rule thread_actions_isolatable_bind)
   apply (clarsimp simp: put_tcb_state_regs_tcb_def threadGet_isolatable
@@ -1811,27 +1818,18 @@ lemma setThreadState_rewrite_simple:
      (\<lambda>s. (runnable' st \<or> ksSchedulerAction s \<noteq> ResumeCurrentThread \<or> t \<noteq> ksCurThread s) \<and> tcb_at' t s)
      (setThreadState st t)
      (threadSet (tcbState_update (\<lambda>_. st)) t)"
-  apply (simp add: setThreadState_def)
-  apply (rule monadic_rewrite_imp)
-   apply (rule monadic_rewrite_trans)
-    apply (rule monadic_rewrite_bind_tail)
-     apply (rule monadic_rewrite_trans)
-      apply (rule monadic_rewrite_bind_tail)+
-         apply (simp add: when_def)
-         apply (rule monadic_rewrite_gen_asm)
-         apply (subst if_not_P)
-          apply assumption
-         apply (rule monadic_rewrite_refl)
-        apply wp+
-     apply (rule monadic_rewrite_symb_exec2,
-            (wp  empty_fail_isRunnable
-               | (simp only: getCurThread_def getSchedulerAction_def
-                      , rule empty_fail_gets))+)+
-     apply (rule monadic_rewrite_refl)
-    apply (simp add: conj_comms, wp hoare_vcg_imp_lift threadSet_tcbState_st_tcb_at')
-     apply (clarsimp simp: obj_at'_def sch_act_simple_def st_tcb_at'_def)
+  supply if_split[split del]
+  apply (simp add: setThreadState_def when_def)
+  apply (monadic_rewrite_l monadic_rewrite_if_l_False
+           \<open>wpsimp wp: hoare_vcg_disj_lift hoare_vcg_imp_lift' threadSet_tcbState_st_tcb_at'\<close>)
+   (* take the threadSet, drop everything until return () *)
+   apply (rule monadic_rewrite_trans[OF monadic_rewrite_bind_tail])
+     apply (rule monadic_rewrite_symb_exec_l_drop)+
+           apply (rule monadic_rewrite_refl)
+          apply (wpsimp simp: getCurThread_def
+                        wp: hoare_vcg_disj_lift hoare_vcg_imp_lift' threadSet_tcbState_st_tcb_at')+
    apply (rule monadic_rewrite_refl)
-  apply clarsimp
+  apply (clarsimp simp: obj_at'_def sch_act_simple_def st_tcb_at'_def)
   done
 
 end

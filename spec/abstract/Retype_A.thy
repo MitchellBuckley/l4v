@@ -18,15 +18,11 @@ imports
   ArchRetype_A
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   arch_default_cap
   default_arch_object
   init_arch_objects
-
-end
-
+  arch_post_reset_untyped
 
 section "Creating Caps"
 
@@ -67,11 +63,11 @@ definition
 
 text \<open>The initial state objects of various types are in when created.\<close>
 definition
-  default_object :: "apiobject_type \<Rightarrow> bool \<Rightarrow> nat \<Rightarrow> kernel_object" where
-  "default_object api dev n \<equiv> case api of
+  default_object :: "apiobject_type \<Rightarrow> bool \<Rightarrow> nat \<Rightarrow> domain \<Rightarrow> kernel_object" where
+  "default_object api dev n d \<equiv> case api of
            Untyped \<Rightarrow> undefined
          | CapTableObject \<Rightarrow> CNode n (empty_cnode n)
-         | TCBObject \<Rightarrow> TCB default_tcb
+         | TCBObject \<Rightarrow> TCB (default_tcb d)
          | EndpointObject \<Rightarrow> Endpoint default_ep
          | NotificationObject \<Rightarrow> Notification default_notification
          | ArchObject aobj \<Rightarrow> ArchObj (default_arch_object aobj dev n)"
@@ -83,7 +79,7 @@ definition
   "obj_bits_api type obj_size_bits \<equiv> case type of
            Untyped \<Rightarrow> obj_size_bits
          | CapTableObject \<Rightarrow> obj_size_bits + slot_bits
-         | TCBObject \<Rightarrow> obj_bits (TCB default_tcb)
+         | TCBObject \<Rightarrow> obj_bits (TCB (default_tcb default_domain))
          | EndpointObject \<Rightarrow> obj_bits (Endpoint undefined)
          | NotificationObject \<Rightarrow> obj_bits (Notification undefined)
          | ArchObject aobj \<Rightarrow> obj_bits $ ArchObj $ default_arch_object aobj False obj_size_bits"
@@ -104,8 +100,8 @@ where
     ptrs \<leftarrow> return $ map (\<lambda>p. ptr_add ptr (p * obj_size)) [0..< numObjects];
     when (type \<noteq> Untyped) (do
       kh \<leftarrow> gets kheap;
-      kh' \<leftarrow> return $ foldr (\<lambda>p kh. kh(p \<mapsto> default_object type dev o_bits)) ptrs kh;
-      do_extended_op (retype_region_ext ptrs type);
+      cd \<leftarrow> gets cur_domain;
+      kh' \<leftarrow> return $ foldr (\<lambda>p kh. kh(p \<mapsto> default_object type dev o_bits cd)) ptrs kh;
       modify $ kheap_update (K kh')
     od);
     return $ ptrs
@@ -118,7 +114,7 @@ abbreviation (input) "extended_state_update \<equiv> trans_state"
 text \<open>Remove objects from a region of the heap.\<close>
 definition
   detype :: "(obj_ref set) \<Rightarrow> 'z::state_ext state \<Rightarrow> 'z::state_ext state" where
- "detype S s \<equiv> s \<lparr> kheap := (\<lambda>x. if x \<in> S then None else kheap s x), extended_state := detype_ext S (exst s)\<rparr>"
+ "detype S s \<equiv> s \<lparr> kheap := (\<lambda>x. if x \<in> S then None else kheap s x)\<rparr>"
 
 text \<open>Delete objects within a specified region.\<close>
 definition
@@ -127,11 +123,6 @@ definition
      do_machine_op (freeMemory ptr bits);
      modify (detype {ptr..ptr + 2 ^ bits - 1})
   od"
-
-(* FIXME: we need a sensible place for these configurable constants. *)
-definition
-  reset_chunk_bits :: nat where
-  "reset_chunk_bits = 8"
 
 definition
   get_free_ref :: "obj_ref \<Rightarrow> nat \<Rightarrow> obj_ref" where
@@ -149,34 +140,34 @@ text \<open>Untyped capabilities note a currently free region. Sometimes this
 region is reset during a Retype operation. This progressively clears the
 underlying memory and also the object level representation, moving the free
 region pointer back to the start of the newly cleared region each time.\<close>
-definition
-  reset_untyped_cap :: "cslot_ptr \<Rightarrow> (unit,'z::state_ext) p_monad"
-where
+definition reset_untyped_cap :: "cslot_ptr \<Rightarrow> (unit,'z::state_ext) p_monad" where
   "reset_untyped_cap src_slot = doE
-  cap \<leftarrow> liftE $ get_cap src_slot;
-  sz \<leftarrow> returnOk $ bits_of cap;
-  base \<leftarrow> returnOk $ obj_ref_of cap;
-  if free_index_of cap = 0
-    then returnOk ()
-  else doE
-    liftE $ delete_objects base sz;
-  dev \<leftarrow> returnOk $ is_device_untyped_cap cap;
+     cap \<leftarrow> liftE $ get_cap src_slot;
+     sz \<leftarrow> returnOk $ bits_of cap;
+     base \<leftarrow> returnOk $ obj_ref_of cap;
+     if free_index_of cap = 0
+     then returnOk ()
+     else doE
+       liftE $ delete_objects base sz;
+       dev \<leftarrow> returnOk $ is_device_untyped_cap cap;
 
-  if dev \<or> sz < reset_chunk_bits
-      then liftE $ do
-        unless dev $ do_machine_op $ clearMemory base (2 ^ sz);
-        set_cap (UntypedCap dev base sz 0) src_slot
-      od
-    else mapME_x (\<lambda>i. doE
-          liftE $ do_machine_op $ clearMemory (base + (of_nat i << reset_chunk_bits))
-              (2 ^ reset_chunk_bits);
-          liftE $ set_cap (UntypedCap dev base sz
-              (i * 2 ^ reset_chunk_bits)) src_slot;
-          preemption_point
-        odE) (rev [i \<leftarrow> [0 ..< 2 ^ (sz - reset_chunk_bits)].
-            i * 2 ^ reset_chunk_bits < free_index_of cap])
-    odE
-  odE"
+       if dev \<or> sz < resetChunkBits
+       then liftE $ do
+         unless dev $ do_machine_op $ clearMemory base (2 ^ sz);
+         set_cap (UntypedCap dev base sz 0) src_slot
+       od
+       else
+         mapME_x (\<lambda>i. doE
+           liftE $ do_machine_op $
+                clearMemory (base + (of_nat i << resetChunkBits)) (2 ^ resetChunkBits);
+           liftE $ set_cap (UntypedCap dev base sz (i * 2 ^ resetChunkBits)) src_slot;
+              preemption_point
+         odE)
+         (rev [i \<leftarrow> [0 ..< 2 ^ (sz - resetChunkBits)].
+            i * 2 ^ resetChunkBits < free_index_of cap]);
+       liftE $ arch_post_reset_untyped dev sz
+     odE
+   odE"
 
 text \<open>Untyped capabilities confer authority to the Retype method. This
 clears existing objects from a region, creates new objects of the requested type,
@@ -199,7 +190,7 @@ doE
 
   \<comment> \<open>Create new objects.\<close>
   orefs \<leftarrow> retype_region retype_base (length slots) obj_sz new_type is_device;
-  init_arch_objects new_type retype_base (length slots) obj_sz orefs;
+  init_arch_objects new_type is_device retype_base (length slots) obj_sz orefs;
   sequence_x (map (create_cap new_type obj_sz src_slot is_device) (zip slots orefs))
 od odE"
 

@@ -11,13 +11,6 @@ begin
 
 context kernel begin
 
-lemma koTypeOf_injectKO:
-  fixes v :: "'a :: pspace_storable" shows
-  "koTypeOf (injectKO v) = koType TYPE('a)"
-  apply (cut_tac v1=v in iffD2 [OF project_inject, OF refl])
-  apply (simp add: project_koType[symmetric])
-  done
-
 lemma setObject_obj_at_pre:
   "\<lbrakk> updateObject ko = updateObject_default ko;
        (1 :: machine_word) < 2 ^ objBits ko \<rbrakk>
@@ -50,7 +43,7 @@ lemma setObject_ccorres_helper:
   fixes ko :: "'a :: pspace_storable"
   assumes valid: "\<And>\<sigma> (ko' :: 'a).
         \<Gamma> \<turnstile> {s. (\<sigma>, s) \<in> rf_sr \<and> P \<sigma> \<and> s \<in> P' \<and> ko_at' ko' p \<sigma>}
-              c {s. (\<sigma>\<lparr>ksPSpace := ksPSpace \<sigma> (p \<mapsto> injectKO ko)\<rparr>, s) \<in> rf_sr}"
+              c {s. (\<sigma>\<lparr>ksPSpace := (ksPSpace \<sigma>)(p \<mapsto> injectKO ko)\<rparr>, s) \<in> rf_sr}"
   shows "\<lbrakk> \<And>ko :: 'a. updateObject ko = updateObject_default ko;
            \<And>ko :: 'a. (1 :: machine_word) < 2 ^ objBits ko \<rbrakk>
     \<Longrightarrow> ccorres dc xfdc P P' hs (setObject p ko) c"

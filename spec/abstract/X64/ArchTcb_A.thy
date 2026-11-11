@@ -11,10 +11,10 @@ Arch-specific functions for the abstract model of CSpace.
 chapter "Architecture-specific TCB functions"
 
 theory ArchTcb_A
-imports KHeap_A
+imports FPU_A
 begin
 
-context Arch begin global_naming X64_A
+context Arch begin arch_global_naming (A)
 
 definition
   sanitise_or_flags :: machine_word
@@ -45,6 +45,23 @@ definition
   arch_post_modify_registers :: "obj_ref \<Rightarrow> obj_ref \<Rightarrow> (unit, 'a::state_ext) s_monad"
 where
   "arch_post_modify_registers cur t \<equiv> when (t \<noteq> cur) $ as_user t $ setRegister ErrorRegister 0"
+
+\<comment> \<open>The corresponding C code is not arch dependent and so is inline as part of invokeSetFlags\<close>
+definition arch_post_set_flags :: "obj_ref \<Rightarrow> tcb_flags \<Rightarrow> (unit, 'a::state_ext) s_monad" where
+  "arch_post_set_flags t flags \<equiv> do
+     cur \<leftarrow> gets cur_thread;
+     if FpuDisabled \<in> flags
+     then fpu_release t
+     else when (t = cur) (lazy_fpu_restore t)
+   od"
+
+(* As opposed to hyp-enabled architectures, we can keep this here as it does not cause circular
+   function dependency. *)
+definition arch_prepare_set_domain :: "obj_ref \<Rightarrow> domain \<Rightarrow> (unit, 'a::state_ext) s_monad" where
+  "arch_prepare_set_domain t new_dom \<equiv> do
+     cur_domain \<leftarrow> gets cur_domain;
+     when (cur_domain \<noteq> new_dom) $ fpu_release t
+   od"
 
 end
 end

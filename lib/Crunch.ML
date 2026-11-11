@@ -10,9 +10,8 @@ structure CrunchTheoryData = Theory_Data
        ((Token.src list -> string -> string
          -> (string * ((Facts.ref * Token.src list), xstring) sum) list
          -> string list -> local_theory -> local_theory)
-        * (string list -> string list -> theory -> theory)) Symtab.table
+        * (string list -> string list -> local_theory -> local_theory)) Symtab.table
      val empty = Symtab.empty
-     val extend = I
      val merge = Symtab.merge (fn _ => true);
    end);
 
@@ -43,30 +42,10 @@ fun read_sections sections =
     Scan.repeat (Scan.first (map (read_section sections) sections)) >> List.concat
 
 val crunch_parser =
-    (((Scan.optional (P.$$$ "(" |-- P.name --| P.$$$ ")") "" -- P.name
-     -- Parse.opt_attribs --| P.$$$ ":") -- P.list1 P.const -- Scan.optional P.term ""
-     -- Scan.optional
-       (P.$$$ "(" |-- read_sections [wp_sect,wp_del_sect,wps_sect,ignore_sect,simp_sect,
-                                     simp_del_sect,rule_sect,rule_del_sect,ignore_del_sect]
-        --| P.$$$ ")")
-       []
-    )
-    >> (fn (((((crunch_instance, prp_name), att_srcs), consts), extra), wpigs) =>
-           (fn lthy =>
-             (case get_crunch_instance crunch_instance (Proof_Context.theory_of lthy) of
-                 NONE => error ("Crunch has not been defined for " ^ crunch_instance)
-               | SOME (crunch_x, _) =>
-                   crunch_x att_srcs extra prp_name wpigs consts lthy))));
-
-val crunches_parser =
     (((P.list1 P.const --| P.$$$ "for")
      -- P.and_list1 ((Scan.optional (P.$$$ "(" |-- P.name --| P.$$$ ")") "" -- P.name
          -- Parse.opt_attribs) -- Scan.optional (P.$$$ ":" |-- P.term) "")
-     -- Scan.optional
-       (P.$$$ "(" |-- read_sections [wp_sect,wp_del_sect,wps_sect,ignore_sect,simp_sect,
-                                     simp_del_sect,rule_sect,rule_del_sect,ignore_del_sect]
-        --| P.$$$ ")")
-       []
+     -- Scan.optional (P.$$$ "(" |-- read_sections crunch_sections --| P.$$$ ")") []
     )
     >> (fn ((consts, confs), wpigs) =>
            fold (fn (((crunch_instance, prp_name), att_srcs), extra) => fn lthy =>
@@ -76,9 +55,7 @@ val crunches_parser =
                    crunch_x att_srcs extra prp_name wpigs consts lthy)) confs));
 
 (*
- example: crunch(kind) inv[wp]: f,g  P  (wp: h_P simp: .. ignore: ..)
-
- or: crunches f,g for (kind)inv: P and (kind2)inv2: Q (wp: etc)
+ example: crunch f,g for (kind) inv: P and (kind2) inv2: Q (wp: h_P simp: .. ignore: ..)
 
  where: crunch = command keyword
         kind   = instance of crunch, e.g. valid, no_fail
@@ -90,7 +67,7 @@ val crunches_parser =
         simp: ..   = simp lemmas to use
         ignore: .. = constants to ignore for unfolding
 
- will prove lemmas for f and for any constituents required.
+ will prove lemmas for f and g and for any constituents required.
  for the default crunch instance "valid", lemmas of the form
     "{P and X} f {%_. P}" will be proven.
  the additional preconditions X are propagated upwards from similar
@@ -102,14 +79,8 @@ val crunches_parser =
 val crunchP =
     Outer_Syntax.local_theory
         @{command_keyword "crunch"}
-        "crunch through monadic definitions with a given property"
-        crunch_parser
-
-val crunchesP =
-    Outer_Syntax.local_theory
-        @{command_keyword "crunches"}
         "crunch through monadic definitions with multiple properties"
-        crunches_parser
+        crunch_parser
 
 val add_sect = ("add", Parse.const >> Constant);
 val del_sect = ("del", Parse.const >> Constant);
@@ -118,21 +89,23 @@ val crunch_ignoreP =
     Outer_Syntax.local_theory
          @{command_keyword "crunch_ignore"}
         "add to and delete from list of things that crunch should ignore in finding prerequisites"
-        ((Scan.optional (P.$$$ "(" |-- P.name --| P.$$$ ")") "" -- Scan.optional
+        ((Scan.optional (P.$$$ "(" |-- P.list1 P.name --| P.$$$ ")") [""] -- Scan.optional
           (P.$$$ "(" |-- read_sections [add_sect, del_sect] --| P.$$$ ")")
-          []
-        )
-        >> (fn (crunch_instance, wpigs) => fn lthy =>
+          [])
+         >> (fn (crunch_instances, wpigs) => fn lthy =>
                let fun const_name const = dest_Const (read_const lthy const) |> #1;
                    val add = wpigs |> filter (fn (s,_) => s = #1 add_sect) |> map #2 |> constants
                                    |> map const_name;
                    val del = wpigs |> filter (fn (s,_) => s = #1 del_sect) |> map #2 |> constants
                                    |> map const_name;
-                   val crunch_ignore_add_del = (case get_crunch_instance crunch_instance (Proof_Context.theory_of lthy) of
-                     NONE => error ("Crunch has not been defined for " ^ crunch_instance)
-                   | SOME x => snd x);
+                   fun crunch_ignore_add_del inst =
+                     (case get_crunch_instance inst (Proof_Context.theory_of lthy) of
+                        NONE => error ("Crunch has not been defined for " ^ inst)
+                      | SOME x => snd x);
+                   val crunch_ignore_add_dels =
+                     map (fn inst => crunch_ignore_add_del inst add del) crunch_instances
                in
-                  Local_Theory.raw_theory (crunch_ignore_add_del add del) lthy
+                  fold (curry (op #>)) crunch_ignore_add_dels I lthy
                end));
 
 end;

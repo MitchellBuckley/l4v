@@ -31,14 +31,7 @@ lemma ps_clear_is_aligned_ksPSpace_None:
                     power_overflow)
   by assumption
 
-lemma ps_clear_is_aligned_ctes_None:
-  assumes "ps_clear p tcbBlockSizeBits s"
-      and "is_aligned p tcbBlockSizeBits"
-  shows "ksPSpace s (p + 2*2^cteSizeBits) = None"
-    and "ksPSpace s (p + 3*2^cteSizeBits) = None"
-    and "ksPSpace s (p + 4*2^cteSizeBits) = None"
-  by (auto intro: assms ps_clear_is_aligned_ksPSpace_None
-            simp: objBits_defs mask_def)+
+context Arch begin arch_global_naming
 
 lemma word_shift_by_3:
   "x * 8 = (x::'a::len word) << 3"
@@ -73,9 +66,17 @@ where
 (* FIXME: move to GenericLib *)
 lemmas unat64_eq_of_nat = unat_eq_of_nat[where 'a=64, folded word_bits_def]
 
-context begin interpretation Arch .
+lemma ps_clear_is_aligned_ctes_None:
+  assumes "ps_clear p tcbBlockSizeBits s"
+      and "is_aligned p tcbBlockSizeBits"
+  shows "ksPSpace s (p + 2*2^cteSizeBits) = None"
+    and "ksPSpace s (p + 3*2^cteSizeBits) = None"
+    and "ksPSpace s (p + 4*2^cteSizeBits) = None"
+  by (auto intro: assms ps_clear_is_aligned_ksPSpace_None
+            simp: objBits_defs mask_def)+
 
-crunch inv'[wp]: archThreadGet P
+crunch archThreadGet
+  for inv'[wp]: P
 
 (* FIXME MOVE near thm tg_sp' *)
 lemma atg_sp':
@@ -93,17 +94,12 @@ lemma atg_sp':
 (* FIXME: MOVE to EmptyFail *)
 lemma empty_fail_archThreadGet [intro!, wp, simp]:
   "empty_fail (archThreadGet f p)"
-  by (simp add: archThreadGet_def getObject_def split_def)
+  by (fastforce simp: archThreadGet_def getObject_def split_def)
 
 (* FIXME: move to ainvs? *)
 lemma sign_extend_canonical_address:
   "(x = sign_extend 38 x) = canonical_address x"
   by (fastforce simp: sign_extended_iff_sign_extend canonical_address_sign_extended canonical_bit_def)
-
-lemma ptr_range_mask_range:
-  "{ptr..ptr + 2 ^ bits - 1} = mask_range ptr bits"
-  unfolding mask_def
-  by simp
 
 lemma valid_untyped':
   notes usableUntypedRange.simps[simp del]
@@ -138,7 +134,6 @@ lemma valid_untyped':
    apply (case_tac "obj_range' ptr' ko \<inter> mask_range ptr bits \<noteq> {}", simp)
    apply (cut_tac is_aligned_no_overflow[OF al])
    apply (clarsimp simp add: obj_range'_def mask_def add_diff_eq)
-   subgoal by auto
   apply (clarsimp simp add: usableUntypedRange.simps Int_commute)
   apply (case_tac "obj_range' ptr' ko \<inter> mask_range ptr bits \<noteq> {}", simp+)
   apply (cut_tac is_aligned_no_overflow[OF al])
@@ -156,18 +151,12 @@ lemma more_pageBits_inner_beauty:
   apply clarsimp
   apply (simp add: word_shift_by_3)
   apply (subst (asm) word_plus_and_or_coroll)
-   apply (clarsimp simp: word_size word_ops_nth_size nth_ucast
-                         nth_shiftl bang_eq)
-   apply (drule test_bit_size)
-   apply (clarsimp simp: word_size pageBits_def)
-   apply arith
+   apply (word_eqI_solve dest: test_bit_size simp: pageBits_def)
   apply (insert x)
   apply (erule notE)
-  apply (rule word_eqI)
-  apply (clarsimp simp: word_size nth_ucast nth_shiftl nth_shiftr bang_eq)
-  apply (erule_tac x="n+3" in allE)
-  apply (clarsimp simp: word_ops_nth_size word_size)
-  apply (clarsimp simp: pageBits_def)
+  apply word_eqI
+  apply (erule_tac x="3+n" in allE)
+  apply (clarsimp simp: word_size pageBits_def)
   done
 
 (* FIXME x64: figure out where these are needed and adjust appropriately *)
@@ -302,21 +291,17 @@ lemma asUser_getRegister_discarded:
                         return_def fail_def stateAssert_def)
   done
 
-crunch pspace_canonical'[wp]: setThreadState pspace_canonical'
+crunch setThreadState
+  for pspace_canonical'[wp]: pspace_canonical'
+  (cong: if_cong)
 
 lemma obj_at_kernel_mappings':
   "\<lbrakk>pspace_in_kernel_mappings' s; obj_at' P p s\<rbrakk>
    \<Longrightarrow> p \<in> kernel_mappings"
   by (clarsimp simp: pspace_in_kernel_mappings'_def obj_at'_def dom_def)
 
-crunches Arch.switchToThread
-  for valid_queues'[wp]: valid_queues'
-  (simp: crunch_simps wp: hoare_drop_imps)
-crunches switchToIdleThread
+crunch switchToIdleThread
   for ksCurDomain[wp]: "\<lambda>s. P (ksCurDomain s)"
-crunches switchToIdleThread, switchToThread
-  for valid_pspace'[wp]: valid_pspace'
-  (simp: whenE_def crunch_simps wp: hoare_drop_imps)
 
 lemma getMessageInfo_less_4:
   "\<lbrace>\<top>\<rbrace> getMessageInfo t \<lbrace>\<lambda>rv s. msgExtraCaps rv < 4\<rbrace>"
@@ -352,19 +337,67 @@ lemma asid_shiftr_low_bits_less[simplified]:
   apply simp
   done
 
-lemma getActiveIRQ_neq_Some0x3FF':
-  "\<lbrace>\<top>\<rbrace> getActiveIRQ in_kernel \<lbrace>\<lambda>rv s. rv \<noteq> Some 0x3FF\<rbrace>"
-  apply (simp add: getActiveIRQ_def)
-  apply (wp alternative_wp select_wp)
-  apply simp
+(* We don't have access to n_msgRegisters from C here, but the number of msg registers in C should
+   be equivalent to what we have in the abstract/design specs. We want a number for this definition
+   that automatically updates if the number of registers changes, and we sanity check it later
+   in msgRegisters_size_sanity *)
+definition size_msgRegisters :: nat where
+  size_msgRegisters_pre_def: "size_msgRegisters \<equiv> size (RISCV64.msgRegisters)"
+
+schematic_goal size_msgRegisters_def:
+  "size_msgRegisters = numeral ?x"
+  unfolding size_msgRegisters_pre_def RISCV64.msgRegisters_def
+  by (simp add: upto_enum_red fromEnum_def enum_register del: Suc_eq_numeral)
+     (simp only: Suc_eq_plus1_left, simp del: One_nat_def)
+
+lemma length_msgRegisters[simplified size_msgRegisters_def]:
+  "length RISCV64_H.msgRegisters = size_msgRegisters"
+  by (simp add: size_msgRegisters_pre_def RISCV64_H.msgRegisters_def)
+
+lemma empty_fail_loadWordUser[intro!, simp]:
+  "empty_fail (loadWordUser x)"
+  by (fastforce simp: loadWordUser_def ef_loadWord ef_dmo')
+
+lemma empty_fail_getMRs[iff]:
+  "empty_fail (getMRs t buf mi)"
+  by (auto simp add: getMRs_def split: option.split)
+
+lemma empty_fail_getReceiveSlots:
+  "empty_fail (getReceiveSlots r rbuf)"
+proof -
+  note
+    empty_fail_resolveAddressBits[wp]
+    empty_fail_rethrowFailure[wp]
+    empty_fail_rethrowFailure[wp]
+  show ?thesis
+  unfolding getReceiveSlots_def loadCapTransfer_def lookupCap_def lookupCapAndSlot_def
+  by (wpsimp simp: emptyOnFailure_def unifyFailure_def lookupSlotForThread_def
+                   capTransferFromWords_def getThreadCSpaceRoot_def locateSlot_conv bindE_assoc
+                   lookupSlotForCNodeOp_def lookupErrorOnFailure_def rangeCheck_def)
+qed
+
+lemma user_getreg_rv:
+  "\<lbrace>obj_at' (\<lambda>tcb. P ((user_regs o atcbContextGet o tcbArch) tcb r)) t\<rbrace>
+   asUser t (getRegister r)
+   \<lbrace>\<lambda>rv s. P rv\<rbrace>"
+  apply (simp add: asUser_def split_def)
+  apply (wp threadGet_wp)
+  apply (clarsimp simp: obj_at'_def getRegister_def in_monad atcbContextGet_def)
   done
 
-lemma getActiveIRQ_neq_Some0x3FF:
-  "\<lbrace>\<top>\<rbrace> doMachineOp (getActiveIRQ in_kernel) \<lbrace>\<lambda>rv s. rv \<noteq> Some 0x3FF\<rbrace>"
-  apply (wpsimp simp: doMachineOp_def split_def)
-  apply (auto dest: use_valid intro: getActiveIRQ_neq_Some0x3FF')
-  done
+crunch insertNewCap, Arch_createNewCaps, threadSet, Arch.createObject, setThreadState,
+         updateFreeIndex, preemptionPoint
+  for gsCNodes[wp]: "\<lambda>s. P (gsCNodes s)"
+  (wp: crunch_wps setObject_ksPSpace_only
+   simp: unless_def updateObject_default_def crunch_simps
+   ignore_del: preemptionPoint)
 
 end
+
+(* these will need to be requalified when moved *)
+arch_requalify_facts
+  empty_fail_loadWordUser
+
+lemmas [intro!, simp] = empty_fail_loadWordUser
 
 end

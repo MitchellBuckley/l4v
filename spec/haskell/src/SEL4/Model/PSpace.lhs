@@ -6,6 +6,14 @@
 
 This module contains the data structure and operations for the physical memory model.
 
+\begin{impdetails}
+
+This module uses the C preprocessor to select a target architecture.
+
+> {-# LANGUAGE CPP #-}
+
+\end{impdetails}
+
 > module SEL4.Model.PSpace (
 >         PSpace, newPSpace, initPSpace,
 >         PSpaceStorable,
@@ -21,6 +29,8 @@ This module contains the data structure and operations for the physical memory m
 % {-# BOOT-EXPORTS: PSpace #PRegion newPSpace #-}
 
 > import Prelude hiding (Word)
+> import qualified SEL4.Model.PSpace.TARGET as Arch
+
 > import SEL4.Model.StateData
 > import SEL4.Object.Structures
 
@@ -71,7 +81,7 @@ The "loadObject" and "updateObject" functions are used to insert or extract an o
 The default definitions are sufficient for most kernel objects. There is one exception in the platform-independent code, for "CTE" objects; it can be found in \autoref{sec:object.instances}.
 \end{impdetails}
 
->     loadObject :: (Monad m) => Word -> Word -> Maybe Word ->
+>     loadObject :: (MonadFail m) => Word -> Word -> Maybe Word ->
 >                                 KernelObject -> m a
 >     loadObject ptr ptr' next obj = do
 >         unless (ptr == ptr') $ fail $ "no object at address given in pspace,target=" ++ (show ptr) ++",lookup=" ++ (show ptr')
@@ -80,7 +90,7 @@ The default definitions are sufficient for most kernel objects. There is one exc
 >         sizeCheck ptr next (objBits val)
 >         return val
 
->     updateObject :: (Monad m) => a -> KernelObject -> Word ->
+>     updateObject :: (MonadFail m) => a -> KernelObject -> Word ->
 >                         Word -> Maybe Word -> m KernelObject
 >     updateObject val oldObj ptr ptr' next = do
 >         unless (ptr == ptr') $ fail $ "no object at address given in pspace,target=" ++ (show ptr) ++",lookup=" ++ (show ptr')
@@ -92,7 +102,7 @@ The default definitions are sufficient for most kernel objects. There is one exc
 The "injectKO" and "projectKO" functions convert to and from a "KernelObject", which is the type used to encapsulate all objects stored in the "PSpace" structure.
 
 >     injectKO :: a -> KernelObject
->     projectKO :: (Monad m) => KernelObject -> m a
+>     projectKO :: (MonadFail m) => KernelObject -> m a
 
 > objBits :: PSpaceStorable a => a -> Int
 > objBits a = objBitsKO (injectKO a)
@@ -107,7 +117,6 @@ A new physical address space has an empty object map.
 > newPSpace = PSpace { psMap = Data.Map.empty }
 
 The "initPSpace" function currently does nothing. In earlier versions of the Haskell model, it was used to configure the "PSpace" model to signal a bus error if an invalid physical address was accessed. This is useful only for debugging of the Haskell model, and is not strictly necessary; it has no equivalent in a real implementation.
-% FIXME maybe check that the arguments are OK
 
 > initPSpace :: [(PPtr (), PPtr ())] -> Kernel ()
 > initPSpace _ = return ()
@@ -156,7 +165,7 @@ requested type.
 >         (before, middle, after) = lookupAround ptr mp
 >         after' = maybe Nothing (Just . fst) after
 
-> maybeToMonad :: Monad m => Maybe a -> m a
+> maybeToMonad :: MonadFail m => Maybe a -> m a
 > maybeToMonad (Just x) = return x
 > maybeToMonad Nothing  = fail "maybeToMonad: got Nothing"
 
@@ -234,6 +243,8 @@ No type checks are performed when deleting objects; "deleteObjects" simply delet
 >             alignError bits
 >         stateAssert (deletionIsSafe ptr bits)
 >             "Object deletion would leave dangling pointers"
+>         stateAssert (deletionIsSafe_delete_locale ptr bits)
+>             "Object deletion would leave dangling pointers"
 >         doMachineOp $ freeMemory (PPtr (fromPPtr ptr)) bits
 >         ps <- gets ksPSpace
 >         let inRange = (\x -> x .&. ((- mask bits) - 1) == fromPPtr ptr)
@@ -241,7 +252,7 @@ No type checks are performed when deleting objects; "deleteObjects" simply delet
 >         let ps' = ps { psMap = map' }
 >         modify (\ks -> ks { ksPSpace = ps'})
 
-Clear the ghost state for user pages and cnodes within the deleted range.
+Clear the ghost state for user pages, cnodes, and arch-specific objects within the deleted range.
 
 >         modify (\ks -> ks { gsUserPages = (\x -> if inRange x
 >                                    then Nothing else gsUserPages ks x) })
@@ -249,12 +260,16 @@ Clear the ghost state for user pages and cnodes within the deleted range.
 >             "Object deletion would split CNodes."
 >         modify (\ks -> ks { gsCNodes = (\x -> if inRange x
 >                                    then Nothing else gsCNodes ks x) })
+>         Arch.deleteGhost ptr bits
 >         stateAssert ksASIDMapSafe "Object deletion would leave dangling PD pointers"
 
-In "deleteObjects" above, we assert "deletionIsSafe"; that is, that there are no pointers to these objects remaining elsewhere in the kernel state. Since we cannot easily check this in the Haskell model, we assume that it is always true; the assertion is strengthened during translation into Isabelle.
+In "deleteObjects" above, we make two assertions, which, when taken together, say that there are no pointers to these objects remaining elsewhere in the kernel state. Since we cannot easily check this in the Haskell model, we assume that it is always true; the assertion is strengthened during translation into Isabelle. We separate these properties into two assertions, since they are shown to be true by different means.
 
 > deletionIsSafe :: PPtr a -> Int -> KernelState -> Bool
 > deletionIsSafe _ _ _ = True
+
+> deletionIsSafe_delete_locale :: PPtr a -> Int -> KernelState -> Bool
+> deletionIsSafe_delete_locale _ _ _ = True
 
 We also assert that the ghost CNodes are all either completely deleted or unchanged; no CNode should be partially in the range and partially deleted. Again, this assertion requires logical quantifiers, and is inserted in translation.
 
@@ -285,18 +300,18 @@ This is intended for use by alternate implementations of "placeNewObject", for o
 
 These two functions halt the kernel with an error message when a memory access is performed with incorrect type or alignment.
 
-> typeError :: Monad m => String -> KernelObject -> m a
+> typeError :: MonadFail m => String -> KernelObject -> m a
 > typeError t1 t2 = fail ("Wrong object type - expected " ++ t1 ++
 >                         ", found " ++ (kernelObjectTypeName t2))
 
-> alignError :: Monad m => Int -> m a
+> alignError :: MonadFail m => Int -> m a
 > alignError n = fail ("Unaligned access - lowest " ++
 >                       (show n) ++ " bits must be 0")
 
-> alignCheck :: Monad m => Word -> Int -> m ()
+> alignCheck :: MonadFail m => Word -> Int -> m ()
 > alignCheck x n = unless (x .&. mask n == 0) $ alignError n
 
-> sizeCheck :: Monad m => Word -> Maybe Word -> Int -> m ()
+> sizeCheck :: MonadFail m => Word -> Maybe Word -> Int -> m ()
 > sizeCheck _ Nothing _ = return ()
 > sizeCheck start (Just end) n =
 >     when (end - start < 1 `shiftL` n)
@@ -318,7 +333,7 @@ The following functions are used to access words in user-accessible data pages. 
 >         "storeWordUser needs a user data page"
 >     doMachineOp $ storeWord p w
 
-The following predicate is used above to assert that the pointer is a valid pointer to user data. It is always "True" here, but is replaced with a stronger assertion in the Isabelle translation. % FIXME: this can probably actually be stronger here too
+The following predicate is used above to assert that the pointer is a valid pointer to user data. It is always "True" here, but is replaced with a stronger assertion in the Isabelle translation.
 
 > pointerInUserData :: PPtr Word -> KernelState -> Bool
 > pointerInUserData _ _ = True

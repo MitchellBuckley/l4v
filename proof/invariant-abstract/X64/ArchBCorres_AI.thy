@@ -9,18 +9,16 @@ imports
   BCorres_AI
 begin
 
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
-crunch (bcorres)bcorres[wp]: arch_finalise_cap truncate_state
+crunch arch_finalise_cap
+  for (bcorres) bcorres[wp]: truncate_state
   (simp: swp_def)
 
-crunch (bcorres)bcorres[wp]: prepare_thread_delete truncate_state
+crunch prepare_thread_delete
+  for (bcorres) bcorres[wp]: truncate_state
   (simp: swp_def)
 
 end
-
-requalify_facts X64.arch_finalise_cap_bcorres X64.prepare_thread_delete_bcorres
-
-declare arch_finalise_cap_bcorres[wp] prepare_thread_delete_bcorres[wp]
 
 end

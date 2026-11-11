@@ -9,7 +9,7 @@ module Main where
 import Distribution.Simple
 import Distribution.Simple.Setup
 import Distribution.PackageDescription
-import Distribution.PackageDescription.Parsec
+import Distribution.Simple.PackageDescription (readGenericPackageDescription)
 import Distribution.Verbosity
 import Control.Monad
 import Data.List
@@ -38,14 +38,14 @@ printKnownTargets = do
     mapM_ (putStrLn.('\t':).fst) targets
 
 targets =
-    [ ("arm-exynos",    ("ARM",     "Exynos4210",   []))
-    , ("arm-kzm",       ("ARM",     "KZM",          []))
+    [ ("arm-kzm",       ("ARM",     "KZM",          []))
     , ("arm-sabre",     ("ARM",     "Sabre",        []))
     , ("x64-pc99",      ("X64",     "PC99",         []))
     , ("arm-tk1-nosmmu",("ARM", "TK1",          ["CONFIG_ARM_HYPERVISOR_SUPPORT"]))
     , ("arm-tk1",       ("ARM", "TK1",          ["CONFIG_ARM_HYPERVISOR_SUPPORT",
                                                      "CONFIG_ARM_SMMU"]))
-    , ("riscv-hifive",   ("RISCV64", "HiFive",        []))
+    , ("riscv-hifive",  ("RISCV64", "HiFive",       []))
+    , ("aarch64-tx2",   ("AARCH64", "TX2",          []))
     ]
 
 getPlatform :: Maybe String -> IO (Maybe (String, String, [String]))

@@ -27,7 +27,8 @@ definition
 
 crunch_ignore (add: crunch_foo1)
 
-crunch gt: crunch_foo2 "\<lambda>x. x > y"
+crunch crunch_foo2
+  for gt: "\<lambda>x. x > y"
   (ignore: modify bind ignore_del: crunch_foo1)
 
 crunch_ignore (del: crunch_foo1)
@@ -44,24 +45,27 @@ lemma crunch_foo1_at_3[wp]:
   "\<lbrace>crunch_always_true 3\<rbrace> crunch_foo1 x \<lbrace>\<lambda>rv. crunch_always_true 3\<rbrace>"
   by (simp add: crunch_always_true_def, wp)
 
-lemma crunch_foo1_no_fail:
+lemma no_fail_crunch_foo1:
   "True \<Longrightarrow> no_fail (crunch_always_true 2 and crunch_always_true 3) (crunch_foo1 x)"
   apply (simp add:crunch_always_true_def crunch_foo1_def)
   apply (rule no_fail_pre)
    apply (wp, simp)
   done
 
-crunch (no_fail) no_fail: crunch_foo2
+crunch crunch_foo2
+  for (no_fail) no_fail
   (ignore: modify bind wp: crunch_foo1_at_2[simplified])
 
-crunch (valid) at_2: crunch_foo2 "crunch_always_true 2"
+crunch crunch_foo2
+  for (valid) at_2: "crunch_always_true 2"
   (ignore: modify bind wp: crunch_foo1_at_2[simplified])
 
 fun crunch_foo3 :: "nat => nat => 'a => (nat,unit) tmonad" where
   "crunch_foo3 0 x _ = crunch_foo1 x"
 | "crunch_foo3 (Suc n) x y = crunch_foo3 n x y"
 
-crunch gt2: crunch_foo3 "\<lambda>x. x > y"
+crunch crunch_foo3
+  for gt2: "\<lambda>x. x > y"
   (ignore: modify bind)
 
 class foo_class =
@@ -83,16 +87,20 @@ lemma crunch_foo4_alt:
    apply simp+
   done
 
-crunch gt3: crunch_foo4 "\<lambda>x. x > y"
+crunch crunch_foo4
+  for gt3: "\<lambda>x. x > y"
   (ignore: modify bind)
 
-crunch (no_fail) no_fail2: crunch_foo4
+crunch crunch_foo4
+  for (no_fail) no_fail2
   (rule: crunch_foo4_alt ignore: modify bind)
 
-crunch gt3': crunch_foo4 "\<lambda>x. x > y"
+crunch crunch_foo4
+  for gt3': "\<lambda>x. x > y"
   (rule: crunch_foo4_alt ignore: modify bind)
 
-crunch gt4: crunch_foo5 "\<lambda>x. x > y"
+crunch crunch_foo5
+  for gt4: "\<lambda>x. x > y"
   (ignore: modify bind)
 
 (* Test cases for crunch in locales *)
@@ -109,11 +117,13 @@ definition
   "crunch_foo7 \<equiv> return () >>= (\<lambda>_. return ())"
 
 (* crunch works on a global constant within a locale *)
-crunch test[wp]: crunch_foo6 P
+crunch crunch_foo6
+  for test[wp]: P
 (ignore: bind)
 
 (* crunch works on a locale constant *)
-crunch test[wp]: crunch_foo7 P
+crunch crunch_foo7
+  for test[wp]: P
 (ignore: bind)
 
 definition
@@ -125,7 +135,8 @@ definition
     modify ((+) x)
   od"
 
-crunch test: crunch_foo9 "\<lambda>x. x > y" (ignore: bind)
+crunch crunch_foo9
+  for test: "\<lambda>x. x > y" (ignore: bind)
 
 definition
   "crunch_foo10 (x :: nat) \<equiv> do
@@ -140,12 +151,14 @@ lemma crunch_foo10_def2[crunch_def]:
   unfolding crunch_foo10_def[abs_def] crunch_foo9_def[abs_def]
   by simp
 
-crunch test[wp]: crunch_foo10 "\<lambda>x. x > y"
+crunch crunch_foo10
+  for test[wp]: "\<lambda>x. x > y"
 
 (* crunch_ignore works within a locale *)
 crunch_ignore (add: bind)
 
-crunch test': crunch_foo9 "\<lambda>x. x > y"
+crunch crunch_foo9
+  for test': "\<lambda>x. x > y"
 
 end
 
@@ -155,17 +168,19 @@ interpretation test_locale "return ()" .
 lemma "\<lbrace>Q\<rbrace> crunch_foo7 \<lbrace>\<lambda>_. Q\<rbrace>" by wp
 
 (* crunch still works on an interpreted locale constant *)
-crunch test2: crunch_foo7 P
+crunch crunch_foo7
+  for test2: P
   (wp_del: crunch_foo7_test)
 
 locale test_sublocale
 
-sublocale test_sublocale < test_locale "return ()" .
+sublocale test_sublocale \<subseteq> test_locale "return ()" .
 
 context test_sublocale begin
 
 (* crunch works on a locale constant with a fixed locale parameter *)
-crunch test[wp]: crunch_foo8 P
+crunch crunch_foo8
+  for test[wp]: P
 
 end
 
@@ -174,12 +189,14 @@ end
 consts foo_const :: "(unit, unit) tmonad"
 defs foo_const_def: "foo_const \<equiv> Crunch_Test_Qualified_Trace.foo_const"
 
-crunch test: foo_const P
+crunch foo_const
+  for test: P
 
 (* check that the grid-style crunch is working *)
 
-crunches crunch_foo3, crunch_foo4, crunch_foo5
-  for silly: "\<lambda>s. True \<noteq> False" and (no_fail)nf
+crunch crunch_foo3, crunch_foo4, crunch_foo5
+  for silly: "\<lambda>s. True \<noteq> False"
+  and (no_fail) nf
   (ignore: modify bind rule: crunch_foo4_alt wp_del: hoare_vcg_prop)
 
 end

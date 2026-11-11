@@ -8,35 +8,41 @@ theory ArchAccess
 imports Types
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 subsection \<open>Arch-specific transformation of caps into authorities\<close>
 
-definition vspace_cap_rights_to_auth :: "cap_rights \<Rightarrow> auth set" where
-  "vspace_cap_rights_to_auth r \<equiv>
+\<comment> \<open>Execute does not confer Read authority on this architecture and is ignored.\<close>
+definition vspace_cap_rights_to_auth :: "cap_rights \<Rightarrow> bool \<Rightarrow> auth set" where
+  "vspace_cap_rights_to_auth r exec \<equiv>
      (if AllowWrite \<in> r then {Write} else {})
    \<union> (if AllowRead \<in> r then {Read} else {})"
 
 definition arch_cap_auth_conferred where
   "arch_cap_auth_conferred arch_cap \<equiv>
-     (if is_page_cap arch_cap then vspace_cap_rights_to_auth (acap_rights arch_cap) else {Control})"
+     (if is_page_cap arch_cap then vspace_cap_rights_to_auth (acap_rights arch_cap) False
+      else {Control})"
 
 subsection \<open>Generating a policy from the current ASID distribution\<close>
 
 definition pte_ref where
   "pte_ref pte \<equiv> case pte of
      SmallPagePTE addr atts rights
-       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMSmallPage, vspace_cap_rights_to_auth rights)
+       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMSmallPage,
+                vspace_cap_rights_to_auth rights False)
    | LargePagePTE addr atts rights
-       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMLargePage, vspace_cap_rights_to_auth rights)
+       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMLargePage,
+                vspace_cap_rights_to_auth rights False)
    | _ \<Rightarrow> None"
 
 definition pde_ref2 where
   "pde_ref2 pde \<equiv> case pde of
      SectionPDE addr atts domain rights
-       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMSection, vspace_cap_rights_to_auth rights)
+       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMSection,
+                vspace_cap_rights_to_auth rights False)
    | SuperSectionPDE addr atts rights
-       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMSuperSection, vspace_cap_rights_to_auth rights)
+       \<Rightarrow> Some (ptrFromPAddr addr, pageBitsForSize ARMSuperSection,
+                vspace_cap_rights_to_auth rights False)
    | PageTablePDE addr atts domain
        \<comment> \<open>The 0 is a hack, saying that we own only addr, although 12 would also be OK\<close>
        \<Rightarrow> Some (ptrFromPAddr addr, 0, {Control})
@@ -63,25 +69,13 @@ definition vs_refs_no_global_pts :: "kernel_object \<Rightarrow> (obj_ref \<time
 definition state_vrefs where
   "state_vrefs s = case_option {} vs_refs_no_global_pts o kheap s"
 
-end
-
-
-context pspace_update_eq begin interpretation Arch .
-
-lemma state_vrefs[iff]: "state_vrefs (f s) = state_vrefs s"
-  by (simp add: state_vrefs_def pspace)
-
-end
-
-
-context Arch begin
-
 primrec aobj_ref' where
-  "aobj_ref' (ASIDPoolCap p as) = {p}"
+  "aobj_ref' (ASIDPoolCap p _) = {p}"
 | "aobj_ref' ASIDControlCap = {}"
-| "aobj_ref' (PageCap isdev x rs sz as4) = ptr_range x (pageBitsForSize sz)"
-| "aobj_ref' (PageDirectoryCap x as2) = {x}"
-| "aobj_ref' (PageTableCap x as3) = {x}"
+| "aobj_ref' (PageCap isdev x _ sz _) = ptr_range x (pageBitsForSize sz)"
+| "aobj_ref' (PageDirectoryCap x _) = {x}"
+| "aobj_ref' (PageTableCap x _) = {x}"
+| "aobj_ref' (SGISignalCap _ _) = {}"
 
 fun acap_asid' :: "arch_cap \<Rightarrow> asid set" where
   "acap_asid' (PageCap _ _ _ _ mapping) = fst ` set_option mapping"
@@ -90,6 +84,7 @@ fun acap_asid' :: "arch_cap \<Rightarrow> asid set" where
 | "acap_asid' (ASIDPoolCap _ asid)
      = {x. asid_high_bits_of x = asid_high_bits_of asid \<and> x \<noteq> 0}"
 | "acap_asid' ASIDControlCap = UNIV"
+| "acap_asid' (SGISignalCap _ _) = {}"
 
 inductive_set state_asids_to_policy_aux for aag caps asid_tab vrefs where
   sata_asid:
@@ -115,115 +110,44 @@ section \<open>Arch-specific integrity definition\<close>
 
 subsection \<open>How ASIDs can change\<close>
 
-abbreviation integrity_asids_aux ::
-  "'a PAS \<Rightarrow> 'a set \<Rightarrow> asid \<Rightarrow> obj_ref option \<Rightarrow> obj_ref option \<Rightarrow> bool" where
-  "integrity_asids_aux aag subjects asid pp_opt pp_opt' \<equiv>
-     pp_opt = pp_opt' \<or> (\<forall>asid'. asid' \<noteq> 0 \<and> asid_high_bits_of asid' = asid_high_bits_of asid
-                                 \<longrightarrow> pasASIDAbs aag asid' \<in> subjects)"
+definition integrity_asids_2 ::
+  "'a PAS \<Rightarrow> 'a set \<Rightarrow> obj_ref \<Rightarrow> asid \<Rightarrow> arch_state \<Rightarrow> arch_state \<Rightarrow>
+   (obj_ref \<rightharpoonup> arch_kernel_obj) \<Rightarrow> (obj_ref \<rightharpoonup> arch_kernel_obj) \<Rightarrow> bool"
+where
+  "integrity_asids_2 aag subjects x asid as as' ao ao' \<equiv>
+     arm_asid_table as (asid_high_bits_of asid) = arm_asid_table as' (asid_high_bits_of asid) \<or>
+     (\<forall>asid'. asid' \<noteq> 0 \<and> asid_high_bits_of asid' = asid_high_bits_of asid
+              \<longrightarrow> pasASIDAbs aag asid' \<in> subjects)"
 
-definition integrity_asids ::
-  "'a PAS \<Rightarrow> 'a set \<Rightarrow> asid \<Rightarrow> 'y::state_ext state \<Rightarrow> 'z:: state_ext state  \<Rightarrow> bool" where
-  "integrity_asids aag subjects x s s' \<equiv>
-   integrity_asids_aux aag subjects x (asid_table s  (asid_high_bits_of x))
-                                      (asid_table s' (asid_high_bits_of x))"
+lemmas integrity_asids_def = integrity_asids_2_def
 
-declare integrity_asids_def[simp]
+\<comment> \<open>No hypervisor\<close>
+definition integrity_hyp_2 ::
+  "'a PAS \<Rightarrow> 'a set \<Rightarrow> obj_ref \<Rightarrow> machine_state \<Rightarrow> machine_state \<Rightarrow> arch_state \<Rightarrow> arch_state
+          \<Rightarrow> (obj_ref \<Rightarrow> arch_kernel_obj option) \<Rightarrow> (obj_ref \<Rightarrow> arch_kernel_obj option) \<Rightarrow> bool"
+where
+  "integrity_hyp_2 aag subjects x ms ms' as as' aobjs aobjs' \<equiv> True"
 
-lemma integrity_asids_trans_state_l[simp]:
-  "integrity_asids aag subjects x (trans_state f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
+lemmas integrity_hyp_def = integrity_hyp_2_def
 
-lemma integrity_asids_trans_state_r[simp]:
-  "integrity_asids aag subjects x st (trans_state f s) =
-   integrity_asids aag subjects x st s"
-  by simp
+definition valid_cur_hyp :: "'s::state_ext state \<Rightarrow> bool" where
+  "valid_cur_hyp \<equiv> \<top>"
 
-lemma integrity_asids_cur_thread_update_l[simp]:
-  "integrity_asids aag subjects x (cur_thread_update f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
+\<comment> \<open>No FPU\<close>
+definition integrity_fpu_2 ::
+  "'a PAS \<Rightarrow> 'a set \<Rightarrow> obj_ref \<Rightarrow> machine_state \<Rightarrow> machine_state
+          \<Rightarrow> (obj_ref \<Rightarrow> kernel_object option) \<Rightarrow> (obj_ref \<Rightarrow> kernel_object option) \<Rightarrow> bool"
+where
+  "integrity_fpu_2 aag subjects x ms ms' kh kh' \<equiv> True"
 
-lemma integrity_asids_cur_thread_update_r[simp]:
-  "integrity_asids aag subjects x st (cur_thread_update f s) =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_kheap_update_l[simp]:
-  "integrity_asids aag subjects x (kheap_update f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_kheap_update_r[simp]:
-  "integrity_asids aag subjects x st (kheap_update f s) =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_machine_state_update_l[simp]:
-  "integrity_asids aag subjects x (machine_state_update f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_machine_state_update_r[simp]:
-  "integrity_asids aag subjects x st (machine_state_update f s) =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_cdt_update_l[simp]:
-  "integrity_asids aag subjects x (cdt_update f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_cdt_update_r[simp]:
-  "integrity_asids aag subjects x st (cdt_update f s) =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_is_original_cap_update_l[simp]:
-  "integrity_asids aag subjects x (is_original_cap_update f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_is_original_cap_update_r[simp]:
-  "integrity_asids aag subjects x st (is_original_cap_update f s) =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_interrupt_states_update_l[simp]:
-  "integrity_asids aag subjects x (interrupt_states_update f st) s =
-   integrity_asids aag subjects x st s"
-  by simp
-
-lemma integrity_asids_interrupt_states_update_r[simp]:
-  "integrity_asids aag subjects x st (interrupt_states_update f s) =
-   integrity_asids aag subjects x st s"
-  by simp
-
-(* FIXME AC: locale? *)
-lemmas integrity_asids_updates =
-  integrity_asids_trans_state_l
-  integrity_asids_trans_state_r
-  integrity_asids_cur_thread_update_l
-  integrity_asids_cur_thread_update_r
-  integrity_asids_kheap_update_l
-  integrity_asids_kheap_update_r
-  integrity_asids_machine_state_update_l
-  integrity_asids_machine_state_update_r
-  integrity_asids_cdt_update_l
-  integrity_asids_cdt_update_r
-  integrity_asids_is_original_cap_update_l
-  integrity_asids_is_original_cap_update_r
-  integrity_asids_interrupt_states_update_l
-  integrity_asids_interrupt_states_update_r
+lemmas integrity_fpu_def = integrity_fpu_2_def
 
 
 subsection \<open>Misc definitions\<close>
 
-definition ctxt_IP_update where
-  "ctxt_IP_update ctxt \<equiv> ctxt(NextIP := ctxt FaultIP)"
-
 abbreviation arch_IP_update where
-  "arch_IP_update arch \<equiv> arch_tcb_context_set (ctxt_IP_update (arch_tcb_context_get arch)) arch"
+  "arch_IP_update a \<equiv>
+   arch_tcb_set_registers ((arch_tcb_get_registers a)(NextIP := arch_tcb_get_registers a FaultIP)) a"
 
 definition asid_pool_integrity ::
   "'a set \<Rightarrow> 'a PAS \<Rightarrow> (asid_low_index \<rightharpoonup> obj_ref) \<Rightarrow> (asid_low_index \<rightharpoonup> obj_ref) \<Rightarrow> bool" where
@@ -259,29 +183,5 @@ definition auth_ipc_buffers :: "'z::state_ext state \<Rightarrow> obj_ref \<Righ
       | _ \<Rightarrow> {})"
 
 end
-
-
-context begin interpretation Arch .
-
-requalify_consts
-  vspace_cap_rights_to_auth
-  aobj_ref'
-  acap_asid'
-  state_vrefs
-  state_asids_to_policy_arch
-  integrity_asids
-  ctxt_IP_update
-  arch_IP_update
-  arch_cap_auth_conferred
-  arch_integrity_obj_atomic
-  arch_integrity_obj_alt
-  auth_ipc_buffers
-
-requalify_facts
-  integrity_asids_updates
-
-end
-
-declare integrity_asids_updates[simp]
 
 end

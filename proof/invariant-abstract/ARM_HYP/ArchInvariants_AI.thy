@@ -1,4 +1,5 @@
 (*
+ * Copyright 2023, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
@@ -23,12 +24,16 @@ end_qualify
 \<comment> \<open>---------------------------------------------------------------------------\<close>
 section "ARM-specific invariant definitions"
 
-qualify ARM_HYP_A (in Arch)
+qualify ARM_HYP (in Arch)
 record iarch_tcb =
   itcb_vcpu :: "obj_ref option"
 end_qualify
 
-context Arch begin global_naming ARM_HYP
+context Arch begin arch_global_naming
+
+(* used to accumulate theorems for satisfying Arch interface assumptions;
+   remember to clear before starting a new accumulation *)
+named_theorems Arch_assms
 
 definition
   arch_tcb_to_iarch_tcb :: "arch_tcb \<Rightarrow> iarch_tcb"
@@ -47,7 +52,7 @@ lemma iarch_tcb_context_set[simp]:
 lemma iarch_tcb_set_registers[simp]:
   "arch_tcb_to_iarch_tcb (arch_tcb_set_registers regs arch_tcb)
      = arch_tcb_to_iarch_tcb arch_tcb"
-  by (simp add: arch_tcb_set_registers_def)
+  by (simp add: arch_tcb_to_iarch_tcb_def arch_tcb_set_registers_def)
 
 lemmas vspace_bits_defs = pd_bits_def pde_bits_def pt_bits_def pte_bits_def pageBits_def
 
@@ -60,7 +65,8 @@ lemma arch_cap_fun_lift_expand[simp]:
                               | PageCap dev obj_ref rights sz vr \<Rightarrow> P_PageCap obj_ref rights sz vr
                               | PageTableCap obj_ref vr \<Rightarrow> P_PageTableCap dev obj_ref vr
                               | PageDirectoryCap obj_ref asid \<Rightarrow> P_PageDirectoryCap obj_ref asid
-                              | VCPUCap obj_ref \<Rightarrow> P_VCPUCap obj_ref)
+                              | VCPUCap obj_ref \<Rightarrow> P_VCPUCap obj_ref
+                              | SGISignalCap irq target \<Rightarrow> P_SGI irq target)
                       F) = (\<lambda>c.
    (case c of
       ArchObjectCap (ASIDPoolCap obj_ref asid) \<Rightarrow> P_ASIDPoolCap obj_ref asid
@@ -69,6 +75,7 @@ lemma arch_cap_fun_lift_expand[simp]:
     | ArchObjectCap (PageTableCap obj_ref vr) \<Rightarrow> P_PageTableCap dev obj_ref vr
     | ArchObjectCap (PageDirectoryCap obj_ref asid) \<Rightarrow> P_PageDirectoryCap obj_ref asid
     | ArchObjectCap (VCPUCap obj_ref) \<Rightarrow> P_VCPUCap obj_ref
+    | ArchObjectCap (SGISignalCap irq target) \<Rightarrow> P_SGI irq target
     | _ \<Rightarrow> F))"
   apply (rule ext)
   by (simp add: arch_cap_fun_lift_def)
@@ -176,14 +183,15 @@ definition
 definition
   valid_arch_cap_ref :: "arch_cap \<Rightarrow> 'z::state_ext state \<Rightarrow> bool"
 where
-  "valid_arch_cap_ref ac s \<equiv> (case ac of
+  "valid_arch_cap_ref ac s \<equiv> case ac of
     ASIDPoolCap r as \<Rightarrow> typ_at (AArch AASIDPool) r s
   | ASIDControlCap \<Rightarrow> True
   | PageCap dev r rghts sz mapdata \<Rightarrow> if dev then typ_at (AArch (ADeviceData sz)) r s
                                              else typ_at (AArch (AUserData sz)) r s
   | PageTableCap r mapdata \<Rightarrow> typ_at (AArch APageTable) r s
   | PageDirectoryCap r mapdata\<Rightarrow> typ_at (AArch APageDirectory) r s
-  | VCPUCap r \<Rightarrow> typ_at (AArch AVCPU) r s)"
+  | VCPUCap r \<Rightarrow> typ_at (AArch AVCPU) r s
+  | SGISignalCap _ _ \<Rightarrow> True"
 
 lemmas valid_arch_cap_ref_simps =
   valid_arch_cap_ref_def[split_simps arch_cap.split]
@@ -191,7 +199,7 @@ lemmas valid_arch_cap_ref_simps =
 definition
   valid_arch_cap :: "arch_cap \<Rightarrow> 'z::state_ext state \<Rightarrow> bool"
 where
-  "valid_arch_cap ac s \<equiv> (case ac of
+  "valid_arch_cap ac s \<equiv> case ac of
     ASIDPoolCap r as \<Rightarrow>
          typ_at (AArch AASIDPool) r s \<and> is_aligned as asid_low_bits
            \<and> as \<le> 2^asid_bits - 1
@@ -211,7 +219,8 @@ where
   | PageDirectoryCap r mapdata \<Rightarrow>
     typ_at (AArch APageDirectory) r s \<and>
     case_option True (\<lambda>asid. 0 < asid \<and> asid \<le> 2^asid_bits - 1) mapdata
-  | VCPUCap r \<Rightarrow> typ_at (AArch AVCPU) r s)"
+  | VCPUCap r \<Rightarrow> typ_at (AArch AVCPU) r s
+  | SGISignalCap _ _ \<Rightarrow> True"
 
 lemmas valid_arch_cap_simps =
   valid_arch_cap_def[split_simps arch_cap.split]
@@ -229,12 +238,13 @@ lemmas is_nondevice_page_cap_simps = is_nondevice_page_cap_def[split_simps arch_
 primrec
   acap_class :: "arch_cap \<Rightarrow> capclass"
 where
-  "acap_class (ASIDPoolCap x y)      = PhysicalClass"
-| "acap_class (ASIDControlCap)       = ASIDMasterClass"
-| "acap_class (PageCap dev x y sz z)     = PhysicalClass"
-| "acap_class (PageTableCap x y)     = PhysicalClass"
-| "acap_class (PageDirectoryCap x y) = PhysicalClass"
-| "acap_class (VCPUCap v)            = PhysicalClass"
+  "acap_class (ASIDPoolCap _ _)      = PhysicalClass"
+| "acap_class (ASIDControlCap)       = OtherCapClass"
+| "acap_class (PageCap _ _ _ _ _)    = PhysicalClass"
+| "acap_class (PageTableCap _ _)     = PhysicalClass"
+| "acap_class (PageDirectoryCap _ _) = PhysicalClass"
+| "acap_class (VCPUCap _)            = PhysicalClass"
+| "acap_class (SGISignalCap _ _)     = OtherCapClass"
 
 definition
   valid_ipc_buffer_cap_arch :: "arch_cap \<Rightarrow> word32 \<Rightarrow> bool"
@@ -473,16 +483,15 @@ where
 
 end
 
-context begin interpretation Arch .
-requalify_consts vs_lookup
-end
+(* needed for abbreviation *)
+arch_requalify_consts vs_lookup
 
 abbreviation
   vs_lookup_abbr
   ("_ \<rhd> _" [80,80] 81) where
   "rs \<rhd> p \<equiv> \<lambda>s. (rs,p) \<in> vs_lookup s"
 
-context Arch begin global_naming ARM
+context Arch begin arch_global_naming
 
 abbreviation
   is_reachable_abbr :: "obj_ref \<Rightarrow> 'z::state_ext state \<Rightarrow> bool" ("\<exists>\<rhd> _" [80] 81) where
@@ -559,9 +568,8 @@ where
 
 end
 
-context begin interpretation Arch .
-requalify_consts vs_lookup_pages
-end
+(* needed for abbreviation *)
+arch_requalify_consts vs_lookup_pages
 
 abbreviation
   vs_lookup_pages_abbr
@@ -573,7 +581,7 @@ abbreviation
   "\<exists>\<unrhd> p \<equiv> \<lambda>s. \<exists>ref. (ref \<unrhd> p) s"
 
 
-context Arch begin global_naming ARM_HYP
+context Arch begin arch_global_naming
 
 definition
   pde_mapping_bits :: "nat"
@@ -732,7 +740,7 @@ definition
   arch_live :: "arch_kernel_obj \<Rightarrow> bool"
 where
   "arch_live ao \<equiv> case ao of
-    ARM_A.VCPU v \<Rightarrow> bound (ARM_A.vcpu_tcb v)
+    ARM_HYP_A.VCPU v \<Rightarrow> bound (ARM_HYP_A.vcpu_tcb v)
     | _ \<Rightarrow>  False"
 
 definition
@@ -744,10 +752,26 @@ where
 |  _ \<Rightarrow> False"
 
 
+(* arch_tcb_live stub; there is no state in the arch specific part of TCBs on this platform that
+   marks a TCB as live *)
+definition arch_tcb_live :: "arch_tcb \<Rightarrow> bool" where
+  "arch_tcb_live arch_tcb \<equiv> False"
+
+definition valid_cur_fpu :: "'z::state_ext state \<Rightarrow> bool" where
+  "valid_cur_fpu \<equiv> \<top>"
+
 definition
   is_vcpu :: "kernel_object \<Rightarrow> bool"
 where
   "is_vcpu \<equiv> \<lambda>ko. \<exists>vcpu. ko = ArchObj (VCPU vcpu)"
+
+definition valid_next_asid_2 :: "hardware_asid \<Rightarrow> bool" where
+  "valid_next_asid_2 hw_asid \<equiv> hw_asid \<noteq> hw_asid_reserved"
+
+locale_abbrev valid_next_asid :: "'z::state_ext state \<Rightarrow> bool" where
+  "valid_next_asid s \<equiv> valid_next_asid_2 (arm_next_asid (arch_state s))"
+
+lemmas valid_next_asid_def = valid_next_asid_2_def
 
 definition
   valid_arch_state :: "'z::state_ext state \<Rightarrow> bool"
@@ -757,6 +781,7 @@ where
   (case arm_current_vcpu (arch_state s) of
      Some (v, b) \<Rightarrow> obj_at (is_vcpu and hyp_live) v s
    | _ \<Rightarrow> True) \<and>
+  valid_next_asid s \<and>
   is_inv (arm_hwasid_table (arch_state s)) (option_map fst o arm_asid_map (arch_state s))"
 
 definition
@@ -807,11 +832,11 @@ definition
 definition
   "is_pt_cap c \<equiv> \<exists>p asid. c = ArchObjectCap (PageTableCap p asid)"
 
-lemma is_arch_cap_simps:
-  "is_pg_cap cap = (\<exists>dev p R sz m. cap = (ArchObjectCap (PageCap dev p R sz m)))"
-  "is_pd_cap cap = (\<exists>p asid. cap = (ArchObjectCap (PageDirectoryCap p asid)))"
-  "is_pt_cap cap = (\<exists>p asid. cap = (ArchObjectCap (PageTableCap p asid)))"
-  by (auto simp add: is_pg_cap_def is_pd_cap_def is_pt_cap_def)
+lemmas is_arch_cap_simps =
+  is_pg_cap_def[THEN meta_eq_to_obj_eq]
+  is_pt_cap_def[THEN meta_eq_to_obj_eq]
+  is_pd_cap_def[THEN meta_eq_to_obj_eq]
+  is_SGISignalCap_def
 
 definition
   "cap_asid_arch cap \<equiv> case cap of
@@ -947,14 +972,9 @@ where
             vspace_at_asid asid pd s \<and> asid \<noteq> 0)"
 
 definition
-  valid_ioports :: "'z::state_ext state \<Rightarrow> bool"
-where
-  "valid_ioports \<equiv> \<lambda>s. True"
-
-definition
   "valid_arch_mdb r cs \<equiv> True"
 
-declare valid_ioports_def[simp] valid_arch_mdb_def[simp]
+declare valid_arch_mdb_def[simp]
 
 section "Lemmas"
 
@@ -1266,7 +1286,6 @@ lemma valid_pd_kernel_mappings [iff]:
       = valid_pd_kernel_mappings uses s"
   by (rule ext, simp add: valid_pd_kernel_mappings_def)
 
-
 (* FIXME: Clagged *)
 lemma get_cap_update [iff]:
   "(fst (get_cap p (f s)) = {(cap, f s)}) = (fst (get_cap p s) = {(cap, s)})"
@@ -1337,9 +1356,13 @@ lemma valid_vspace_objs_update' [iff]:
   "valid_vspace_objs (f s) = valid_vspace_objs s"
   by (simp add: valid_vspace_objs_def)
 
+lemma valid_cur_fpu_update [iff]:
+  "valid_cur_fpu (f s) = valid_cur_fpu s"
+  by (auto simp: valid_cur_fpu_def)
+
 end
 
-context Arch begin global_naming ARM_HYP
+context Arch begin arch_global_naming
 
 lemma global_refs_equiv:
   assumes "idle_thread s = idle_thread s'"
@@ -1370,6 +1393,10 @@ lemma valid_arch_state_lift:
    apply (case_tac "arm_current_vcpu x"; simp add: split_def)
     apply (wp arch vcpus typs hoare_vcg_conj_lift hoare_vcg_const_Ball_lift)+
   done
+
+lemma valid_cur_fpu_updates[simp]:
+  "\<And>f. valid_cur_fpu (arch_state_update f s) = valid_cur_fpu s"
+  by (auto simp: valid_cur_fpu_def)
 
 lemma aobj_at_default_arch_cap_valid:
   assumes "ty \<noteq> ASIDPoolObj"
@@ -1421,7 +1448,8 @@ lemma page_directory_pde_atI:  (* ARMHYP: x < 2 ^ pageBits? *)
   apply (subgoal_tac "p = (p + (x << pde_bits) && ~~ mask pd_bits)")
    subgoal by (auto simp add: pd_bits_def)
   apply (rule sym, rule add_mask_lower_bits)
-   apply (simp add: pd_bits_def pageBits_def pde_bits_def)+
+   apply (simp add: pd_bits_def pageBits_def pde_bits_def)
+  apply (simp del: bit_shiftl_iff bit_shiftl_word_iff)
   apply (subst upper_bits_unset_is_l2p_32[unfolded word_bits_conv])
    apply (simp add: pd_bits_def pde_bits_def pageBits_def)
   apply (rule shiftl_less_t2n)
@@ -1439,7 +1467,8 @@ lemma page_table_pte_atI:  (* ARMHYP: x < 2 ^ (pt_bits - 2) *)
   apply (subgoal_tac "p = (p + (x << pte_bits) && ~~ mask pt_bits)")
    subgoal by (auto simp add: pt_bits_def)
   apply (rule sym, rule add_mask_lower_bits)
-   apply (simp add: pt_bits_def pageBits_def pte_bits_def)+
+   apply (simp add: pt_bits_def pageBits_def pte_bits_def)
+  apply (simp del: bit_shiftl_iff bit_shiftl_word_iff)
   apply (subst upper_bits_unset_is_l2p_32[unfolded word_bits_conv])
    apply (simp add: pt_bits_def pageBits_def pte_bits_def)
   apply (rule shiftl_less_t2n)
@@ -1555,9 +1584,6 @@ lemma vs_lookup_pdI:
   apply (rule_tac x=c in exI)
   apply (simp add: pde_ref_def)
   done
-
-(* FIXME: move *)
-lemma bexEI: "\<lbrakk>\<exists>x\<in>S. Q x; \<And>x. \<lbrakk>x \<in> S; Q x\<rbrakk> \<Longrightarrow> P x\<rbrakk> \<Longrightarrow> \<exists>x\<in>S. P x" by blast
 
 lemma vs_lookup_pages_vs_lookupI: "(ref \<rhd> p) s \<Longrightarrow> (ref \<unrhd> p) s"
   apply (clarsimp simp: vs_lookup_pages_def vs_lookup_def Image_def
@@ -1887,7 +1913,7 @@ proof -
      apply (erule (5) 2)
     apply (clarsimp simp: vs_refs_pages_def graph_of_def obj_at_def
                           pde_ref_pages_def data_at_def
-                   dest!: vs_lookup_pages1D elim!: disjE
+                   dest!: vs_lookup_pages1D
                    split: if_split_asm pde.splits)
     apply (frule_tac d=ac in vpt, assumption+)
     apply (erule converse_rtranclE)
@@ -2114,9 +2140,9 @@ lemma aa_type_vcpuD:
   by (clarsimp simp: aa_type_def
                split: arch_kernel_obj.splits if_split_asm)
 
-lemma global_refs_asid_table_update [iff]:
-  "global_refs (s\<lparr>arch_state := arm_asid_table_update f (arch_state s)\<rparr>) = global_refs s"
-  by (simp add: global_refs_def)
+lemma global_refs_updates[simp]:
+  "\<And>f. global_refs (s\<lparr>arch_state := arm_asid_table_update f (arch_state s)\<rparr>) = global_refs s"
+  by (auto simp: global_refs_def)
 
 lemma pspace_in_kernel_window_arch_update[simp]:
   "arm_kernel_vspace (f (arch_state s)) = arm_kernel_vspace (arch_state s)
@@ -2162,7 +2188,7 @@ lemma valid_vspace_objs_lift:
   apply (rule valid_vspace_obj_typ [OF z], auto)
   done
 
-lemma acap_rights_update_id [intro!, simp]:
+lemma wf_acap_rights_update_id [intro!, simp]:
   "\<lbrakk>wellformed_acap cap\<rbrakk> \<Longrightarrow> acap_rights_update (acap_rights cap) cap = cap"
   unfolding wellformed_acap_def acap_rights_update_def
   by (auto split: arch_cap.splits)
@@ -2410,93 +2436,64 @@ lemma valid_tcb_arch_ref_lift:
   "tcb_arch_ref t = tcb_arch_ref t' \<Longrightarrow> valid_arch_tcb (tcb_arch t) = valid_arch_tcb (tcb_arch t')"
   by (simp add: valid_arch_tcb_def tcb_arch_ref_def)
 
-lemma valid_arch_tcb_context_update[simp]:
-  "valid_arch_tcb (tcb_context_update f t) = valid_arch_tcb t"
-  unfolding valid_arch_tcb_def obj_at_def by simp
+lemma valid_arch_tcb_simps[simp]:
+  "\<And>f. valid_arch_tcb (tcb_context_update f t) = valid_arch_tcb t"
+  by (simp add: valid_arch_tcb_def)+
 
-lemma valid_arch_arch_tcb_context_set[simp]:
-  "valid_arch_tcb (arch_tcb_context_set a t) = valid_arch_tcb t"
-  by (simp add: arch_tcb_context_set_def)
+lemma valid_arch_tcb_context_simps[simp]:
+  "\<And>a. valid_arch_tcb (arch_tcb_context_set a t) = valid_arch_tcb t"
+  "\<And>a. valid_arch_tcb (arch_tcb_set_registers a t) = valid_arch_tcb t"
+  by (simp add: arch_tcb_context_set_def arch_tcb_set_registers_def)+
 
-lemma tcb_arch_ref_context_update:
+lemma tcb_arch_ref_simps[simp]:
+  "\<And>f. tcb_arch_ref (tcb_ipc_buffer_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_mcpriority_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_flags_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_ctable_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_vtable_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_reply_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_caller_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_ipcframe_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_state_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_fault_handler_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_fault_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_bound_notification_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_domain_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_priority_update f tcb) = tcb_arch_ref tcb"
+  "\<And>f. tcb_arch_ref (tcb_time_slice_update f tcb) = tcb_arch_ref tcb"
   "tcb_arch_ref (t\<lparr>tcb_arch := (arch_tcb_context_set a (tcb_arch t))\<rparr>) = tcb_arch_ref t"
-  by (simp add: tcb_arch_ref_def arch_tcb_context_set_def)
-
-lemma tcb_arch_ref_set_registers:
   "tcb_arch_ref (tcb\<lparr>tcb_arch := arch_tcb_set_registers regs (tcb_arch tcb)\<rparr>) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def arch_tcb_context_set_def arch_tcb_set_registers_def)
-
-lemma valid_arch_arch_tcb_set_registers[simp]:
-  "valid_arch_tcb (arch_tcb_set_registers a t) = valid_arch_tcb t"
-   by (simp add: arch_tcb_set_registers_def)
-
-lemma tcb_arch_ref_ipc_buffer_update: "\<And>tcb.
-       tcb_arch_ref (tcb_ipc_buffer_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_mcpriority_update: "\<And>tcb.
-       tcb_arch_ref (tcb_mcpriority_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_ctable_update: "\<And>tcb.
-       tcb_arch_ref (tcb_ctable_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_vtable_update: "\<And>tcb.
-       tcb_arch_ref (tcb_vtable_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_reply_update: "\<And>tcb.
-       tcb_arch_ref (tcb_reply_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_caller_update: "\<And>tcb.
-       tcb_arch_ref (tcb_caller_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_ipcframe_update: "\<And>tcb.
-       tcb_arch_ref (tcb_ipcframe_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_state_update: "\<And>tcb.
-       tcb_arch_ref (tcb_state_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_fault_handler_update: "\<And>tcb.
-       tcb_arch_ref (tcb_fault_handler_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_fault_update: "\<And>tcb.
-       tcb_arch_ref (tcb_fault_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-lemma tcb_arch_ref_bound_notification_update: "\<And>tcb.
-       tcb_arch_ref (tcb_bound_notification_update f tcb) = tcb_arch_ref tcb"
-  by (simp add: tcb_arch_ref_def)
-
-
-lemmas tcb_arch_ref_simps[simp] = tcb_arch_ref_ipc_buffer_update tcb_arch_ref_mcpriority_update
-  tcb_arch_ref_ctable_update tcb_arch_ref_vtable_update tcb_arch_ref_reply_update
-  tcb_arch_ref_caller_update tcb_arch_ref_ipcframe_update tcb_arch_ref_state_update
-  tcb_arch_ref_fault_handler_update tcb_arch_ref_fault_update tcb_arch_ref_bound_notification_update
-  tcb_arch_ref_context_update tcb_arch_ref_set_registers
+  by (auto simp: tcb_arch_ref_def arch_tcb_set_registers_def arch_tcb_context_set_def)
 
 lemma hyp_live_tcb_def: "hyp_live (TCB tcb) = bound (tcb_arch_ref tcb)"
   by (clarsimp simp: hyp_live_def tcb_arch_ref_def)
 
 lemma hyp_live_tcb_simps[simp]:
-"\<And>tcb f. hyp_live (TCB (tcb_ipc_buffer_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_mcpriority_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_ctable_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_vtable_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_reply_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_caller_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_ipcframe_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_state_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_fault_handler_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_fault_update f tcb)) = hyp_live (TCB tcb)"
-"\<And>tcb f. hyp_live (TCB (tcb_bound_notification_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_ipc_buffer_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_mcpriority_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_ctable_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_vtable_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_reply_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_caller_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_ipcframe_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_state_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_fault_handler_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_fault_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_bound_notification_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_domain_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_priority_update f tcb)) = hyp_live (TCB tcb)"
+  "\<And>f. hyp_live (TCB (tcb_time_slice_update f tcb)) = hyp_live (TCB tcb)"
   by (simp_all add: hyp_live_tcb_def)
+
+lemma arch_tcb_live_simps[simp]:
+  "\<And>f. arch_tcb_live (tcb_context_update f arch_tcb) = arch_tcb_live arch_tcb"
+  "\<And>f. arch_tcb_live (tcb_vcpu_update f arch_tcb) = arch_tcb_live arch_tcb"
+  by (simp_all add: arch_tcb_live_def)
+
+lemma arch_tcb_live_context_simps[simp]:
+  "\<And>f. arch_tcb_live (arch_tcb_context_set f arch_tcb) = arch_tcb_live arch_tcb"
+  "\<And>f. arch_tcb_live (arch_tcb_set_registers f arch_tcb) = arch_tcb_live arch_tcb"
+  by (simp_all add: arch_tcb_context_set_def arch_tcb_set_registers_def)
 
 
 lemma valid_arch_tcb_pspaceI:
@@ -2532,6 +2529,7 @@ lemma arch_gen_obj_refs_simps[simp]:
   "arch_gen_obj_refs (ASIDControlCap) = {}"
   "arch_gen_obj_refs (PageCap x1 x2 x3 x4 x5) = {}"
   "arch_gen_obj_refs (VCPUCap x6) = {}"
+  "arch_gen_obj_refs (SGISignalCap irq target) = {}"
   by (simp add: arch_gen_obj_refs_def)+
 
 lemma same_aobject_same_arch_gen_refs:
@@ -2542,8 +2540,8 @@ lemma valid_arch_mdb_eqI:
   assumes "valid_arch_mdb (is_original_cap s) (caps_of_state s)"
   assumes "caps_of_state s = caps_of_state s'"
   assumes "is_original_cap s = is_original_cap s'"
-  shows "valid_arch_mdb (is original_cap s') (caps_of_state s')"
-  by (clarsimp simp: valid_arch_mdb_def)
+  shows "valid_arch_mdb (is_original_cap s') (caps_of_state s')"
+  by (clarsimp)
 
 lemma arch_tcb_context_absorbs[simp]:
   "arch_tcb_context_set uc2 (arch_tcb_context_set uc1 a_tcb) \<equiv> arch_tcb_context_set uc2 a_tcb"
@@ -2572,6 +2570,59 @@ proof -
     by (fastforce dest: ko elim: vs_lookup_pages1_stateI2)
   thus ?thesis by (rule rtrancl_mono)
 qed
+
+lemmas pte_ref_pages_simps[simp] = pte_ref_pages_def[split_simps pte.split]
+lemmas pde_ref_pages_simps[simp] = pde_ref_pages_def[split_simps pde.split]
+
+(* sanity check Arch_Kernel_Config_Lemmas version and shadow original name *)
+lemma physBase_aligned[simplified pageBitsForSize_simps]:
+  "is_aligned physBase (pageBitsForSize ARMSuperSection)"
+  by simp (rule physBase_aligned)
+
+lemma pptrBase_aligned[simplified pageBitsForSize_simps]:
+  "is_aligned pptrBase (pageBitsForSize ARMSuperSection)"
+  by (simp add: is_aligned_def pptrBase_def)
+
+lemma pptrBaseOffset_aligned[simplified pageBitsForSize_simps]:
+  "is_aligned pptrBaseOffset (pageBitsForSize ARMSuperSection)"
+  by (auto simp: pptrBaseOffset_def physBase_aligned pptrBase_aligned
+           elim: is_aligned_weaken intro: aligned_sub_aligned)
+
+lemma pageBitsForSize_limit[simplified pageBitsForSize_simps, simp]:
+  "pageBitsForSize sz \<le> pageBitsForSize ARMSuperSection"
+  by (cases sz; simp)
+
+lemma is_aligned_pptrBaseOffset[simplified pageBitsForSize_simps]:
+  "is_aligned pptrBaseOffset (pageBitsForSize sz)"
+  by (cases sz; clarsimp intro!: is_aligned_weaken[OF pptrBaseOffset_aligned])
+
+lemma is_aligned_addrFromPPtr_n[simplified pageBitsForSize_simps]:
+  "\<lbrakk> is_aligned p n; n \<le> (pageBitsForSize ARMSuperSection) \<rbrakk>
+   \<Longrightarrow> is_aligned (Platform.ARM_HYP.addrFromPPtr p) n"
+  by (auto simp: addrFromPPtr_def
+           elim!: aligned_sub_aligned
+           intro: is_aligned_weaken pptrBaseOffset_aligned)
+
+lemma is_aligned_addrFromPPtr:
+  "is_aligned p pageBits \<Longrightarrow> is_aligned (Platform.ARM_HYP.addrFromPPtr p) pageBits"
+  by (simp add: is_aligned_addrFromPPtr_n pageBits_def)
+
+lemma is_aligned_ptrFromPAddr_n[simplified pageBitsForSize_simps]:
+  "\<lbrakk> is_aligned p n; n \<le> (pageBitsForSize ARMSuperSection)\<rbrakk>
+   \<Longrightarrow> is_aligned (ptrFromPAddr p) n"
+  by (auto simp: ptrFromPAddr_def
+           elim!: aligned_add_aligned
+           intro: is_aligned_weaken pptrBaseOffset_aligned)
+
+lemma is_aligned_ptrFromPAddr:
+  "is_aligned p pageBits \<Longrightarrow> is_aligned (ptrFromPAddr p) pageBits"
+  by (simp add: is_aligned_ptrFromPAddr_n pageBits_def)
+
+lemma is_aligned_ptrFromPAddrD[simplified pageBitsForSize_simps]:
+  "\<lbrakk> is_aligned (ptrFromPAddr b) a; a \<le> (pageBitsForSize ARMSuperSection)\<rbrakk>
+   \<Longrightarrow> is_aligned b a"
+  by (simp add: ptrFromPAddr_def)
+     (erule is_aligned_addD2, erule is_aligned_weaken[OF pptrBaseOffset_aligned])
 
 end
 

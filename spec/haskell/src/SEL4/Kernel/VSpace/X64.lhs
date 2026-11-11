@@ -180,28 +180,20 @@ Locating the page directory for a given ASID is necessary when updating or delet
 >             return ptr
 >         Nothing -> throw InvalidRoot
 
-> findVSpaceForASIDAssert :: ASID -> Kernel (PPtr PML4E)
-> findVSpaceForASIDAssert asid = do
->     pm <- findVSpaceForASID asid `catchFailure`
->         const (fail "findVSpaceForASIDAssert: pm not found")
->     assert (pm .&. mask pml4Bits == 0)
->         "findVSpaceForASIDAssert: pml4 pointer alignment check"
->     checkPML4At pm
->     return pm
-
-> -- FIXME x64: these are all now unused.
+These are used in proofs only, and will be translated to the corresponding table_at
+predicates.
 
 > checkPML4At :: PPtr PML4E -> Kernel ()
-> checkPML4At _ = return ()
+> checkPML4At _ = isabelleOp
 
 > checkPDPTAt :: PPtr PDPTE -> Kernel ()
-> checkPDPTAt _ = return ()
+> checkPDPTAt _ = isabelleOp
 
 > checkPDAt :: PPtr PDE -> Kernel ()
-> checkPDAt _ = return ()
+> checkPDAt _ = isabelleOp
 
 > checkPTAt :: PPtr PTE -> Kernel ()
-> checkPTAt _ = return ()
+> checkPTAt _ = isabelleOp
 
 \subsubsection{Locating Page Table and Page Directory Slots}
 
@@ -356,7 +348,7 @@ When a capability backing a virtual memory mapping is deleted, or when an explic
 >     case pde of
 >         PageTablePDE { pdeTable = pt' } ->
 >             if pt' == addrFromPPtr pt then return () else throw InvalidRoot
->         _ -> throw InvalidRoot -- FIXME x64: dummy throw
+>         _ -> throw InvalidRoot
 >     withoutFailure $ do
 >         flushTable vspace vaddr pt asid
 >         storePDE pdSlot InvalidPDE
@@ -467,8 +459,6 @@ Note that implementations with separate high and low memory regions may also wis
 
 \subsection{Flushing}
 
-%FIXME x64: needs review
-
 > flushAll :: Word -> ASID -> Kernel ()
 > flushAll vspace asid  = doMachineOp $ invalidateASID vspace (fromASID asid)
 
@@ -477,9 +467,6 @@ Note that implementations with separate high and low memory regions may also wis
 
 > flushPD :: Word -> ASID -> Kernel ()
 > flushPD p a = flushAll p a
-
-
-%FIXME x64: needs review
 
 > flushTable :: PPtr PML4E -> VPtr -> PPtr PTE -> ASID -> Kernel ()
 > flushTable _ vptr pt asid = do
@@ -743,7 +730,7 @@ IOMap is related with label X64PageMapIO and IOUnmap is related with X64PageUnma
 
 
 >-- x86KSvtdRootTable :: Word
->-- x86KSvtdRootTable = 0 -- FIXME: this is not correct, similar to ipcbuf, artifical hard coded address not good, and I don't want do that again here.
+>-- x86KSvtdRootTable = 0 -- FIXME x64-vtd: this is not correct, similar to ipcbuf, artifical hard coded address not good, and I don't want do that again here.
 
 >-- lookupIOContextSlot :: IOASID -> Kernel (PPtr IOCTE)
 >-- lookupIOContextSlot pciRequestId = do
@@ -1028,15 +1015,24 @@ Checking virtual address for page size dependent alignment:
 > performX64MMUInvocation :: ArchInv.Invocation -> KernelP [Word]
 > performX64MMUInvocation i = withoutPreemption $ do
 >     case i of
->         InvokePDPT oper -> performPDPTInvocation oper
->         InvokePageDirectory oper -> performPageDirectoryInvocation oper
->         InvokePageTable oper -> performPageTableInvocation oper
+>         InvokePDPT oper -> do
+>             performPDPTInvocation oper
+>             return []
+>         InvokePageDirectory oper -> do
+>             performPageDirectoryInvocation oper
+>             return []
+>         InvokePageTable oper -> do
+>             performPageTableInvocation oper
+>             return []
 >--         InvokeIOPageTable oper -> performIOPageTableInvocation oper
 >         InvokePage oper -> performPageInvocation oper
->         InvokeASIDControl oper -> performASIDControlInvocation oper
->         InvokeASIDPool oper -> performASIDPoolInvocation oper
+>         InvokeASIDControl oper -> do
+>             performASIDControlInvocation oper
+>             return []
+>         InvokeASIDPool oper -> do
+>             performASIDPoolInvocation oper
+>             return []
 >         _ -> fail "Unreachable"
->     return $ []
 
 > performPDPTInvocation :: PDPTInvocation -> Kernel ()
 > performPDPTInvocation (PDPTMap cap ctSlot pml4e pml4Slot vspace) = do
@@ -1130,7 +1126,7 @@ Checking virtual address for page size dependent alignment:
 >     pd <- getObject slot
 >     return $ pd /= InvalidPDE
 
-> performPageInvocation :: PageInvocation -> Kernel ()
+> performPageInvocation :: PageInvocation -> Kernel [Word]
 > performPageInvocation (PageMap cap ctSlot entries vspace) = do
 >     updateCap ctSlot cap
 >     case entries of
@@ -1142,16 +1138,19 @@ Checking virtual address for page size dependent alignment:
 >         ArchObjectCap (PageCap _ _ _ _ _ (Just (as, _))) -> return as
 >         _ -> fail "impossible"
 >     invalidatePageStructureCacheASID (addrFromPPtr vspace) asid
+>     return []
 >
-> performPageInvocation (PageUnmap cap ctSlot) =
+> performPageInvocation (PageUnmap cap ctSlot) = do
 >     when (isJust $ capVPMappedAddress cap) $ case capVPMapType cap of
->         VMVSpaceMap -> performPageInvocationUnmap cap ctSlot
+>         VMVSpaceMap -> do
+>             performPageInvocationUnmap cap ctSlot
 >         _ -> fail "mapped cap has incorrect map type"
-
+>     return []
 
 >-- performPageInvocation (PageIOMap cap cptr vtdpte slot) = do
 >--     updateCap cptr cap
 >--     storeIOPTE slot vtdpte
+>--     return []
 >--
 >-- performPageInvocation (PageIOUnmap (ArchObjectCap cap@PageCap {}) ctSlot) = do
 >--     case capVPMappedAddress cap of
@@ -1161,18 +1160,11 @@ Checking virtual address for page size dependent alignment:
 >--     ArchObjectCap cap <- getSlotCap ctSlot
 >--     updateCap ctSlot (ArchObjectCap $
 >--                           cap { capVPMappedAddress = Nothing })
+>--     return []
 >-- performPageInvocation (PageIOUnmap _ _)  = fail "impossible" -}
 >
 > performPageInvocation (PageGetAddr ptr) = do
->     let paddr = fromPAddr $ addrFromPPtr ptr
->     ct <- getCurThread
->     msgTransferred <- setMRs ct Nothing [paddr]
->     msgInfo <- return $ MI {
->             msgLength = msgTransferred,
->             msgExtraCaps = 0,
->             msgCapsUnwrapped = 0,
->             msgLabel = 0 }
->     setMessageInfo ct msgInfo
+>     return [fromPAddr $ addrFromPPtr ptr]
 
 > performPageInvocationUnmap :: ArchCapability -> PPtr CTE -> Kernel ()
 > performPageInvocationUnmap cap ctSlot = do
@@ -1184,7 +1176,6 @@ Checking virtual address for page size dependent alignment:
 >     updateCap ctSlot (ArchObjectCap $
 >                           cap { capVPMappedAddress = Nothing,
 >                                 capVPMapType = VMNoMap })
->
 
 > performASIDControlInvocation :: ASIDControlInvocation -> Kernel ()
 > performASIDControlInvocation (MakePool frame slot parent base) = do
@@ -1268,36 +1259,36 @@ The kernel model's x64 targets use an external simulation of the physical addres
 >-- deleteIOPageTable _ = error "Not an IOPageTable capability" -}
 
 > mapKernelWindow  :: Kernel ()
-> mapKernelWindow = error "boot code unimplemented"
+> mapKernelWindow = error "unimplemented init code"
 
 > activateGlobalVSpace :: Kernel ()
-> activateGlobalVSpace = error "boot code unimplemented"
+> activateGlobalVSpace = error "unimplemented init code"
 
 > createIPCBufferFrame :: Capability -> VPtr -> KernelInit Capability
-> createIPCBufferFrame = error "boot code unimplemented"
+> createIPCBufferFrame = error "unimplemented init code"
 
 > createBIFrame :: Capability -> VPtr -> Word32 -> Word32 -> KernelInit Capability
-> createBIFrame = error "boot code unimplemented"
+> createBIFrame = error "unimplemented init code"
 
 > createFramesOfRegion :: Capability -> Region -> Bool -> KernelInit ()
-> createFramesOfRegion = error "boot code unimplemented"
+> createFramesOfRegion = error "unimplemented init code"
 
 > createITPDPTs :: Capability -> VPtr -> VPtr -> KernelInit Capability
-> createITPDPTs  = error "boot code unimplemented"
+> createITPDPTs  = error "unimplemented init code"
 
 > writeITPDPTs :: Capability -> Capability -> KernelInit ()
-> writeITPDPTs  = error "boot code unimplemented"
+> writeITPDPTs  = error "unimplemented init code"
 
 > createITASIDPool :: Capability -> KernelInit Capability
-> createITASIDPool  = error "boot code unimplemented"
+> createITASIDPool  = error "unimplemented init code"
 
 > writeITASIDPool :: Capability -> Capability -> Kernel ()
-> writeITASIDPool  = error "boot code unimplemented"
+> writeITASIDPool  = error "unimplemented init code"
 
 > createDeviceFrames :: Capability -> KernelInit ()
-> createDeviceFrames  = error "boot code unimplemented"
+> createDeviceFrames  = error "unimplemented init code"
 
 > vptrFromPPtr :: PPtr a -> KernelInit VPtr
-> vptrFromPPtr  = error "boot code unimplemented"
+> vptrFromPPtr  = error "unimplemented init code"
 
 

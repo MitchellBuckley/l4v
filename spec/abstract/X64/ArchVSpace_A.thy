@@ -11,10 +11,12 @@ Higher level functions for manipulating virtual address spaces
 chapter "x64 VSpace Functions"
 
 theory ArchVSpace_A
-imports Retype_A
+imports
+  Retype_A
+  FPU_A
 begin
 
-context Arch begin global_naming X64_A
+context Arch begin arch_global_naming (A)
 text \<open>
   These attributes are always set to @{const False} when pages are mapped.
 \<close>
@@ -28,7 +30,7 @@ text \<open>Save the set of entries that would be inserted into a page table or
 page directory to map various different sizes of frame at a given virtual
 address.\<close>
 primrec create_mapping_entries ::
-  "paddr \<Rightarrow> vspace_ref \<Rightarrow> vmpage_size \<Rightarrow> vm_rights \<Rightarrow> frame_attrs \<Rightarrow> obj_ref \<Rightarrow>
+  "paddr \<Rightarrow> vspace_ref \<Rightarrow> vmpage_size \<Rightarrow> vm_rights \<Rightarrow> vm_attributes \<Rightarrow> obj_ref \<Rightarrow>
   (vm_page_entry * obj_ref,'z::state_ext) se_monad"
 where
   "create_mapping_entries base vptr X64SmallPage vm_rights attrib pd =
@@ -446,16 +448,6 @@ check_valid_ipc_buffer :: "vspace_ref \<Rightarrow> cap \<Rightarrow> (unit,'z::
   odE
 | _ \<Rightarrow> throwError IllegalOperation"
 
-text \<open>Decode a user argument word describing the kind of VM attributes a
-mapping is to have.\<close>
-definition
-attribs_from_word :: "machine_word \<Rightarrow> frame_attrs" where
-"attribs_from_word w \<equiv>
-  let V = (if w !!0 then {PTAttr WriteThrough} else {});
-      V' = (if w!!1 then insert (PTAttr CacheDisabled) V else V)
-  in if w!!2 then insert PAT V' else V'"
-
-
 text \<open>Update the mapping data saved in a page or page table capability.\<close>
 definition
   update_map_data :: "arch_cap \<Rightarrow> (asid \<times> vspace_ref) option \<Rightarrow> vmmap_type option \<Rightarrow> arch_cap" where
@@ -475,17 +467,9 @@ definition
         Some (ArchObj (DataPage False sz))"
 
 definition
-  fpu_thread_delete :: "obj_ref \<Rightarrow> (unit, 'z::state_ext) s_monad"
-where
-  "fpu_thread_delete thread_ptr \<equiv> do
-    using_fpu \<leftarrow> do_machine_op (nativeThreadUsingFPU thread_ptr);
-    when using_fpu $ do_machine_op (switchFpuOwner 0 0)
-  od"
-
-definition
   prepare_thread_delete :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad"
 where
-  "prepare_thread_delete thread_ptr \<equiv> fpu_thread_delete thread_ptr"
+  "prepare_thread_delete thread_ptr \<equiv> fpu_release thread_ptr"
 
 text \<open>Make numeric value of @{const msg_align_bits} visible.\<close>
 lemmas msg_align_bits = msg_align_bits'[unfolded word_size_bits_def, simplified]

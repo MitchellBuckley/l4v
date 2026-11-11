@@ -49,10 +49,10 @@ fun find_term ctxt get pat t = find_term1 ctxt get t
 fun lambda_frees_vars ctxt ord_t t = let
     fun is_free t = is_Free t andalso not (Variable.is_fixed ctxt (Term.term_name t))
     fun is_it t = is_free t orelse is_Var t
-    val get = fold_aterms (fn t => if is_it t then insert (=) t else I)
+    val get = fold_aterms (fn t => if is_it t then insert (op =) t else I)
     val all_vars = get ord_t []
     val vars = get t []
-    val ord_vars = filter (member (=) vars) all_vars
+    val ord_vars = filter (member (op =) vars) all_vars
   in fold lambda ord_vars t end
 
 fun parse_pat_fixes ctxt fixes pats = let
@@ -138,12 +138,12 @@ fun do_adjust ctxt ((("select", []), [p]), fixes) t = let
   | do_adjust _ args _ = error ("do_adjust: unexpected: " ^ @{make_string} args)
 
 fun unvarify_types_same ty = ty
-  |> Term_Subst.map_atypsT_same
+  |> Term.map_atyps_same
     (fn TVar ((a, i), S) => TFree (a ^ "_var_" ^ string_of_int i, S)
       | _ => raise Same.SAME)
 
 fun unvarify_types tm = tm
-  |> Same.commit (Term_Subst.map_types_same unvarify_types_same)
+  |> Same.commit (Term.map_types_same unvarify_types_same)
 
 fun match_abbreviation mode name init adjusts int ctxt = let
     val init_term = init ctxt

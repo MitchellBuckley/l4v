@@ -1,4 +1,5 @@
 (*
+ * Copyright 2023, Proofcraft Pty Ltd
  * Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
  * Copyright 2014, General Dynamics C4 Systems
  *
@@ -10,6 +11,10 @@
 theory ArchMove_C
 imports Move_C
 begin
+
+(* FIXME arch-split: CRefine was before Kernel_Config.maxIRQ was wrapped in Platform.maxIRQ_def *)
+arch_requalify_facts maxIRQ_def
+declare maxIRQ_def[simp]
 
 lemma ps_clear_is_aligned_ksPSpace_None:
   "\<lbrakk>ps_clear p n s; is_aligned p n; 0<d; d \<le> mask n\<rbrakk>
@@ -31,6 +36,8 @@ lemma ps_clear_is_aligned_ksPSpace_None:
                     power_overflow)
   by assumption
 
+context begin interpretation Arch .
+
 lemma ps_clear_is_aligned_ctes_None:
   assumes "ps_clear p tcbBlockSizeBits s"
       and "is_aligned p tcbBlockSizeBits"
@@ -49,8 +56,6 @@ lemma Arch_switchToThread_obj_at_pre:
   apply (wp doMachineOp_obj_at setVMRoot_obj_at hoare_drop_imps|wpc)+
   done
 
-context begin interpretation Arch .
-
 lemma asid_pool_at'_ko:
   "asid_pool_at' p s \<Longrightarrow> \<exists>pool. ko_at' (ASIDPool pool) p s"
   apply (clarsimp simp: typ_at'_def obj_at'_def ko_wp_at'_def projectKOs)
@@ -65,7 +70,7 @@ lemma setCTE_asidpool':
   "\<lbrace> ko_at' (ASIDPool pool) p \<rbrace> setCTE c p' \<lbrace>\<lambda>_. ko_at' (ASIDPool pool) p\<rbrace>"
   apply (clarsimp simp: setCTE_def)
   apply (simp add: setObject_def split_def)
-  apply (rule hoare_seq_ext [OF _ hoare_gets_post])
+  apply (rule bind_wp [OF _ hoare_gets_sp])
   apply (clarsimp simp: valid_def in_monad)
   apply (frule updateObject_type)
   apply (clarsimp simp: obj_at'_def projectKOs)
@@ -82,31 +87,18 @@ lemma setCTE_asidpool':
 
 lemma empty_fail_findPDForASID[iff]:
   "empty_fail (findPDForASID asid)"
-  apply (simp add: findPDForASID_def liftME_def)
-  apply (intro empty_fail_bindE, simp_all split: option.split)
-     apply (simp add: assertE_def split: if_split)
-    apply (simp add: assertE_def split: if_split)
-   apply (simp add: empty_fail_getObject)
-  apply (simp add: assertE_def liftE_bindE checkPDAt_def split: if_split)
-  done
+  unfolding findPDForASID_def checkPDAt_def
+  by (wpsimp wp: empty_fail_getObject)
 
 lemma empty_fail_findPDForASIDAssert[iff]:
   "empty_fail (findPDForASIDAssert asid)"
-  apply (simp add: findPDForASIDAssert_def catch_def
-                   checkPDAt_def checkPDUniqueToASID_def
-                   checkPDASIDMapMembership_def)
-  apply (intro empty_fail_bind, simp_all split: sum.split)
-  done
+  unfolding findPDForASIDAssert_def checkPDAt_def checkPDUniqueToASID_def checkPDASIDMapMembership_def
+  by (wpsimp wp: empty_fail_getObject)
 
-crunches Arch.switchToThread
-  for valid_queues'[wp]: valid_queues'
-  (simp: crunch_simps ignore: clearExMonitor)
-crunches switchToIdleThread
+crunch switchToIdleThread
   for ksCurDomain[wp]: "\<lambda>s. P (ksCurDomain s)"
-crunches switchToIdleThread, switchToThread
-  for valid_pspace'[wp]: valid_pspace'
-  (simp: crunch_simps)
-crunches switchToThread
+
+crunch switchToThread
   for valid_arch_state'[wp]: valid_arch_state'
 
 lemma mab_gt_2 [simp]:
@@ -132,10 +124,9 @@ where
     0 \<notin> ran pool \<and> (\<forall>x \<in> ran pool. is_aligned x pdBits))"
 
 lemma valid_eq_wf_asid_pool'[simp]:
-  "valid_asid_pool' pool = (\<lambda>s. wf_asid_pool' pool)"
+  "valid_asid_pool' pool = wf_asid_pool' pool"
   by (case_tac pool) simp
 declare valid_asid_pool'.simps[simp del]
-(*<<<*)
 
 lemma valid_untyped':
   notes usableUntypedRange.simps[simp del]
@@ -159,6 +150,7 @@ lemma valid_untyped':
   apply (frule pspace_distinctD'[OF _ pspace_distinct'])
   apply simp
   apply (frule aligned_ranges_subset_or_disjoint[OF al])
+  apply (simp only: add_mask_fold)
   apply (fold obj_range'_def)
   apply (rule iffI)
    apply auto[1]
@@ -166,17 +158,94 @@ lemma valid_untyped':
    apply (rule ccontr, simp)
    apply (simp add: Set.psubset_eq)
    apply (erule conjE)
-   apply (case_tac "obj_range' ptr' ko \<inter> {ptr..ptr + 2 ^ bits - 1} \<noteq> {}", simp)
+   apply (case_tac "obj_range' ptr' ko \<inter> mask_range ptr bits \<noteq> {}", simp)
    apply (cut_tac is_aligned_no_overflow[OF al])
-   apply (auto simp add: obj_range'_def)[1]
+   apply (auto simp add: obj_range'_def add_mask_fold)[1]
   apply (clarsimp simp add: usableUntypedRange.simps Int_commute)
-  apply (case_tac "obj_range' ptr' ko \<inter> {ptr..ptr + 2 ^ bits - 1} \<noteq> {}", simp+)
+  apply (case_tac "obj_range' ptr' ko \<inter> mask_range ptr bits \<noteq> {}", simp)
   apply (cut_tac is_aligned_no_overflow[OF al])
   apply (clarsimp simp add: obj_range'_def)
   apply (frule is_aligned_no_overflow)
+  apply (simp add: mask_def add_diff_eq)
   by (metis al intvl_range_conv' le_m1_iff_lt less_is_non_zero_p1
                nat_le_linear power_overflow sub_wrap add_0
                add_0_right word_add_increasing word_less_1 word_less_sub_1)
+
+(* We don't have access to n_msgRegisters from C here, but the number of msg registers in C should
+   be equivalent to what we have in the abstract/design specs. We want a number for this definition
+   that automatically updates if the number of registers changes, and we sanity check it later
+   in msgRegisters_size_sanity *)
+definition size_msgRegisters :: nat where
+  size_msgRegisters_pre_def: "size_msgRegisters \<equiv> size (ARM.msgRegisters)"
+
+schematic_goal size_msgRegisters_def:
+  "size_msgRegisters = numeral ?x"
+  unfolding size_msgRegisters_pre_def ARM.msgRegisters_def
+  by (simp add: upto_enum_red fromEnum_def enum_register del: Suc_eq_numeral)
+     (simp only: Suc_eq_plus1_left, simp del: One_nat_def)
+
+lemma length_msgRegisters[simplified size_msgRegisters_def]:
+  "length ARM_H.msgRegisters = size_msgRegisters"
+  by (simp add: size_msgRegisters_pre_def ARM_H.msgRegisters_def)
+
+lemma cap_case_isPageDirectoryCap:
+  "(case cap of capability.ArchObjectCap (arch_capability.PageDirectoryCap pd ( Some asid))  \<Rightarrow> fn pd asid
+                | _ => g)
+    = (if ( if (isArchObjectCap cap) then if (isPageDirectoryCap (capCap cap)) then capPDMappedASID (capCap cap) \<noteq> None else False else False)
+                then fn (capPDBasePtr (capCap cap)) (the ( capPDMappedASID (capCap cap))) else g)"
+  apply (cases cap; simp add: isArchObjectCap_def)
+  apply (rename_tac arch_capability)
+  apply (case_tac arch_capability, simp_all add: isPageDirectoryCap_def)
+  apply (rename_tac option)
+  apply (case_tac option; simp)
+  done
+
+lemma empty_fail_loadWordUser[intro!, simp]:
+  "empty_fail (loadWordUser x)"
+  by (fastforce simp: loadWordUser_def ef_loadWord ef_dmo')
+
+lemma empty_fail_getMRs[iff]:
+  "empty_fail (getMRs t buf mi)"
+  by (auto simp add: getMRs_def split: option.split)
+
+lemma empty_fail_getReceiveSlots:
+  "empty_fail (getReceiveSlots r rbuf)"
+proof -
+  note
+    empty_fail_resolveAddressBits[wp]
+    empty_fail_rethrowFailure[wp]
+    empty_fail_rethrowFailure[wp]
+  show ?thesis
+  unfolding getReceiveSlots_def loadCapTransfer_def lookupCap_def lookupCapAndSlot_def
+  by (wpsimp simp: emptyOnFailure_def unifyFailure_def lookupSlotForThread_def
+                   capTransferFromWords_def getThreadCSpaceRoot_def locateSlot_conv bindE_assoc
+                   lookupSlotForCNodeOp_def lookupErrorOnFailure_def rangeCheck_def)
+qed
+
+lemma user_getreg_rv:
+  "\<lbrace>obj_at' (\<lambda>tcb. P ((user_regs \<circ> atcbContextGet \<circ> tcbArch) tcb r)) t\<rbrace>
+   asUser t (getRegister r)
+   \<lbrace>\<lambda>rv s. P rv\<rbrace>"
+  apply (simp add: asUser_def split_def)
+  apply (wp threadGet_wp)
+  apply (clarsimp simp: obj_at'_def projectKOs getRegister_def in_monad atcbContextGet_def)
+  done
+
+crunch insertNewCap, Arch_createNewCaps, threadSet, Arch.createObject, setThreadState,
+         updateFreeIndex, preemptionPoint
+  for gsCNodes[wp]: "\<lambda>s. P (gsCNodes s)"
+  (wp: crunch_wps setObject_ksPSpace_only
+   simp: unless_def updateObject_default_def crunch_simps
+   ignore_del: preemptionPoint)
+
+lemma addrFromPPtr_mask_ARMSuperSection:
+  "n \<le> pageBitsForSize ARMSuperSection
+   \<Longrightarrow> addrFromPPtr ptr && mask n = ptr && mask n"
+  apply (simp add: addrFromPPtr_def)
+  apply (prop_tac "pptrBaseOffset AND mask n = 0")
+   apply (rule mask_zero[OF is_aligned_weaken[OF pptrBaseOffset_aligned]], simp)
+  apply (simp flip: mask_eqs(8))
+  done
 
 end
 

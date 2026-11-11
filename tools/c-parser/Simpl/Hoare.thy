@@ -1,29 +1,8 @@
 (*
     Author:      Norbert Schirmer
     Maintainer:  Norbert Schirmer, norbert.schirmer at web de
-    License:     LGPL
-*)
 
-(*  Title:      Hoare.thy
-    Author:     Norbert Schirmer, TU Muenchen
-
-Copyright (C) 2004-2008 Norbert Schirmer
-Some rights reserved, TU Muenchen
-
-This library is free software; you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as
-published by the Free Software Foundation; either version 2.1 of the
-License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
-USA
+Copyright (C) 2006-2008 Norbert Schirmer
 *)
 
 section \<open>Auxiliary Definitions/Lemmas to Facilitate Hoare Logic\<close>
@@ -35,64 +14,64 @@ syntax
 "_hoarep_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,
    'f set,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-    ("(3_,_/\<turnstile> (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+    (\<open>(3_,_/\<turnstile> (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoarep_emptyCtx"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-    ("(3_/\<turnstile>\<^bsub>'/_\<^esub> (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+    (\<open>(3_/\<turnstile>\<^bsub>'/_\<^esub> (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoarep_emptyCtx_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-    ("(3_/\<turnstile> (_/ (_)/ _,/_))" [61,1000,20,1000,1000]60)
+    (\<open>(3_/\<turnstile> (_/ (_)/ _,/_))\<close> [61,1000,20,1000,1000]60)
 
 "_hoarep_noAbr"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'f set,
     's assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_,_/\<turnstile>\<^bsub>'/_\<^esub> (_/ (_)/ _))" [61,60,60,1000,20,1000]60)
+    (\<open>(3_,_/\<turnstile>\<^bsub>'/_\<^esub> (_/ (_)/ _))\<close> [61,60,60,1000,20,1000]60)
 
 "_hoarep_noAbr_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'s assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_,_/\<turnstile> (_/ (_)/ _))" [61,60,1000,20,1000]60)
+    (\<open>(3_,_/\<turnstile> (_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoarep_emptyCtx_noAbr"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_/\<turnstile>\<^bsub>'/_\<^esub> (_/ (_)/ _))" [61,60,1000,20,1000]60)
+    (\<open>(3_/\<turnstile>\<^bsub>'/_\<^esub> (_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoarep_emptyCtx_noAbr_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_/\<turnstile> (_/ (_)/ _))" [61,1000,20,1000]60)
+    (\<open>(3_/\<turnstile> (_/ (_)/ _))\<close> [61,1000,20,1000]60)
 
 
 
 "_hoaret_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,
     's assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-    ("(3_,_/\<turnstile>\<^sub>t (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+    (\<open>(3_,_/\<turnstile>\<^sub>t (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoaret_emptyCtx"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-    ("(3_/\<turnstile>\<^sub>t\<^bsub>'/_\<^esub> (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+    (\<open>(3_/\<turnstile>\<^sub>t\<^bsub>'/_\<^esub> (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoaret_emptyCtx_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-    ("(3_/\<turnstile>\<^sub>t (_/ (_)/ _,/_))" [61,1000,20,1000,1000]60)
+    (\<open>(3_/\<turnstile>\<^sub>t (_/ (_)/ _,/_))\<close> [61,1000,20,1000,1000]60)
 
 "_hoaret_noAbr"::
 "[('s,'p,'f) body,'f set, ('s,'p) quadruple set,
     's assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_,_/\<turnstile>\<^sub>t\<^bsub>'/_\<^esub> (_/ (_)/ _))" [61,60,60,1000,20,1000]60)
+    (\<open>(3_,_/\<turnstile>\<^sub>t\<^bsub>'/_\<^esub> (_/ (_)/ _))\<close> [61,60,60,1000,20,1000]60)
 
 "_hoaret_noAbr_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'s assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_,_/\<turnstile>\<^sub>t (_/ (_)/ _))" [61,60,1000,20,1000]60)
+    (\<open>(3_,_/\<turnstile>\<^sub>t (_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoaret_emptyCtx_noAbr"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_/\<turnstile>\<^sub>t\<^bsub>'/_\<^esub> (_/ (_)/ _))" [61,60,1000,20,1000]60)
+    (\<open>(3_/\<turnstile>\<^sub>t\<^bsub>'/_\<^esub> (_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoaret_emptyCtx_noAbr_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn] => bool"
-    ("(3_/\<turnstile>\<^sub>t (_/ (_)/ _))" [61,1000,20,1000]60)
+    (\<open>(3_/\<turnstile>\<^sub>t (_/ (_)/ _))\<close> [61,1000,20,1000]60)
 
 
 syntax (ASCII)
@@ -100,62 +79,62 @@ syntax (ASCII)
 "_hoarep_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,
      's assn,('s,'p,'f) com, 's assn,'s assn] \<Rightarrow> bool"
-   ("(3_,_/|- (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+   (\<open>(3_,_/|- (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoarep_emptyCtx"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-   ("(3_/|-'/_ (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+   (\<open>(3_/|-'/_ (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoarep_emptyCtx_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-   ("(3_/|-(_/ (_)/ _,/_))" [61,1000,20,1000,1000]60)
+   (\<open>(3_/|-(_/ (_)/ _,/_))\<close> [61,1000,20,1000,1000]60)
 
 "_hoarep_noAbr"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'f set,
    's assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_,_/|-'/_ (_/ (_)/ _))" [61,60,60,1000,20,1000]60)
+   (\<open>(3_,_/|-'/_ (_/ (_)/ _))\<close> [61,60,60,1000,20,1000]60)
 
 "_hoarep_noAbr_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'s assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_,_/|-(_/ (_)/ _))" [61,60,1000,20,1000]60)
+   (\<open>(3_,_/|-(_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoarep_emptyCtx_noAbr"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_/|-'/_ (_/ (_)/ _))" [61,60,1000,20,1000]60)
+   (\<open>(3_/|-'/_ (_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoarep_emptyCtx_noAbr_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_/|-(_/ (_)/ _))" [61,1000,20,1000]60)
+   (\<open>(3_/|-(_/ (_)/ _))\<close> [61,1000,20,1000]60)
 
 "_hoaret_emptyFault"::
 "[('s,'p,'f) body,('s,'p) quadruple set,
      's assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-   ("(3_,_/|-t (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+   (\<open>(3_,_/|-t (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoaret_emptyCtx"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-   ("(3_/|-t'/_ (_/ (_)/ _,/_))" [61,60,1000,20,1000,1000]60)
+   (\<open>(3_/|-t'/_ (_/ (_)/ _,/_))\<close> [61,60,1000,20,1000,1000]60)
 
 "_hoaret_emptyCtx_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn,'s assn] => bool"
-   ("(3_/|-t(_/ (_)/ _,/_))" [61,1000,20,1000,1000]60)
+   (\<open>(3_/|-t(_/ (_)/ _,/_))\<close> [61,1000,20,1000,1000]60)
 
 "_hoaret_noAbr"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'f set,
    's assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_,_/|-t'/_ (_/ (_)/ _))" [61,60,60,1000,20,1000]60)
+   (\<open>(3_,_/|-t'/_ (_/ (_)/ _))\<close> [61,60,60,1000,20,1000]60)
 
 "_hoaret_noAbr_emptyFaults"::
 "[('s,'p,'f) body,('s,'p) quadruple set,'s assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_,_/|-t(_/ (_)/ _))" [61,60,1000,20,1000]60)
+   (\<open>(3_,_/|-t(_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoaret_emptyCtx_noAbr"::
 "[('s,'p,'f) body,'f set,'s assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_/|-t'/_ (_/ (_)/ _))" [61,60,1000,20,1000]60)
+   (\<open>(3_/|-t'/_ (_/ (_)/ _))\<close> [61,60,1000,20,1000]60)
 
 "_hoaret_emptyCtx_noAbr_emptyFaults"::
 "[('s,'p,'f) body,'s assn,('s,'p,'f) com, 's assn] => bool"
-   ("(3_/|-t(_/ (_)/ _))" [61,1000,20,1000]60)
+   (\<open>(3_/|-t(_/ (_)/ _))\<close> [61,1000,20,1000]60)
 
 translations
 

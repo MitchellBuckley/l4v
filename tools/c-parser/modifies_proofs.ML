@@ -385,7 +385,7 @@ fun prove_all_modifies_goals_local csenv includeP tyargs lthy = let
       val _ = Feedback.informStr (0, pnm ^ " commencing.")
       fun msg () = Feedback.informStr (0, pnm ^ " completed.")
       val nway_thm = munge_tactic lthy nway_goal msg tac
-      val nway_thms = HOLogic.conj_elims lthy nway_thm
+      val nway_thms = HOLogic.conj_elims nway_thm
       val _ = length nway_thms = length fnlist orelse
               raise Fail "CONJUNCTS nway_thm and fnlist don't match up!"
       fun note_it (nm, th, lthy) =
@@ -429,12 +429,12 @@ end
 fun prove_all_modifies_goals thy csenv includeP tyargs globloc =
   if Config.get_global thy calculate_modifies_proofs then
     let
-      val lthy = Named_Target.init globloc thy
+      val lthy = Named_Target.init [] globloc thy
     in
       lthy
-        |> Local_Theory.open_target |> snd
+        |> Local_Theory.begin_nested |> snd
         |> prove_all_modifies_goals_local csenv includeP tyargs
-        |> Local_Theory.close_target
+        |> Local_Theory.end_nested
         |> Local_Theory.exit_global
     end
   else
@@ -444,6 +444,6 @@ val _ =
   Outer_Syntax.command
     @{command_keyword "cond_sorry_modifies_proofs"}
     "set sorry_modifies_proof option, conditional on env variable"
-    (Parse.text >> (Toplevel.generic_theory o cond_sorry_modifies_proofs))
+    (Parse.embedded >> (Toplevel.generic_theory o cond_sorry_modifies_proofs))
 
 end (* struct *)

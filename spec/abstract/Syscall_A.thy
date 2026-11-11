@@ -18,13 +18,10 @@ imports
   Hypervisor_A
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   arch_perform_invocation
   handle_vm_fault
   handle_hypervisor_fault
-end
 
 
 text\<open>
@@ -177,7 +174,11 @@ where
 
 | "perform_invocation block call (InvokeTCB i) = invoke_tcb i"
 
-| "perform_invocation block call (InvokeDomain tptr d) = invoke_domain tptr d"
+| "perform_invocation block call (InvokeDomain dom_inv) =
+    liftE (do
+      invoke_domain dom_inv;
+      return []
+    od)"
 
 | "perform_invocation block call (InvokeReply thread slot grant) =
     liftE (do
@@ -252,9 +253,9 @@ definition
   handle_yield :: "(unit,'z::state_ext) s_monad" where
   "handle_yield \<equiv> do
      thread \<leftarrow> gets cur_thread;
-     do_extended_op (tcb_sched_action (tcb_sched_dequeue) thread);
-     do_extended_op (tcb_sched_action (tcb_sched_append) thread);
-     do_extended_op (reschedule_required)
+     tcb_sched_action (tcb_sched_dequeue) thread;
+     tcb_sched_action (tcb_sched_append) thread;
+     reschedule_required
    od"
 
 definition
@@ -349,12 +350,7 @@ where
     return ()
   od)"
 
-| "handle_event Interrupt = (without_preemption $ do
-    active \<leftarrow> do_machine_op $ getActiveIRQ False;
-    case active of
-       Some irq \<Rightarrow> handle_interrupt irq
-     | None \<Rightarrow> return ()
-  od)"
+| "handle_event Interrupt = without_preemption (maybe_handle_interrupt False)"
 
 | "handle_event (VMFaultEvent fault_type) = (without_preemption $ do
     thread \<leftarrow> gets cur_thread;
@@ -377,13 +373,9 @@ text \<open>
 \<close>
 
 definition
-  call_kernel :: "event \<Rightarrow> (unit,'z::state_ext_sched) s_monad" where
+  call_kernel :: "event \<Rightarrow> (unit, 'z::state_ext) s_monad" where
   "call_kernel ev \<equiv> do
-       handle_event ev <handle>
-           (\<lambda>_. without_preemption $ do
-                  irq \<leftarrow> do_machine_op $ getActiveIRQ True;
-                  when (irq \<noteq> None) $ handle_interrupt (the irq)
-                od);
+       handle_event ev <handle> (\<lambda>_. without_preemption $ maybe_handle_interrupt True);
        schedule;
        activate_thread
    od"

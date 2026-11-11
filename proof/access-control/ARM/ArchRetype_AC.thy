@@ -17,7 +17,7 @@ lemma invs_mdb_cte':
 context retype_region_proofs begin interpretation Arch .
 
 lemma vs_refs_no_global_pts_default[simp]:
-  "vs_refs_no_global_pts (default_object ty dev us) = {}"
+  "vs_refs_no_global_pts (default_object ty dev us d) = {}"
   by (simp add: default_object_def default_arch_object_def tyunt
                 vs_refs_no_global_pts_def pde_ref2_def pte_ref_def
                 o_def
@@ -34,21 +34,23 @@ end
 context retype_region_proofs' begin interpretation Arch .
 
 lemma pas_refined:
-  "\<lbrakk> invs s; pas_refined aag s \<rbrakk> \<Longrightarrow> pas_refined aag s'"
-  apply (erule pas_refined_state_objs_to_policy_subset)
-     apply (simp add: state_objs_to_policy_def refs_eq vrefs_eq mdb_and_revokable)
-     apply (rule subsetI, rename_tac x, case_tac x, simp)
-     apply (erule state_bits_to_policy.cases)
-            apply (solves \<open>auto intro!: sbta_caps intro: caps_retype split: cap.split\<close>)
-           apply (solves \<open>auto intro!: sbta_untyped intro: caps_retype split: cap.split\<close>)
+  "\<lbrakk> invs s; pas_refined aag s; pas_cur_domain aag s; \<forall>x\<in> set (retype_addrs ptr ty n us). is_subject aag x \<rbrakk>
+   \<Longrightarrow> pas_refined aag s'"
+  apply (erule pas_refined_subsets_tcb_domain_map_wellformed)
+      apply (simp add: state_objs_to_policy_def refs_eq vrefs_eq mdb_and_revokable)
+      apply (rule subsetI, rename_tac x, case_tac x, simp)
+      apply (erule state_bits_to_policy.cases)
+             apply (solves \<open>auto intro!: sbta_caps intro: caps_retype split: cap.split\<close>)
+            apply (solves \<open>auto intro!: sbta_untyped intro: caps_retype split: cap.split\<close>)
+           apply (blast intro: state_bits_to_policy.intros)
           apply (blast intro: state_bits_to_policy.intros)
-         apply (blast intro: state_bits_to_policy.intros)
-        apply (force intro!: sbta_cdt
+         apply (force intro!: sbta_cdt
+                        dest: caps_of_state_pres invs_mdb_cte'[THEN mdb_cte_atD[rotated]])
+        apply (force intro!: sbta_cdt_transferable
                        dest: caps_of_state_pres invs_mdb_cte'[THEN mdb_cte_atD[rotated]])
-       apply (force intro!: sbta_cdt_transferable
-                      dest: caps_of_state_pres invs_mdb_cte'[THEN mdb_cte_atD[rotated]])
-      apply (simp add: vrefs_eq)
-      apply (blast intro: state_bits_to_policy.intros)
+       apply (simp add: vrefs_eq)
+       apply (blast intro: state_bits_to_policy.intros)
+      apply simp
      apply (simp add: vrefs_eq)
      apply (force elim!: state_asids_to_policy_aux.cases
                  intro: state_asids_to_policy_aux.intros caps_retype
@@ -57,21 +59,22 @@ lemma pas_refined:
     apply clarsimp
     apply (erule state_irqs_to_policy_aux.cases)
     apply (solves\<open>auto intro!: sita_controlled intro: caps_retype split: cap.split\<close>)
-   apply (rule domains_of_state)
+   apply (erule (2) tcb_domain_map_wellformed)
   apply simp
   done
 
 end
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 named_theorems Retype_AC_assms
 
 declare retype_region_proofs.vrefs_eq[Retype_AC_assms]
 declare retype_region_proofs'.pas_refined[Retype_AC_assms]
 
-crunch integrity_autarch: set_pd "integrity aag X st"
+crunch set_pd
+  for integrity_autarch: "integrity aag X st"
   (wp: crunch_wps simp: crunch_simps)
 
 lemma store_pde_respects:
@@ -98,18 +101,16 @@ lemma copy_global_mappings_integrity:
        \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   apply (rule hoare_gen_asm)
   apply (simp add: copy_global_mappings_def)
-  apply (wp mapM_x_wp[OF _ subset_refl] store_pde_respects)
+  apply (wp mapM_x_wp[OF _ subset_refl] store_pde_respects)+
     apply (drule subsetD[OF copy_global_mappings_index_subset])
     apply (fastforce simp: pd_shifting')
    apply wpsimp+
   done
 
-lemma state_vrefs_detype[Retype_AC_assms,simp]:
-  "state_vrefs (detype R s) = (\<lambda>x. if x \<in> R then {} else state_vrefs s x)"
+lemma state_vrefs_detype[Retype_AC_assms, dest]:
+  "x \<in> state_vrefs (detype R s) p \<Longrightarrow> x \<in> state_vrefs s p"
   unfolding state_vrefs_def
-  apply (rule ext)
-  apply (clarsimp simp: detype_def)
-  done
+  by (clarsimp simp: detype_def split: if_splits)
 
 lemma sata_detype[Retype_AC_assms]:
   "state_asids_to_policy aag (detype R s) \<subseteq> state_asids_to_policy aag s"
@@ -118,8 +119,11 @@ lemma sata_detype[Retype_AC_assms]:
   apply (auto intro: state_asids_to_policy_aux.intros split: if_split_asm)
   done
 
-lemma untyped_min_bits_ge_2[Retype_AC_assms]: "2 \<le> untyped_min_bits"
-  by (simp add: untyped_min_bits_def)
+lemma word_size_bits_untyped_min_bits[Retype_AC_assms]: "word_size_bits \<le> untyped_min_bits"
+  by (simp add: word_size_bits_def untyped_min_bits_def)
+
+lemma word_size_bits_resetChunkBits[Retype_AC_assms]: "word_size_bits \<le> resetChunkBits"
+  by (simp add: word_size_bits_def Kernel_Config.resetChunkBits_def)
 
 lemma clas_default_cap[Retype_AC_assms]:
   "tp \<noteq> ArchObject ASIDPoolObj \<Longrightarrow> cap_links_asid_slot aag p (default_cap tp p' sz dev)"
@@ -164,20 +168,19 @@ lemma copy_global_mappings_pas_refined:
        copy_global_mappings pd
        \<lbrace>\<lambda>_. pas_refined aag\<rbrace>"
   apply (simp add: copy_global_mappings_def)
-  apply (rule hoare_weaken_pre)
   apply wp
-  (* Use \<circ> to avoid wp filtering out the global_pd condition here
-     TODO: see if we can clean this up *)
-    apply (rule_tac Q="\<lambda>rv s. is_aligned global_pd pd_bits \<and>
+    (* Use \<circ> to avoid wp filtering out the global_pd condition here
+       TODO: see if we can clean this up *)
+    apply (rule_tac Q'="\<lambda>rv s. is_aligned global_pd pd_bits \<and>
                               (global_pd = (arm_global_pd \<circ> arch_state) s \<and>
                                valid_kernel_mappings s \<and> valid_arch_state s \<and>
                                valid_global_objs s \<and> valid_global_refs s \<and> pas_refined aag s)"
                  in hoare_strengthen_post)
-  apply (rule mapM_x_wp[OF _ subset_refl])
-    apply (rule hoare_seq_ext)
-     apply (unfold o_def)
-     (* Use [1] so wp doesn't filter out the global_pd condition *)
-     apply (wp store_pde_pas_refined store_pde_valid_kernel_mappings_map_global)[1]
+     apply (rule mapM_x_wp[OF _ subset_refl])
+     apply (rule bind_wp)
+      apply (unfold o_def)
+    (* Use [1] so wp doesn't filter out the global_pd condition *)
+      apply (wp store_pde_pas_refined store_pde_valid_kernel_mappings_map_global)[1]
      apply (frule subsetD[OF copy_global_mappings_index_subset])
      apply (rule hoare_gen_asm[simplified K_def pred_conj_def conj_commute])
      apply (simp add: get_pde_def)
@@ -189,7 +192,6 @@ lemma copy_global_mappings_pas_refined:
      apply (frule (1) valid_kernel_mappingsD[folded obj_at_def])
      apply (clarsimp simp: kernel_mapping_slots_def shiftr_20_less pde_ref_def
                            global_refs_def empty_table_update_from_arm_global_pts)
-     apply fastforce
     apply fastforce
    apply (rule gets_wp)
   apply (simp, blast intro: invs_aligned_pdD)
@@ -209,25 +211,21 @@ lemma copy_global_invs_mappings_restricted':
 lemma init_arch_objects_pas_refined[Retype_AC_assms]:
   "\<lbrace>pas_refined aag and post_retype_invs tp refs and (\<lambda>s. \<forall> x\<in>set refs. x \<notin> global_refs s)
                     and K (\<forall>ref \<in> set refs. is_aligned ref (obj_bits_api tp obj_sz))\<rbrace>
-   init_arch_objects tp ptr bits obj_sz refs
+   init_arch_objects tp dev ptr bits obj_sz refs
    \<lbrace>\<lambda>_. pas_refined aag\<rbrace>"
+  supply if_split[split del]
   apply (rule hoare_gen_asm)
-  apply (cases tp)
-       apply (simp_all add: init_arch_objects_def)
-       apply (wp | simp)+
-  apply (rename_tac aobject_type)
-  apply (case_tac aobject_type, simp_all)
-        apply ((simp | wp)+)[5]
-   apply wp
-    apply (rule_tac Q="\<lambda>rv. pas_refined aag and
+  apply (cases tp;
+         (wpsimp simp: init_arch_objects_def
+                 wp: mapM_x_wp'[where f="\<lambda>r. do_machine_op (m r)" for m]))
+   apply (rule_tac Q'="\<lambda>rv. pas_refined aag and
                             all_invs_but_equal_kernel_mappings_restricted (set refs) and
                             (\<lambda>s. \<forall>x \<in> set refs. x \<notin> global_refs s)" in hoare_strengthen_post)
-     apply (wp mapM_x_wp[OF _ subset_refl])
-     apply ((wp copy_global_mappings_pas_refined copy_global_invs_mappings_restricted'
-                copy_global_mappings_global_refs_inv copy_global_invs_mappings_restricted'
-             | fastforce simp: obj_bits_api_def default_arch_object_def pd_bits_def pageBits_def)+)[2]
-   apply (wp dmo_invs hoare_vcg_const_Ball_lift valid_irq_node_typ
-         | fastforce simp: post_retype_invs_def)+
+    apply (wp mapM_x_wp[OF _ subset_refl])
+    apply ((wp copy_global_mappings_pas_refined copy_global_invs_mappings_restricted'
+               copy_global_mappings_global_refs_inv copy_global_invs_mappings_restricted'
+            | fastforce simp: obj_bits_api_def default_arch_object_def pd_bits_def pageBits_def)+)[2]
+  apply (fastforce simp: post_retype_invs_def split: if_split)
   done
 
 lemma region_in_kernel_window_preserved:
@@ -250,7 +248,7 @@ lemma freeMemory_vms:
   apply (simp add: freeMemory_def machine_op_lift_def machine_rest_lift_def split_def)
   apply (wp hoare_drop_imps | simp | wp mapM_x_wp_inv)+
    apply (simp add: storeWord_def | wp)+
-   apply (simp add: word_rsplit_0)+
+   apply (simp add: word_rsplit_0 word_bits_conv)+
   done
 
 lemma dmo_freeMemory_vms:
@@ -264,7 +262,8 @@ lemma freeMemory_valid_irq_states:
   unfolding freeMemory_def
   by (wp mapM_x_wp[OF _ subset_refl] storeWord_valid_irq_states)
 
-crunch pspace_respects_device_region[wp]: freeMemory "\<lambda>ms. P (device_state ms)"
+crunch freeMemory
+  for pspace_respects_device_region[wp]: "\<lambda>ms. P (device_state ms)"
   (wp: crunch_wps)
 
 lemma dmo_freeMemory_invs[Retype_AC_assms]:
@@ -281,11 +280,12 @@ lemma dmo_freeMemory_invs[Retype_AC_assms]:
   apply auto
   done
 
-crunch global_refs[wp]: delete_objects "\<lambda>s. P (global_refs s)"
+crunch delete_objects
+  for global_refs[wp]: "\<lambda>s. P (global_refs s)"
   (ignore: do_machine_op freeMemory)
 
 lemma init_arch_objects_pas_cur_domain[Retype_AC_assms, wp]:
-  "init_arch_objects tp ptr n us refs \<lbrace>pas_cur_domain aag\<rbrace>"
+  "init_arch_objects tp dev ptr n us refs \<lbrace>pas_cur_domain aag\<rbrace>"
   by wp
 
 lemma retype_region_pas_cur_domain[Retype_AC_assms, wp]:
@@ -295,6 +295,11 @@ lemma retype_region_pas_cur_domain[Retype_AC_assms, wp]:
 lemma reset_untyped_cap_pas_cur_domain[Retype_AC_assms, wp]:
   "reset_untyped_cap src_slot \<lbrace>pas_cur_domain aag\<rbrace>"
   by wp
+
+lemma arch_post_reset_untyped_integrity[Retype_AC_assms, wp]:
+  "arch_post_reset_untyped dev sz \<lbrace>integrity aag X st\<rbrace>"
+  unfolding arch_post_reset_untyped_def
+  by (wpsimp simp: dmo_bind_valid dsb_def invalidate_I_PoU_def isb_def)
 
 lemma arch_data_to_obj_type_not_ASIDPoolObj[Retype_AC_assms, simp]:
   "arch_data_to_obj_type v \<noteq> Some ASIDPoolObj"
@@ -321,7 +326,7 @@ lemma storeWord_integrity_autarch:
 
 (* TODO: proof has mainly been copied from dmo_clearMemory_respects *)
 lemma dmo_freeMemory_respects[Retype_AC_assms]:
-  "\<lbrace>integrity aag X st and K (is_aligned ptr bits \<and> bits < word_bits \<and> 2 \<le> bits \<and>
+  "\<lbrace>integrity aag X st and K (is_aligned ptr bits \<and> bits < word_bits \<and> word_size_bits \<le> bits \<and>
                               (\<forall>p \<in> ptr_range ptr bits. is_subject aag p))\<rbrace>
    do_machine_op (freeMemory ptr bits)
    \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
@@ -330,9 +335,8 @@ lemma dmo_freeMemory_respects[Retype_AC_assms]:
   apply wp
   apply clarsimp
   apply (erule use_valid)
-   apply (wp mol_respects mapM_x_wp' storeWord_integrity_autarch)
-   apply simp
-   apply (clarsimp simp: word_size_def word_bits_def
+   apply (wpsimp wp: mol_respects mapM_x_wp' storeWord_integrity_autarch)
+   apply (clarsimp simp: word_size_def word_bits_def word_size_bits_def
                          upto_enum_step_shift_red[where us=2, simplified])
    apply (erule bspec)
    apply (erule set_mp [rotated])
@@ -359,18 +363,18 @@ lemma storeWord_respects:
 
 lemma dmo_clearMemory_respects'[Retype_AC_assms]:
   "\<lbrace>integrity aag X st and
-    K (is_aligned ptr bits \<and> bits < word_bits \<and> 2 \<le> bits \<and>
+    K (is_aligned ptr bits \<and> bits < word_bits \<and> word_size_bits \<le> bits \<and>
        (\<forall>p \<in> ptr_range ptr bits. aag_has_auth_to aag Write p))\<rbrace>
    do_machine_op (clearMemory ptr (2 ^ bits))
    \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   unfolding do_machine_op_def clearMemory_def
   apply (simp add: split_def cleanCacheRange_PoU_def)
-  apply wp
-  apply clarsimp
+  apply wpsimp
   apply (erule use_valid)
-   apply wp
-    apply (simp add: cleanByVA_PoU_def)
-    apply (wp mol_respects mapM_x_wp' storeWord_respects)+
+   apply (wp mapM_x_wp')
+   apply (simp add: cleanCacheRange_RAM_def cleanCacheRange_PoC_def cacheRangeOp_def cleanL2Range_def
+                    cleanByVA_def split_def dsb_def)
+   apply (wp mol_respects mapM_x_wp' storeWord_respects)+
    apply (simp add: word_size_bits_def)
    apply (clarsimp simp: word_size_def word_bits_def upto_enum_step_shift_red[where us=2, simplified])
    apply (erule bspec)
@@ -394,6 +398,12 @@ lemma dmo_cleanCacheRange_PoU_respects [wp]:
   "do_machine_op (cleanCacheRange_PoU vstart vend pstart) \<lbrace>integrity aag X st\<rbrace>"
   by (wpsimp wp: dmo_cacheRangeOp_lift simp: cleanCacheRange_PoU_def cleanByVA_PoU_def)
 
+lemma dmo_cleanCacheRange_RAM_respects [wp]:
+  "do_machine_op (cleanCacheRange_RAM vstart vend pstart) \<lbrace>integrity aag X st\<rbrace>"
+  by (wpsimp wp: dmo_cacheRangeOp_lift
+             simp: dmo_bind_valid cleanCacheRange_RAM_def cleanCacheRange_PoC_def
+                   cleanL2Range_def dsb_def cleanByVA_def)
+
 lemma dmo_mapM_x_cleanCacheRange_PoU_integrity:
   "do_machine_op (mapM_x (\<lambda>x. cleanCacheRange_PoU (f x) (g x) (h x)) refs) \<lbrace>integrity aag X st\<rbrace>"
   by (wp dmo_mapM_x_wp_inv)
@@ -401,7 +411,7 @@ lemma dmo_mapM_x_cleanCacheRange_PoU_integrity:
 lemma init_arch_objects_integrity[Retype_AC_assms]:
   "\<lbrace>integrity aag X st and K (\<forall>x\<in>set refs. is_subject aag x)
                        and K (\<forall>ref \<in> set refs. is_aligned ref (obj_bits_api new_type obj_sz))\<rbrace>
-   init_arch_objects new_type ptr num_objects obj_sz refs
+   init_arch_objects new_type dev ptr num_objects obj_sz refs
    \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   apply (rule hoare_gen_asm)+
   apply (cases new_type; simp add: init_arch_objects_def split del: if_split)
@@ -410,18 +420,34 @@ lemma init_arch_objects_integrity[Retype_AC_assms]:
               simp: obj_bits_api_def default_arch_object_def pd_bits_def pageBits_def)
   done
 
-end
+lemma integrity_asids_detype[Retype_AC_assms]:
+  assumes refs: "\<forall>r\<in>refs. pasObjectAbs aag r \<in> subjects"
+  shows
+    "integrity_asids aag subjects x a (detype refs s) s' =
+     integrity_asids aag subjects x a s s'"
+    "integrity_asids aag subjects x a s (detype refs s') =
+     integrity_asids aag subjects x a s s'"
+  by (auto simp: integrity_asids_def detype_def refs opt_map_def)
 
+lemma retype_region_integrity_asids[Retype_AC_assms]:
+  "\<lbrakk> range_cover ptr sz (obj_bits_api typ o_bits) n; typ \<noteq> Untyped;
+     \<forall>x\<in>up_aligned_area ptr sz. is_subject aag x; integrity_asids aag {pasSubject aag} x a s st \<rbrakk>
+     \<Longrightarrow> integrity_asids aag {pasSubject aag} x a s
+           (st\<lparr>kheap := \<lambda>a. if a \<in> (\<lambda>x. ptr_add ptr (x * 2 ^ obj_bits_api typ o_bits)) ` {0 ..< n}
+                            then Some (default_object typ dev o_bits d)
+                            else kheap s a\<rparr>)"
+  by (clarsimp simp: integrity_asids_def opt_map_def)
+
+declare state_hyp_refs_of_detype[Retype_AC_assms]
+
+end
 
 global_interpretation Retype_AC_1?: Retype_AC_1
 proof goal_cases
   interpret Arch .
   case 1 show ?case
-    by (unfold_locales; fact Retype_AC_assms)
+    by (unfold_locales; (fact Retype_AC_assms | solves \<open>rule integrity_arch_triv\<close>
+                                              | solves \<open>wp only: Retype_AC_assms; simp\<close>)?)
 qed
-
-
-requalify_facts
-  ARM_A.storeWord_respects
 
 end

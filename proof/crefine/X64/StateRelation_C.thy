@@ -8,7 +8,10 @@ theory StateRelation_C
 imports Wellformed_C
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+(* needs to be outside of locales *)
+declare domScheduleLength_def[code]
+
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 definition
   "lifth p s \<equiv> the (clift (t_hrs_' s) p)"
@@ -16,8 +19,7 @@ definition
 definition
   "array_relation r n a c \<equiv> \<forall>i \<le> n. r (a i) (index c (unat i))"
 
-(* used for bound ntfn/tcb *)
-definition
+definition option_to_ctcb_ptr :: "machine_word option \<Rightarrow> tcb_C ptr" where
   "option_to_ctcb_ptr x \<equiv> case x of None \<Rightarrow> NULL | Some t \<Rightarrow> tcb_ptr_to_ctcb_ptr t"
 
 
@@ -80,7 +82,7 @@ text \<open>
   which can subsequently be instantiated for
   @{text kernel_all_global_addresses} as well as @{text kernel_all_substitute}.
 \<close>
-locale state_rel = Arch + substitute_pre + (*FIXME: arch_split*)
+locale state_rel = Arch + substitute_pre + (*FIXME: arch-split*)
   fixes x64KSKernelVSpace_C :: "machine_word \<Rightarrow> x64vspace_region_use"
 
 locale kernel = kernel_all_substitute + state_rel
@@ -175,12 +177,16 @@ where
            \<and> ptr_span (ioport_table_Ptr (symbol_table ''x86KSAllocatedIOPorts'')) \<subseteq> kernel_data_refs"
 
 definition
-  fpu_null_state_relation :: "heap_raw_state \<Rightarrow> bool"
+  fpu_null_state_relation :: "user_fpu_state_C \<Rightarrow> bool"
 where
-  "fpu_null_state_relation hrs \<equiv>
-    clift hrs (Ptr (symbol_table ''x86KSnullFpuState''))
-      = Some (user_fpu_state_C (ARRAY i. FPUNullState (finite_index i))) \<and>
-    ptr_span (fpu_state_Ptr (symbol_table ''x86KSnullFpuState'')) \<subseteq> kernel_data_refs"
+  "fpu_null_state_relation nullFpuState \<equiv>
+    nullFpuState = user_fpu_state_C (ARRAY i. FPUNullState (finite_index i))"
+
+definition cur_fpu_relation :: "machine_word option \<Rightarrow> tcb_C ptr \<Rightarrow> bool" where
+  "cur_fpu_relation akscurfpu cfpu \<equiv>
+     case akscurfpu of
+       Some acurfpu \<Rightarrow> cfpu = tcb_ptr_to_ctcb_ptr acurfpu \<and> cfpu \<noteq> NULL
+     | None \<Rightarrow> cfpu = NULL"
 
 definition
   carch_state_relation :: "Arch.kernel_state \<Rightarrow> globals \<Rightarrow> bool"
@@ -190,14 +196,16 @@ where
     array_relation ((=) \<circ> option_to_ptr) (2^asid_high_bits - 1) (x64KSASIDTable astate) (x86KSASIDTable_' cstate) \<and>
     ccr3_relation (x64KSCurrentUserCR3 astate) (x64KSCurrentUserCR3_' cstate) \<and>
     global_ioport_bitmap_relation (clift (t_hrs_' cstate)) (x64KSAllocatedIOPorts astate) \<and>
-    fpu_null_state_relation (t_hrs_' cstate) \<and>
+    fpu_null_state_relation (x86KSnullFpuState_' cstate) \<and>
     x64KSNumIOAPICs astate = UCAST (32 \<rightarrow> 64) (num_ioapics_' cstate) \<and>
+    array_relation (=) (of_nat Kernel_Config.maxNumIOAPIC) (x64KSIOAPICnIRQs astate) (ioapic_nirqs_' cstate) \<and>
     array_relation x64_irq_state_relation maxIRQ (x64KSIRQState astate) (x86KSIRQState_' cstate) \<and>
-    carch_globals astate"
+    carch_globals astate \<and>
+    cur_fpu_relation (x64KSCurFPUOwner astate) (ksCurFPUOwner_' cstate)"
 
 end
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 definition
   cmachine_state_relation :: "machine_state \<Rightarrow> globals \<Rightarrow> bool"
@@ -206,6 +214,7 @@ where
   irq_masks s = irq_masks (phantom_machine_state_' s') \<and>
   irq_state s = irq_state (phantom_machine_state_' s') \<and>
   device_state s = device_state (phantom_machine_state_' s') \<and>
+  fpu_enabled s = fpu_enabled (phantom_machine_state_' s') \<and>
   \<comment> \<open>exclusive_state s = exclusive_state (phantom_machine_state_' s') \<and>\<close> \<comment> \<open>FIXME x64:this is needed for infoflow so we'll leave it commented\<close>
   machine_state_rest s = machine_state_rest (phantom_machine_state_' s')"
 
@@ -330,7 +339,7 @@ definition
   ccontext_relation :: "user_context \<Rightarrow> user_context_C \<Rightarrow> bool"
 where
   "ccontext_relation uc_H uc_C \<equiv> cregs_relation (user_regs uc_H) (registers_C uc_C) \<and>
-                                  fpu_relation (fpu_state uc_H) (fpuState_C uc_C)"
+                                  fpu_relation (user_fpu_state uc_H) (fpuState_C uc_C)"
 
 primrec
   cthread_state_relation_lifted :: "Structures_H.thread_state \<Rightarrow>
@@ -439,7 +448,10 @@ where
      \<and> tcbTimeSlice atcb    = unat (tcbTimeSlice_C ctcb)
      \<and> cfault_rel (tcbFault atcb) (seL4_Fault_lift (tcbFault_C ctcb))
                   (lookup_fault_lift (tcbLookupFailure_C ctcb))
-     \<and> option_to_ptr (tcbBoundNotification atcb) = tcbBoundNotification_C ctcb"
+     \<and> option_to_ptr (tcbBoundNotification atcb) = tcbBoundNotification_C ctcb
+     \<and> option_to_ctcb_ptr (tcbSchedPrev atcb) = tcbSchedPrev_C ctcb
+     \<and> option_to_ctcb_ptr (tcbSchedNext atcb) = tcbSchedNext_C ctcb
+     \<and> tcbFlags atcb = tcbFlags_C ctcb"
 
 abbreviation
   "ep_queue_relation' \<equiv> tcb_queue_relation' tcbEPNext_C tcbEPPrev_C"
@@ -776,17 +788,17 @@ definition
 where
   "cready_queues_index_to_C qdom prio \<equiv> (unat qdom) * numPriorities + (unat prio)"
 
-definition
-  cready_queues_relation :: "tcb_C typ_heap \<Rightarrow> (tcb_queue_C[4096]) \<Rightarrow> (domain \<times> priority \<Rightarrow> ready_queue) \<Rightarrow> bool"
-where
-  "cready_queues_relation h_tcb queues aqueues \<equiv>
-     \<forall>qdom prio. ((qdom \<ge> ucast minDom \<and> qdom \<le> ucast maxDom \<and>
-                  prio \<ge> ucast minPrio \<and> prio \<le> ucast maxPrio) \<longrightarrow>
-       (let cqueue = index queues (cready_queues_index_to_C qdom prio) in
-            sched_queue_relation' h_tcb (aqueues (qdom, prio)) (head_C cqueue) (end_C cqueue)))
-        \<and> (\<not> (qdom \<ge> ucast minDom \<and> qdom \<le> ucast maxDom \<and>
-                  prio \<ge> ucast minPrio \<and> prio \<le> ucast maxPrio) \<longrightarrow> aqueues (qdom, prio) = [])"
+definition ctcb_queue_relation :: "tcb_queue \<Rightarrow> tcb_queue_C \<Rightarrow> bool" where
+   "ctcb_queue_relation aqueue cqueue \<equiv>
+      head_C cqueue = option_to_ctcb_ptr (tcbQueueHead aqueue)
+      \<and> end_C cqueue = option_to_ctcb_ptr (tcbQueueEnd aqueue)"
 
+definition cready_queues_relation ::
+  "(domain \<times> priority \<Rightarrow> ready_queue) \<Rightarrow> (tcb_queue_C[num_tcb_queues]) \<Rightarrow>  bool"
+  where
+  "cready_queues_relation aqueues cqueues \<equiv>
+     \<forall>d p. d \<le> maxDomain \<and> p \<le> maxPriority
+           \<longrightarrow> ctcb_queue_relation (aqueues (d, p)) (index cqueues (cready_queues_index_to_C d p))"
 
 abbreviation
   "cte_array_relation astate cstate
@@ -807,9 +819,8 @@ fun
   | "irqstate_to_C IRQTimer = scast Kernel_C.IRQTimer"
   | "irqstate_to_C irqstate.IRQReserved = scast Kernel_C.IRQReserved"
 
-(* FIXME x64: 126? was 192 before, investigate naming *)
 definition
-  cinterrupt_relation :: "interrupt_state \<Rightarrow> 'a ptr \<Rightarrow> (machine_word[126]) \<Rightarrow> bool"
+  cinterrupt_relation :: "interrupt_state \<Rightarrow> 'a ptr \<Rightarrow> (machine_word[irq_array_size]) \<Rightarrow> bool"
 where
   "cinterrupt_relation airqs cnode cirqs \<equiv>
      cnode = Ptr (intStateIRQNode airqs) \<and>
@@ -825,18 +836,20 @@ where
    | SwitchToThread p' \<Rightarrow> p = tcb_ptr_to_ctcb_ptr p'"
 
 definition
-  dom_schedule_entry_relation :: "8 word \<times> machine_word \<Rightarrow> dschedule_C \<Rightarrow> bool"
+  dom_schedule_entry_relation :: "domain \<times> domain_duration \<Rightarrow> 64 word \<Rightarrow> bool"
 where
   "dom_schedule_entry_relation adomSched cdomSched \<equiv>
-     ucast (fst adomSched) = dschedule_C.domain_C cdomSched \<and>
-     (snd adomSched) = dschedule_C.length_C cdomSched"
+     ucast (fst adomSched) = cdomSched >> LENGTH(domain_duration_len) \<and>
+     (snd adomSched) = cdomSched && mask LENGTH(domain_duration_len)"
+
+value_type dom_schedule_len = "unat domScheduleLength"
 
 definition
-  cdom_schedule_relation :: "(8 word \<times> machine_word) list \<Rightarrow> (dschedule_C['b :: finite]) \<Rightarrow> bool"
+  cdom_schedule_relation :: "(domain \<times> domain_duration) list \<Rightarrow> (64 word[dom_schedule_len]) \<Rightarrow> bool"
 where
   "cdom_schedule_relation adomSched cdomSched \<equiv>
-     length adomSched = card (UNIV :: 'b set) \<and>
-     (\<forall>n \<le> length adomSched. dom_schedule_entry_relation (adomSched ! n) (index cdomSched n))"
+     length adomSched = LENGTH(dom_schedule_len) \<and>
+     (\<forall>n < length adomSched. dom_schedule_entry_relation (adomSched ! n) (index cdomSched n))"
 
 definition
   ghost_size_rel :: "cghost_state \<Rightarrow> nat \<Rightarrow> bool"
@@ -862,7 +875,7 @@ where
            ((\<not> (d \<le> maxDomain \<and> i < l2BitmapSize))
             \<longrightarrow>  abitmap2 (d, i) = 0)"
 
-end (* interpretation Arch . (*FIXME: arch_split*) *)
+end (* interpretation Arch . (*FIXME: arch-split*) *)
 
 definition
    region_is_bytes' :: "machine_word \<Rightarrow> nat \<Rightarrow> heap_typ_desc \<Rightarrow> bool"
@@ -909,8 +922,10 @@ where
 
 context state_rel begin
 
+value_type intState_array_size = "2^LENGTH(irq_len) :: nat"
+
 \<comment> \<open>The IRQ node is a global array of CTEs.\<close>
-abbreviation intStateIRQNode_array_Ptr :: "(cte_C[256]) ptr" where
+abbreviation intStateIRQNode_array_Ptr :: "(cte_C[intState_array_size]) ptr" where
   "intStateIRQNode_array_Ptr \<equiv> Ptr (symbol_table ''intStateIRQNode'')"
 
 \<comment> \<open>But for compatibility with older proofs (written when the IRQ Node was a global pointer
@@ -926,9 +941,7 @@ where
   "cstate_relation astate cstate \<equiv>
      let cheap = t_hrs_' cstate in
        cpspace_relation (ksPSpace astate) (underlying_memory (ksMachineState astate)) cheap \<and>
-       cready_queues_relation (clift cheap)
-                             (ksReadyQueues_' cstate)
-                             (ksReadyQueues astate) \<and>
+       cready_queues_relation (ksReadyQueues astate) (ksReadyQueues_' cstate) \<and>
        zero_ranges_are_zero (gsUntypedZeroRanges astate) cheap \<and>
        cbitmap_L1_relation (ksReadyQueuesL1Bitmap_' cstate) (ksReadyQueuesL1Bitmap astate) \<and>
        cbitmap_L2_relation (ksReadyQueuesL2Bitmap_' cstate) (ksReadyQueuesL2Bitmap astate) \<and>
@@ -951,9 +964,9 @@ where
        htd_safe domain (hrs_htd (t_hrs_' cstate)) \<and>
        -domain \<subseteq> kernel_data_refs \<and>
        globals_list_distinct (- kernel_data_refs) symbol_table globals_list \<and>
-       cdom_schedule_relation (ksDomSchedule astate)
-                              Kernel_C.kernel_all_global_addresses.ksDomSchedule \<and>
-       ksDomScheduleIdx_' cstate = of_nat (ksDomScheduleIdx astate) \<and>
+       cdom_schedule_relation (ksDomSchedule astate) (ksDomSchedule_' cstate) \<and>
+       unat (ksDomScheduleIdx_' cstate) = ksDomScheduleIdx astate \<and>
+       unat (ksDomScheduleStart_' cstate) = ksDomScheduleStart astate \<and>
        ksCurDomain_' cstate = ucast (ksCurDomain astate) \<and>
        ksDomainTime_' cstate = ksDomainTime astate"
 

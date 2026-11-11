@@ -13,10 +13,10 @@ chapter "ARM Machine Instantiation"
 
 theory Machine_A
 imports
-  "ExecSpec.MachineTypes"
+  "ExecSpec.MachineOps"
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   The specification is written with abstract type names for object
@@ -43,6 +43,18 @@ type_synonym asid_high_index    = "asid_high_len word"
 type_synonym asid_len           = 17
 type_synonym asid_rep_len       = machine_word_len
 type_synonym asid               = "asid_rep_len word"
+
+text \<open>
+  Hardware ASID 0 is reserved for the global/empty page directory: @{text set_vm_root} installs
+  the empty page directory under hardware ASID 0 for threads without a valid page directory,
+  without a TLB flush. That is only sound if no real page directory ever runs under hardware
+  ASID 0, otherwise such a thread hits that page directory's TLB entries.
+\<close>
+definition hw_asid_reserved :: hardware_asid where
+  "hw_asid_reserved \<equiv> 0"
+
+definition hw_asid_min :: hardware_asid where
+  "hw_asid_min \<equiv> 1"
 
 text \<open>With the definitions above, most conversions between abstract
 type names boil down to just the identity function, some convert from
@@ -82,11 +94,11 @@ definition
 
 definition
   combine_ntfn_badges :: "data \<Rightarrow> data \<Rightarrow> data" where
-  "combine_ntfn_badges \<equiv> bitOR"
+  "combine_ntfn_badges \<equiv> semiring_bit_operations_class.or"
 
 definition
   combine_ntfn_msgs :: "data \<Rightarrow> data \<Rightarrow> data" where
-  "combine_ntfn_msgs \<equiv> bitOR"
+  "combine_ntfn_msgs \<equiv> semiring_bit_operations_class.or"
 
 
 text \<open>These definitions will be unfolded automatically in proofs.\<close>
@@ -107,29 +119,21 @@ definition
   msg_label_bits :: nat where
   [simp]: "msg_label_bits \<equiv> 20"
 
-type_synonym user_context = "register \<Rightarrow> data"
-
 definition
   new_context :: "user_context" where
-  "new_context \<equiv> (\<lambda>r. 0) (CPSR := 0x150)"
+  "new_context \<equiv> UserContext ((\<lambda>r. 0) (CPSR := 0x150))"
 
 text \<open>The lowest virtual address in the kernel window. The kernel reserves the
 virtual addresses from here up in every virtual address space.\<close>
 definition
   kernel_base :: "vspace_ref" where
-  "kernel_base \<equiv> 0xe0000000"
-
-definition
-  idle_thread_ptr :: vspace_ref where
-  "idle_thread_ptr = kernel_base + 0x1000"
+  "kernel_base \<equiv> pptrBase"
 
 end
 
-context begin interpretation Arch .
-  requalify_consts kernel_base idle_thread_ptr
-end
+arch_requalify_consts (A) kernel_base
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 text \<open>Miscellaneous definitions of constants used in modelling machine
 operations.\<close>

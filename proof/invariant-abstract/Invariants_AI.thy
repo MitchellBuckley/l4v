@@ -1,4 +1,5 @@
 (*
+ * Copyright 2022, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
@@ -8,27 +9,36 @@ theory Invariants_AI
 imports ArchInvariants_AI
 begin
 
-context begin interpretation Arch .
-
-requalify_types
+arch_requalify_types
   iarch_tcb
 
-requalify_consts
+arch_requalify_consts (A)
+  arch_cap_is_device
+  ASIDPoolObj
+
+(* we need to know the sizes of arch objects in the generic context *)
+arch_requalify_facts (A)
+  cte_level_bits_def
+  tcb_bits_def
+  endpoint_bits_def
+  ntfn_bits_def
+
+arch_requalify_consts
   not_kernel_window
   global_refs
   arch_obj_bits_type
-  arch_cap_is_device
   is_nondevice_page_cap
   state_hyp_refs_of
   hyp_refs_of
+  tcb_hyp_refs
   hyp_live
+  arch_tcb_live
 
   wellformed_acap
   valid_arch_cap
   valid_arch_cap_ref
   acap_class
   valid_ipc_buffer_cap
-  wellformed_vspace_obj
   arch_valid_obj
   valid_asid_map
   valid_vspace_obj
@@ -36,16 +46,14 @@ requalify_consts
   valid_arch_idle
 
   valid_arch_state
+  valid_cur_fpu
   valid_vspace_objs
   valid_arch_caps
   valid_global_objs
-  valid_ioports
   valid_kernel_mappings
   equal_kernel_mappings
   valid_global_vspace_mappings
   pspace_in_kernel_window
-
-  ASIDPoolObj
 
   valid_vs_lookup
   user_mem
@@ -59,7 +67,7 @@ requalify_consts
   vs_lookup
   vs_lookup_pages
 
-requalify_facts
+arch_requalify_facts
   valid_arch_sizes
   aobj_bits_T
   valid_arch_cap_def2
@@ -69,10 +77,9 @@ requalify_facts
   valid_vspace_obj_typ
   arch_kobj_size_bounded
   global_refs_lift
-  valid_arch_state_lift
   aobj_at_default_arch_cap_valid
   aobj_ref_default
-  acap_rights_update_id
+  wf_acap_rights_update_id
   physical_arch_cap_has_ref
   wellformed_arch_default
   valid_vspace_obj_default'
@@ -89,16 +96,18 @@ requalify_facts
   tcb_arch_ref_simps
   hyp_live_tcb_simps
   hyp_live_tcb_def
+  arch_tcb_live_context_simps
   wellformed_arch_pspace
   wellformed_arch_typ
   valid_arch_tcb_pspaceI
   valid_arch_tcb_lift
-  cte_level_bits_def
   obj_ref_not_arch_gen_ref
   arch_gen_ref_not_obj_ref
   arch_gen_obj_refs_inD
   same_aobject_same_arch_gen_refs
   valid_arch_mdb_eqI
+  iarch_tcb_context_set
+  iarch_tcb_set_registers
 
 lemmas [simp] =
   tcb_bits_def
@@ -107,12 +116,10 @@ lemmas [simp] =
   iarch_tcb_context_set
   iarch_tcb_set_registers
 
-end
+lemmas [intro!] = idle_global wf_acap_rights_update_id
 
-lemmas [intro!] =  idle_global acap_rights_update_id
-
-lemmas [simp] =  acap_rights_update_id state_hyp_refs_update
-                 tcb_arch_ref_simps hyp_live_tcb_simps hyp_refs_of_simps
+lemmas [simp] = wf_acap_rights_update_id state_hyp_refs_update
+                tcb_arch_ref_simps hyp_live_tcb_simps arch_tcb_live_context_simps hyp_refs_of_simps
 
 
 \<comment> \<open>---------------------------------------------------------------------------\<close>
@@ -221,6 +228,7 @@ where
 abbreviation "st_tcb_at \<equiv> pred_tcb_at itcb_state"
 abbreviation "bound_tcb_at \<equiv> pred_tcb_at itcb_bound_notification"
 abbreviation "mcpriority_tcb_at \<equiv> pred_tcb_at itcb_mcpriority"
+abbreviation "arch_tcb_at \<equiv> pred_tcb_at itcb_arch"
 
 (* sseefried: 'st_tcb_at_def' only exists to make existing proofs go through. Use 'pred_tcb_at_def' from now on. *)
 lemma st_tcb_at_def: "st_tcb_at test \<equiv> obj_at (\<lambda>ko. \<exists>tcb. ko = TCB tcb \<and> test (tcb_state tcb))"
@@ -265,7 +273,7 @@ primrec (nonexhaustive)
   usable_untyped_range :: "cap \<Rightarrow> machine_word set"
 where
  "usable_untyped_range (UntypedCap _ p n f) =
-  (if f < 2^n  then {p+of_nat f .. p + 2 ^ n - 1} else {})"
+  (if f < 2 ^ n \<and> p \<le> p + of_nat f then {p + of_nat f .. p + 2 ^ n - 1} else {})"
 
 definition
   "obj_range p obj \<equiv> {p .. p + 2^obj_bits obj - 1}" (* FIXME mask_range *)
@@ -381,10 +389,13 @@ where
   | ArchObjectCap ac \<Rightarrow> valid_arch_cap ac s)"
 
 
-abbreviation
-  valid_cap_syn :: "'z::state_ext state \<Rightarrow> cap \<Rightarrow> bool" ("_ \<turnstile> _" [60, 60] 61)
-where
-  "s \<turnstile> c \<equiv> valid_cap c s"
+abbreviation valid_cap_syn :: "'z::state_ext state \<Rightarrow> cap \<Rightarrow> bool" where
+  "valid_cap_syn s c \<equiv> valid_cap c s" (* s \<turnstile> c \<equiv> valid_cap c s ; syntax applied via bundle below *)
+
+(* use "includes no valid_cap_syn" to prevent syntax ambiguity warning with spec_validE *)
+open_bundle valid_cap_syn begin
+notation valid_cap_syn ("_ \<turnstile> _" [60, 60] 61)
+end
 
 definition
   "valid_caps cs s \<equiv> \<forall>slot cap. cs slot = Some cap \<longrightarrow> valid_cap cap s"
@@ -392,18 +403,18 @@ definition
 primrec
   cap_class :: "cap \<Rightarrow> capclass"
 where
-  "cap_class (cap.NullCap)                          = NullClass"
-| "cap_class (cap.UntypedCap dev p n f)             = PhysicalClass"
-| "cap_class (cap.EndpointCap ref badge r)          = PhysicalClass"
-| "cap_class (cap.NotificationCap ref badge r)     = PhysicalClass"
-| "cap_class (cap.CNodeCap ref n bits)              = PhysicalClass"
-| "cap_class (cap.ThreadCap ref)                    = PhysicalClass"
-| "cap_class (cap.DomainCap)                        = DomainClass"
-| "cap_class (cap.Zombie r b n)                     = PhysicalClass"
-| "cap_class (cap.IRQControlCap)                    = IRQClass"
-| "cap_class (cap.IRQHandlerCap irq)                = IRQClass"
-| "cap_class (cap.ReplyCap tcb m rights)            = ReplyClass tcb"
-| "cap_class (cap.ArchObjectCap cap)                = acap_class cap"
+  "cap_class (NullCap)                     = OtherCapClass"
+| "cap_class (UntypedCap dev p n f)        = PhysicalClass"
+| "cap_class (EndpointCap ref badge r)     = PhysicalClass"
+| "cap_class (NotificationCap ref badge r) = PhysicalClass"
+| "cap_class (CNodeCap ref n bits)         = PhysicalClass"
+| "cap_class (ThreadCap ref)               = PhysicalClass"
+| "cap_class (DomainCap)                   = OtherCapClass"
+| "cap_class (Zombie r b n)                = PhysicalClass"
+| "cap_class (IRQControlCap)               = OtherCapClass"
+| "cap_class (IRQHandlerCap irq)           = OtherCapClass"
+| "cap_class (ReplyCap tcb m rights)       = ReplyClass tcb"
+| "cap_class (ArchObjectCap cap)           = acap_class cap"
 
 
 definition
@@ -698,7 +709,7 @@ definition live :: "kernel_object \<Rightarrow> bool"
 where
  "live ko \<equiv> case ko of
      CNode sz fun      => False
-   | TCB tcb           => live0 ko \<or> hyp_live ko
+   | TCB tcb           => live0 ko \<or> hyp_live ko \<or> arch_tcb_live (tcb_arch tcb)
    | Endpoint ep       => live0 ko
    | Notification ntfn => live0 ko
    | ArchObj ao        => hyp_live ko"
@@ -996,10 +1007,10 @@ where
                   and valid_reply_masters
                   and valid_global_refs
                   and valid_arch_state
+                  and valid_cur_fpu
                   and valid_irq_node
                   and valid_irq_handlers
                   and valid_irq_states
-                  and valid_ioports
                   and valid_machine_state
                   and valid_vspace_objs
                   and valid_arch_caps
@@ -1077,11 +1088,10 @@ abbreviation(input)
        and if_live_then_nonz_cap and zombies_final
        and valid_mdb and valid_idle and only_idle and if_unsafe_then_cap
        and valid_reply_caps and valid_reply_masters and valid_global_refs
-       and valid_arch_state and valid_machine_state and valid_irq_states
+       and valid_arch_state and valid_cur_fpu and valid_machine_state and valid_irq_states
        and valid_irq_node and valid_irq_handlers and valid_vspace_objs
        and valid_arch_caps and valid_global_objs and valid_kernel_mappings
-       and equal_kernel_mappings and valid_asid_map and valid_ioports
-       and valid_global_vspace_mappings
+       and equal_kernel_mappings and valid_asid_map and valid_global_vspace_mappings
        and pspace_in_kernel_window and cap_refs_in_kernel_window
        and pspace_respects_device_region and cap_refs_respects_device_region
        and cur_tcb"
@@ -1277,6 +1287,12 @@ lemma valid_objsI [intro]:
 lemma valid_objsE [elim]:
   "\<lbrakk> valid_objs s; kheap s x = Some obj; valid_obj x obj s \<Longrightarrow> R \<rbrakk> \<Longrightarrow> R"
   unfolding valid_objs_def by (auto simp: dom_def)
+
+\<comment> \<open>This would be a simp rule but too many existing proofs expect valid_obj and break when it is
+    preemptively simplified into arch_valid_obj.\<close>
+lemma valid_obj_arch_valid_obj:
+  "valid_obj p (ArchObj ao) s = arch_valid_obj ao s"
+  by (simp add: valid_obj_def)
 
 
 lemma obj_at_ko_at:
@@ -1681,17 +1697,13 @@ lemma cte_wp_at_pspaceI:
   "\<lbrakk> cte_wp_at P slot s; kheap s = kheap s' \<rbrakk> \<Longrightarrow> cte_wp_at P slot s'"
   by (simp add: cte_wp_at_cases)
 
-context Arch begin
-lemma valid_arch_cap_pspaceI:
+(* generic consequence of architecture-specific details *)
+lemma (in Arch) valid_arch_cap_pspaceI:
   "\<lbrakk> valid_arch_cap acap s; kheap s = kheap s' \<rbrakk> \<Longrightarrow> valid_arch_cap acap s'"
   unfolding valid_arch_cap_def
   by (auto intro: obj_at_pspaceI split: arch_cap.split)
-end
 
-context begin interpretation Arch .
-requalify_facts
-  valid_arch_cap_pspaceI
-end
+requalify_facts Arch.valid_arch_cap_pspaceI
 
 lemma valid_cap_pspaceI:
   "\<lbrakk> s \<turnstile> cap; kheap s = kheap s' \<rbrakk> \<Longrightarrow> s' \<turnstile> cap"
@@ -1823,7 +1835,7 @@ lemma valid_mdb_eqI:
   done
 
 lemma set_object_at_obj:
-  "\<lbrace> \<lambda>s. obj_at P p s \<and> (p = r \<longrightarrow> P obj) \<rbrace> set_object r obj \<lbrace> \<lambda>rv. obj_at P p \<rbrace>"
+  "\<lbrace> \<lambda>s. Q (obj_at P p s) \<and> (p = r \<longrightarrow> Q (P obj)) \<rbrace> set_object r obj \<lbrace> \<lambda>_ s. Q (obj_at P p s) \<rbrace>"
   by (clarsimp simp: valid_def in_monad obj_at_def set_object_def get_object_def)
 
 lemma set_object_at_obj1:
@@ -2299,7 +2311,7 @@ lemma valid_tcb_state_typ:
   assumes P: "\<And>T p. \<lbrace>typ_at T p\<rbrace> f \<lbrace>\<lambda>rv. typ_at T p\<rbrace>"
   shows      "\<lbrace>\<lambda>s. valid_tcb_state st s\<rbrace> f \<lbrace>\<lambda>rv s. valid_tcb_state st s\<rbrace>"
   by (case_tac st,
-      simp_all add: valid_tcb_state_def hoare_post_taut
+      simp_all add: valid_tcb_state_def hoare_TrueI
                     ep_at_typ P tcb_at_typ ntfn_at_typ)
 
 lemma ntfn_at_typ_at:
@@ -2327,7 +2339,7 @@ lemma valid_ep_typ:
   assumes P: "\<And>p. \<lbrace>typ_at ATCB p\<rbrace> f \<lbrace>\<lambda>rv. typ_at ATCB p\<rbrace>"
   shows      "\<lbrace>\<lambda>s. valid_ep ep s\<rbrace> f \<lbrace>\<lambda>rv s. valid_ep ep s\<rbrace>"
   apply (case_tac ep,
-         simp_all add: valid_ep_def hoare_post_taut tcb_at_typ)
+         simp_all add: valid_ep_def hoare_TrueI tcb_at_typ)
    apply (rule hoare_vcg_conj_lift [OF hoare_vcg_prop])
    apply (rule hoare_vcg_conj_lift [OF _ hoare_vcg_prop])
    apply (rule hoare_vcg_const_Ball_lift [OF P])
@@ -2340,14 +2352,14 @@ lemma valid_ntfn_typ:
   assumes P: "\<And>p. \<lbrace>typ_at ATCB p\<rbrace> f \<lbrace>\<lambda>rv. typ_at ATCB p\<rbrace>"
   shows      "\<lbrace>\<lambda>s. valid_ntfn ntfn s\<rbrace> f \<lbrace>\<lambda>rv s. valid_ntfn ntfn s\<rbrace>"
   apply (case_tac "ntfn_obj ntfn",
-         simp_all add: valid_ntfn_def valid_bound_tcb_def hoare_post_taut tcb_at_typ)
+         simp_all add: valid_ntfn_def valid_bound_tcb_def hoare_TrueI tcb_at_typ)
     defer 2
-    apply ((case_tac "ntfn_bound_tcb ntfn", simp_all add: hoare_post_taut tcb_at_typ P)+)[2]
+    apply ((case_tac "ntfn_bound_tcb ntfn", simp_all add: hoare_TrueI tcb_at_typ P)+)[2]
   apply (rule hoare_vcg_conj_lift [OF hoare_vcg_prop])+
   apply (rule hoare_vcg_conj_lift)
    apply (rule hoare_vcg_const_Ball_lift [OF P])
   apply (rule hoare_vcg_conj_lift [OF hoare_vcg_prop])
-  apply (case_tac "ntfn_bound_tcb ntfn", simp_all add: hoare_post_taut tcb_at_typ P)
+  apply (case_tac "ntfn_bound_tcb ntfn", simp_all add: hoare_TrueI tcb_at_typ P)
   apply (rule hoare_vcg_conj_lift [OF hoare_vcg_prop], simp add: P)
   done
 
@@ -2636,6 +2648,10 @@ lemma valid_reply_masters_update [iff]:
 lemmas in_user_frame_update[iff] = in_user_frame_update
 lemmas in_device_frame_update[iff] = in_device_frame_update
 
+lemma zombies_final_update[iff]:
+  "zombies_final (f s) = zombies_final s"
+  by (simp add: zombies_final_def is_final_cap'_def)
+
 end
 
 
@@ -2669,9 +2685,9 @@ lemma cap_refs_in_kernel_window_update [iff]:
   "cap_refs_in_kernel_window (f s) = cap_refs_in_kernel_window s"
   by (simp add: cap_refs_in_kernel_window_def arch pspace)
 
-lemma valid_ioports_update[iff]:
-  "valid_ioports (f s) = valid_ioports s"
-  by (simp add: valid_ioports_def arch)
+lemma valid_cur_fpu_update [iff]:
+  "valid_cur_fpu (f s) = valid_cur_fpu s"
+  by simp
 
 end
 
@@ -2758,6 +2774,49 @@ interpretation more_update:
 
 sublocale Arch \<subseteq> more_update: Arch_p_arch_idle_update_int_eq "trans_state f" ..
 
+interpretation scheduler_action_update:
+  p_arch_idle_update_int_eq "scheduler_action_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq> scheduler_action_update: Arch_p_arch_idle_update_int_eq "scheduler_action_update f" ..
+
+interpretation domain_list_update:
+  p_arch_idle_update_int_eq "domain_list_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq> domain_list_update: Arch_p_arch_idle_update_int_eq "domain_list_update f" ..
+
+interpretation domain_index_update:
+  p_arch_idle_update_int_eq "domain_index_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq> domain_index_update: Arch_p_arch_idle_update_int_eq "domain_index_update f" ..
+
+interpretation domain_start_update:
+  p_arch_idle_update_int_eq "domain_start_index_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq>
+  domain_start_index_update: Arch_p_arch_idle_update_int_eq "domain_start_index_update f" ..
+
+interpretation cur_domain_update:
+  p_arch_idle_update_int_eq "cur_domain_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq> cur_domain_update: Arch_p_arch_idle_update_int_eq "cur_domain_update f" ..
+
+interpretation domain_time_update:
+  p_arch_idle_update_int_eq "domain_time_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq> domain_time_update: Arch_p_arch_idle_update_int_eq "domain_time_update f" ..
+
+interpretation ready_queues_update:
+  p_arch_idle_update_int_eq "ready_queues_update f"
+  by unfold_locales auto
+
+sublocale Arch \<subseteq> ready_queues_update: Arch_p_arch_idle_update_int_eq "ready_queues_update f" ..
+
 interpretation interrupt_update:
   p_arch_idle_update_eq "interrupt_states_update f"
   by unfold_locales auto
@@ -2792,17 +2851,14 @@ lemma untyped_range_non_empty:
   "\<lbrakk> is_untyped_cap c; cap_aligned c \<rbrakk> \<Longrightarrow> untyped_range c \<noteq> {}"
   by (blast dest: obj_ref_in_untyped_range)
 
-lemma valid_mdb_cur [iff]:
-  "valid_mdb (cur_thread_update f s) = valid_mdb s"
+lemma valid_mdb_simps[simp]:
+  "\<And>f. valid_mdb (cur_thread_update f s) = valid_mdb s"
+  "\<And>f. valid_mdb (ready_queues_update f s) = valid_mdb s"
+  "\<And>f. valid_mdb (domain_time_update f s) = valid_mdb s"
+  "\<And>f. valid_mdb (scheduler_action_update f s) = valid_mdb s"
+  "\<And>f. valid_mdb (trans_state f s) = valid_mdb s"
+  "\<And>f. valid_mdb (machine_state_update f s) = valid_mdb s"
   by (auto elim!: valid_mdb_eqI)
-
-lemma valid_mdb_more_update [iff]:
-  "valid_mdb (trans_state f s) = valid_mdb s"
-  by (auto elim!: valid_mdb_eqI)
-
-lemma valid_mdb_machine [iff]:
-  "valid_mdb (machine_state_update f s) = valid_mdb s"
-  by (auto elim: valid_mdb_eqI)
 
 lemma valid_refs_cte:
   assumes "\<And>P p. cte_wp_at P p s = cte_wp_at P p s'"
@@ -2816,6 +2872,10 @@ lemma valid_refs_cte_lift:
   apply (rule ctes)
   done
 
+lemma valid_global_refs_arch_state_update[simp]:
+  "global_refs (arch_state_update f s) = global_refs s
+   \<Longrightarrow> valid_global_refs (arch_state_update f s) = valid_global_refs s"
+  by (simp add: valid_global_refs_def)
 
 lemma valid_global_refs_cte:
   assumes "\<And>P p. cte_wp_at P p s = cte_wp_at P p s'"
@@ -2835,7 +2895,6 @@ lemma valid_global_refs_cte_lift:
   apply (rule hoare_lift_Pf [where f="caps_of_state", OF _ ctes])
   apply (rule global_refs_lift[OF arch idle irq])
   done
-
 
 lemma has_reply_cap_cte_lift:
   assumes ctes: "\<And>P. \<lbrace>\<lambda>s. P (caps_of_state s)\<rbrace> f \<lbrace>\<lambda>_ s. P (caps_of_state s)\<rbrace>"
@@ -2884,7 +2943,7 @@ lemma dom_empty_cnode: "dom (empty_cnode us) = {x. length x = us}"
   by (simp add: dom_def)
 
 lemma obj_at_default_cap_valid:
-  "\<lbrakk>obj_at (\<lambda>ko. ko = default_object ty dev us) x s;
+  "\<lbrakk>obj_at (\<lambda>ko. ko = default_object ty dev us d) x s;
    ty = CapTableObject \<Longrightarrow> 0 < us;
    ty \<noteq> Untyped; ty \<noteq> ArchObject ASIDPoolObj;
    cap_aligned (default_cap ty x us dev)\<rbrakk>
@@ -2948,11 +3007,11 @@ lemma valid_idle_lift:
 
 lemmas caps_of_state_valid_cap = cte_wp_valid_cap [OF caps_of_state_cteD]
 
-
+(* generic consequence of architecture-specific details *)
 lemma (in Arch) obj_ref_is_arch:
   "\<lbrakk>aobj_ref c = Some r; valid_arch_cap c s\<rbrakk> \<Longrightarrow> \<exists> ako. kheap s r = Some (ArchObj ako)"
-by (auto simp add: valid_arch_cap_def obj_at_def valid_arch_cap_ref_def split: arch_cap.splits if_splits)
-
+  by (auto simp: valid_arch_cap_def obj_at_def valid_arch_cap_ref_def
+           split: arch_cap.splits if_splits)
 
 requalify_facts Arch.obj_ref_is_arch
 
@@ -3084,11 +3143,10 @@ lemma real_cte_at_typ_valid:
    \<Longrightarrow> \<lbrace>real_cte_at p\<rbrace> f \<lbrace>\<lambda>rv. real_cte_at p\<rbrace>"
   by (simp add: cap_table_at_typ)
 
-lemma dmo_aligned:
-  "\<lbrace>pspace_aligned\<rbrace> do_machine_op f \<lbrace>\<lambda>_. pspace_aligned\<rbrace>"
+lemma dmo_aligned[wp]:
+  "do_machine_op f \<lbrace>pspace_aligned\<rbrace>"
   apply (simp add: do_machine_op_def split_def)
-  apply (wp select_wp)
-  apply (clarsimp simp: pspace_aligned_def)
+  apply wpsimp
   done
 
 lemma cte_wp_at_eqD2:
@@ -3116,6 +3174,7 @@ lemmas (in pspace_update_eq) state_hyp_refs_update[iff] = state_hyp_refs_update[
 
 declare more_update.state_refs_update[iff]
 declare more_update.state_hyp_refs_update[iff]
+declare ready_queues_update.state_refs_update[simp]
 
 lemma zombies_final_arch_update [iff]:
   "zombies_final (arch_state_update f s) = zombies_final s"
@@ -3129,31 +3188,62 @@ lemmas state_refs_arch_update [iff] = arch_update.state_refs_update
 
 lemmas state_hyp_refs_arch_update [iff] = arch_update.state_hyp_refs_update
 
-lemma valid_ioc_arch_state_update[iff]:
-  "valid_ioc (arch_state_update f s) = valid_ioc s"
-  by (simp add: valid_ioc_def)
-
-lemma valid_ioc_more_update[iff]:
-  "valid_ioc (trans_state f s) = valid_ioc s"
-  by (simp add: valid_ioc_def)
-
-lemma valid_ioc_interrupt_states_update[iff]:
-  "valid_ioc (interrupt_states_update f s) = valid_ioc s"
-  by (simp add: valid_ioc_def)
-lemma valid_ioc_machine_state_update[iff]:
-  "valid_ioc (machine_state_update f s) = valid_ioc s"
-  by (simp add: valid_ioc_def)
-lemma valid_ioc_cur_thread_update[iff]:
-  "valid_ioc (cur_thread_update f s) = valid_ioc s"
-  by (simp add: valid_ioc_def)
+lemma valid_ioc_simps[simp]:
+  "\<And>f. valid_ioc (arch_state_update f s) = valid_ioc s"
+  "\<And>f. valid_ioc (trans_state f s) = valid_ioc s"
+  "\<And>f. valid_ioc (interrupt_states_update f s) = valid_ioc s"
+  "\<And>f. valid_ioc (machine_state_update f s) = valid_ioc s"
+  "\<And>f. valid_ioc (cur_thread_update f s) = valid_ioc s"
+  "\<And>f. valid_ioc (scheduler_action_update f s) = valid_ioc s"
+  "\<And>f. valid_ioc (ready_queues_update f s) = valid_ioc s"
+  "\<And>f. valid_ioc (domain_time_update f s) = valid_ioc s"
+  by (simp_all add: valid_ioc_def)
 
 lemma vms_ioc_update[iff]:
-  "valid_machine_state (is_original_cap_update f s::'z::state_ext state) = valid_machine_state s"
+  "valid_machine_state (is_original_cap_update f s) = valid_machine_state s"
   by (simp add: valid_machine_state_def)+
 
-lemma valid_machine_state_more_update[iff]:
-  "valid_machine_state (trans_state f s) = valid_machine_state s"
-  by (simp add: valid_machine_state_def)
+lemma cur_tcb_simps[simp]:
+  "\<And>f. cur_tcb (cdt_update f s) = cur_tcb s"
+  "\<And>f. cur_tcb (trans_state f s) = cur_tcb s"
+  "\<And>f. cur_tcb (ready_queues_update f s) = cur_tcb s"
+  "\<And>f. cur_tcb (domain_time_update f s) = cur_tcb s"
+  by (simp_all add: cur_tcb_def)
+
+lemma valid_machine_state_simps[simp]:
+  "\<And>f. valid_machine_state (arch_state_update f s) = valid_machine_state s"
+  "\<And>f. valid_machine_state (ready_queues_update f s) = valid_machine_state s"
+  "\<And>f. valid_machine_state (domain_time_update f s) = valid_machine_state s"
+  "\<And>f. valid_machine_state (scheduler_action_update f s) = valid_machine_state s"
+  "\<And>f. valid_machine_state (trans_state f s) = valid_machine_state s"
+  by (simp_all add: valid_machine_state_def)
+
+lemma valid_irq_states_simps[simp]:
+  "\<And>f. valid_irq_states (cur_thread_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (cdt_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (is_original_cap_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (arch_state_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (ready_queues_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (domain_time_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (exst_update f s) = valid_irq_states s"
+  "\<And>f. valid_irq_states (trans_state f s) = valid_irq_states s"
+  by (simp_all add: valid_irq_states_def)
+
+lemma ex_nonz_cap_to_simps[simp]:
+  "\<And>f. ex_nonz_cap_to p (scheduler_action_update f s) = ex_nonz_cap_to p s"
+  "\<And>f. ex_nonz_cap_to w (trans_state f s) = ex_nonz_cap_to w s"
+  by (simp_all add: ex_nonz_cap_to_def)
+
+lemma is_final_cap_simps[simp]:
+  "\<And>f. is_final_cap' cap (cdt_update f s) = is_final_cap' cap s"
+  "\<And>f. is_final_cap' cap (machine_state_update f s) = is_final_cap' cap s"
+  "\<And>f. is_final_cap' cap (arch_state_update f s) = is_final_cap' cap s"
+  "\<And>f. is_final_cap' cap (trans_state f s) = is_final_cap' cap s"
+  by (clarsimp simp: is_final_cap'_def2)+
+
+lemma valid_irq_node_arch_state_updates[simp]:
+  "\<And>f. valid_irq_node (arch_state_update f s) = valid_irq_node s"
+  by (simp add: valid_irq_node_def)
 
 lemma only_idle_lift_weak:
   assumes "\<And>Q P t. \<lbrace>\<lambda>s. Q (st_tcb_at P t s)\<rbrace> f \<lbrace>\<lambda>_ s. Q (st_tcb_at P t s)\<rbrace>"
@@ -3215,11 +3305,6 @@ lemma tcb_at_invs [elim!]:
   "invs s \<Longrightarrow> tcb_at (cur_thread s) s"
   by (simp add: invs_def cur_tcb_def)
 
-lemma valid_irq_states_more_update[iff]:
-  "valid_irq_states (trans_state f s) = valid_irq_states s"
-  by (simp add: valid_irq_states_def)
-
-
 lemma invs_valid_objs [elim!]:
   "invs s \<Longrightarrow> valid_objs s"
   by (simp add: invs_def valid_state_def valid_pspace_def)
@@ -3244,6 +3329,10 @@ lemma invs_arch_state [elim!]:
   "invs s \<Longrightarrow> valid_arch_state s"
   by (simp add: invs_def valid_state_def)
 
+lemma invs_cur_fpu [elim!]:
+  "invs s \<Longrightarrow> valid_cur_fpu s"
+  by (simp add: invs_def valid_state_def)
+
 lemma invs_cur [elim!]:
   "invs s \<Longrightarrow> cur_tcb s"
   by (simp add: invs_def)
@@ -3260,7 +3349,7 @@ lemma invs_sym_refs [elim!]:
   "invs s \<Longrightarrow> sym_refs (state_refs_of s)"
   by (simp add: invs_def valid_state_def valid_pspace_def)
 
-lemma invs_hyp_sym_refs [elim!]: (* ARMHYP move and requalify *)
+lemma invs_hyp_sym_refs [elim!]:
   "invs s \<Longrightarrow> sym_refs (state_hyp_refs_of s)"
   by (simp add: invs_def valid_state_def valid_pspace_def)
 
@@ -3344,10 +3433,6 @@ lemma all_invs_but_sym_refs_check:
 
 lemma invs_valid_asid_map[elim!]:
   "invs s \<Longrightarrow> valid_asid_map s"
-  by (simp add: invs_def valid_state_def)
-
-lemma invs_valid_ioports[elim!]:
-  "invs s \<Longrightarrow> valid_ioports s"
   by (simp add: invs_def valid_state_def)
 
 lemma invs_equal_kernel_mappings[elim!]:
@@ -3455,12 +3540,19 @@ lemma max_ipc_length_unfold:
   "max_ipc_length = 128"
   by (simp add: max_ipc_length_def cap_transfer_data_size_def msg_max_length_def msg_max_extra_caps_def)
 
+lemma valid_mask_vm_rights[simp]:
+  "mask_vm_rights V R \<in> valid_vm_rights"
+  by (simp add: mask_vm_rights_def)
+
+lemma invs_pspace_in_kernel_window[elim!]:
+  "invs s \<Longrightarrow> pspace_in_kernel_window s"
+  by (simp add: invs_def valid_state_def)
+
 lemmas invs_implies =
   invs_equal_kernel_mappings
   invs_arch_state
   invs_valid_asid_map
   invs_valid_global_objs
-  invs_valid_ioports
   invs_vspace_objs
   invs_psp_aligned
   invs_distinct
@@ -3480,5 +3572,24 @@ lemmas invs_implies =
   invs_hyp_sym_refs
   invs_sym_refs
   tcb_at_invs
+  invs_pspace_in_kernel_window
+
+(* Pull invs out of a complex goal and prove it only once. Use as (strengthen invs_strengthen)+,
+   best in combination with simp and potentially conj_cong. *)
+lemma invs_strengthen:
+  "invs s \<Longrightarrow> P s \<longrightarrow> invs s"
+  "invs s \<and> (P s \<longrightarrow> Q s) \<Longrightarrow> P s \<longrightarrow> invs s \<and> Q s"
+  "invs s \<and> (P s \<longrightarrow> Q s) \<Longrightarrow> P s \<longrightarrow> Q s \<and> invs s"
+  "invs s \<and> (P s \<longrightarrow> Q s) \<Longrightarrow> P s \<longrightarrow> (invs and Q) s"
+  "invs s \<and> (P s \<longrightarrow> Q s) \<Longrightarrow> P s \<longrightarrow> (Q and invs) s"
+  by auto
+
+lemma runnable_eq:
+  "runnable st = (st = Running \<or> st = Restart)"
+  by (cases st; simp)
+
+lemma halted_eq:
+  "halted st = (st = Inactive \<or> st = IdleThreadState)"
+  by (cases st; simp)
 
 end

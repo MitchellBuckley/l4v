@@ -14,15 +14,13 @@ theory Tcb_A
 imports TcbAcc_A Schedule_A ArchTcb_A
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   arch_activate_idle_thread
   sanitise_register
   arch_get_sanitise_register_info
   arch_post_modify_registers
-
-end
+  arch_post_set_flags
+  arch_prepare_set_domain
 
 section "Activating Threads"
 
@@ -48,8 +46,8 @@ definition
       cancel_ipc thread;
       setup_reply_master thread;
       set_thread_state thread Restart;
-      do_extended_op (tcb_sched_action (tcb_sched_enqueue) thread);
-      do_extended_op (possible_switch_to thread)
+      tcb_sched_action (tcb_sched_enqueue) thread;
+      possible_switch_to thread
     od
   od"
 
@@ -180,11 +178,11 @@ where
           $ check_cap_at (ThreadCap target) slot
           $ cap_insert new_cap src_slot (target, tcb_cnode_index 4);
       cur \<leftarrow> liftE $ gets cur_thread;
-      liftE $ when (target = cur) (do_extended_op reschedule_required)
+      liftE $ when (target = cur) reschedule_required
     odE);
     liftE $ case priority
               of None \<Rightarrow> return()
-               | Some (prio, _) \<Rightarrow> do_extended_op (set_priority target prio);
+               | Some (prio, _) \<Rightarrow> set_priority target prio;
     returnOk []
   odE"
 
@@ -192,10 +190,11 @@ where
   (liftE $ do
     when suspend_source $ suspend src;
     when resume_target $ restart dest;
+    sanitise_info \<leftarrow> arch_get_sanitise_register_info dest;
     when transfer_frame $ do
         mapM_x (\<lambda>r. do
                 v \<leftarrow> as_user src $ getRegister r;
-                as_user dest $ setRegister r v
+                as_user dest $ setRegister r (sanitise_register sanitise_info r v)
         od) frame_registers;
         pc \<leftarrow> as_user dest getRestartPC;
         as_user dest $ setNextPC pc
@@ -203,11 +202,11 @@ where
     when transfer_integer $
         mapM_x (\<lambda>r. do
                 v \<leftarrow> as_user src $ getRegister r;
-                as_user dest $ setRegister r v
+                as_user dest $ setRegister r (sanitise_register sanitise_info r v)
         od) gpRegisters;
     cur \<leftarrow> gets cur_thread;
     arch_post_modify_registers cur dest;
-    when (dest = cur) (do_extended_op reschedule_required);
+    when (dest = cur) reschedule_required;
     return []
   od)"
 
@@ -231,7 +230,7 @@ where
     od;
     arch_post_modify_registers self dest;
     when resume_target $ restart dest;
-    when (dest = self) (do_extended_op reschedule_required);
+    when (dest = self) reschedule_required;
     return []
   od)"
 
@@ -249,27 +248,49 @@ where
 
 | "invoke_tcb (SetTLSBase tcb tls_base) =
   (liftE $ do
-    as_user tcb $ setRegister tlsBaseRegister tls_base;
+    sanitise_info \<leftarrow> arch_get_sanitise_register_info tcb;
+    as_user tcb $
+      setRegister tlsBaseRegister (sanitise_register sanitise_info tlsBaseRegister tls_base);
     cur \<leftarrow> gets cur_thread;
-    when (tcb = cur) (do_extended_op reschedule_required);
+    when (tcb = cur) reschedule_required;
     return []
   od)"
 
+| "invoke_tcb (SetFlags tcb clearFlags setFlags) =
+  (liftE $ do
+    flags \<leftarrow> thread_get tcb_flags tcb;
+    new_flags \<leftarrow> return $ flags - clearFlags \<union> setFlags;
+    set_flags tcb new_flags;
+    arch_post_set_flags tcb new_flags;
+    return [tcb_flags_to_word new_flags]
+  od)"
+
 definition
-  set_domain :: "obj_ref \<Rightarrow> domain \<Rightarrow> unit det_ext_monad" where
+  set_domain :: "obj_ref \<Rightarrow> domain \<Rightarrow> (unit, 'z::state_ext) s_monad" where
   "set_domain tptr new_dom \<equiv> do
      cur \<leftarrow> gets cur_thread;
      tcb_sched_action tcb_sched_dequeue tptr;
      thread_set_domain tptr new_dom;
      ts \<leftarrow> get_thread_state tptr;
-     when (runnable ts) (tcb_sched_action tcb_sched_enqueue tptr);
+     when (runnable ts) $ tcb_sched_action tcb_sched_enqueue tptr;
      when (tptr = cur) reschedule_required
    od"
 
-definition invoke_domain:: "obj_ref \<Rightarrow> domain \<Rightarrow> (data list,'z::state_ext) p_monad"
-where
-  "invoke_domain thread domain \<equiv>
-     liftE (do do_extended_op (set_domain thread domain); return [] od)"
+definition invoke_set_domain :: "obj_ref \<Rightarrow> domain \<Rightarrow> (unit, 'z::state_ext) s_monad" where
+  "invoke_set_domain thread domain \<equiv> do
+     arch_prepare_set_domain thread domain;
+     set_domain thread domain
+   od"
+
+definition invoke_domain :: "domain_invocation \<Rightarrow> (unit, 'z::state_ext) s_monad" where
+  "invoke_domain dom_inv \<equiv>
+     case dom_inv of
+       InvokeDomainSet thread domain \<Rightarrow>
+         invoke_set_domain thread domain
+     | InvokeDomainScheduleSetStart index \<Rightarrow>
+         domain_set_start index
+     | InvokeDomainScheduleConfigure index domain duration \<Rightarrow>
+         domain_schedule_configure index domain duration"
 
 text \<open>Get all of the message registers, both from the sending thread's current
 register file and its IPC buffer.\<close>

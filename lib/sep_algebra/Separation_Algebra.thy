@@ -14,7 +14,6 @@ chapter "Abstract Separation Algebra"
 theory Separation_Algebra
 imports
   Arbitrary_Comm_Monoid
-  "HOL-Library.Adhoc_Overloading"
 begin
 
 text \<open>This theory is the main abstract separation algebra development\<close>
@@ -345,6 +344,14 @@ lemma sep_conj_exists2:
   by (force intro!: sep_conjI elim!: sep_conjE)
 
 lemmas sep_conj_exists = sep_conj_exists1 sep_conj_exists2
+
+lemma sep_conj_existL:
+  "(P \<and>* Q) s \<Longrightarrow> \<exists>s. P s"
+  by (auto simp: sep_conj_def)
+
+lemma sep_conj_existR:
+  "(P \<and>* Q) s \<Longrightarrow> \<exists>s. Q s"
+  by (auto simp: sep_conj_def)
 
 lemma sep_conj_spec1:
   "((ALLS x. P x) ** Q) h \<Longrightarrow> (P x ** Q) h"
@@ -698,8 +705,8 @@ consts
 notation (latex output) sep_conj_lifted ("\<And>\<^sup>* _" [60] 90)
 notation (latex output) sep_map_list_conj ("\<And>\<^sup>* _" [60] 90)
 
-adhoc_overloading sep_conj_lifted sep_list_conj
-adhoc_overloading sep_conj_lifted sep_set_conj
+adhoc_overloading sep_conj_lifted \<rightleftharpoons> sep_list_conj
+adhoc_overloading sep_conj_lifted \<rightleftharpoons> sep_set_conj
 
 
 (* FIXME. Add notation for sep_map_list_conj, and consider unifying with sep_map_set_conj. *)
@@ -996,7 +1003,7 @@ lemma sep_list_conj_filter_map:
 
 lemma sep_map_set_conj_restrict_predicate:
   "finite A \<Longrightarrow> (\<And>* x\<in>A. if T x then P x else \<box>) = (\<And>* x\<in>(Set.filter T A). P x)"
-  by (simp add: Set.filter_def sep.prod.inter_filter)
+  by (simp add: sep.prod.inter_filter)
 
 lemma distinct_filters:
   "\<lbrakk>distinct xs; \<And>x. (f x \<and> g x) = False\<rbrakk> \<Longrightarrow>
@@ -1019,6 +1026,16 @@ lemma sep_map_set_conj_set_disjoint:
    apply blast
   apply simp
   by (metis Collect_disj_eq)
+
+lemma sep_map_set_conj_set_append:
+  "distinct (xs@ys) \<Longrightarrow>
+   sep_map_set_conj P (set (xs @ ys)) = (sep_map_set_conj P (set xs) \<and>* sep_map_set_conj P (set ys))"
+  by (simp add: sep.prod.union_disjoint)
+
+lemma sep_map_set_conj_set_take_drop:
+  "\<lbrakk> sep_map_set_conj P (set xs) s; distinct xs \<rbrakk> \<Longrightarrow>
+   (sep_map_set_conj P (set (take n xs)) \<and>*  sep_map_set_conj P (set (drop n xs))) s"
+  by (clarsimp simp flip: sep_map_set_conj_set_append append_take_drop_id[where n=n])
 
 
 text \<open>

@@ -18,16 +18,6 @@ imports
 begin
 
 text \<open>
-  This is used by some decode functions. VCPU decode functions are the first that need to bounds
-  check IRQs from the user.
-  \<close>
-
-definition
-  arch_check_irq :: "data \<Rightarrow> (unit,'z::state_ext) se_monad"
-where
-  "arch_check_irq irq \<equiv> whenE (irq > ucast maxIRQ) $ throwError (RangeError 0 (ucast maxIRQ))"
-
-text \<open>
   Some parts of some registers cannot be written by the user.
   Bits set in the mask will be preserved (used in vcpu\_write\_register).
 \<close>
@@ -35,9 +25,20 @@ consts
   register_mask :: "machine_word option" (* no need for option? *)
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 section "VCPU"
+
+text \<open>
+  This is used by some decode functions. VCPU decode functions are the first that need to bounds
+  check IRQs from the user.
+  \<close>
+
+definition
+  arch_check_irq :: "data \<Rightarrow> (unit,'z::state_ext) se_monad"
+where
+  "arch_check_irq irq \<equiv> whenE (irq > maxIRQ) $ throwError (RangeError 0 maxIRQ)"
+
 
 subsection "VCPU: Set TCB"
 
@@ -145,11 +146,6 @@ where
      num_list_regs \<leftarrow> liftE $ gets (arm_gicvcpu_numlistregs \<circ> arch_state);
      whenE (index \<ge> of_nat num_list_regs) $
         (throwError $ RangeError 0 (of_nat num_list_regs - 1));
-
-     vcpu \<leftarrow> liftE $ get_vcpu p;
-     vcpuLR \<leftarrow> returnOk (vgic_lr $ vcpu_vgic $ vcpu);
-
-     whenE (vcpuLR (unat index) && vgic_irq_mask = vgic_irq_active) $ throwError DeleteFirst;
 
      virq \<leftarrow> returnOk (make_virq group priority vid);
      returnOk $ InvokeVCPU $ VCPUInjectIRQ p (unat index) virq

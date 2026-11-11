@@ -10,17 +10,13 @@ theory PSpaceFuns_H
 imports
   ObjectInstances_H
   FaultMonad_H
+  ArchPSpace_H
   "Lib.DataMap"
 begin
 
-context begin interpretation Arch .
-requalify_consts
-  fromPPtr
-  PPtr
-  freeMemory
-  storeWord
-  loadWord
-end
+(* Haskell expects this with Arch prefix *)
+requalify_consts (in Arch)
+  deleteGhost
 
 definition deleteRange :: "( machine_word , 'a ) DataMap.map \<Rightarrow> machine_word \<Rightarrow> nat \<Rightarrow> ( machine_word , 'a ) DataMap.map"
 where "deleteRange m ptr bits \<equiv>
@@ -32,6 +28,6 @@ where "deleteRange m ptr bits \<equiv>
 consts
 lookupAround2 :: "('k :: {linorder,finite}) \<Rightarrow> ( 'k , 'a ) DataMap.map \<Rightarrow> (('k * 'a) option * 'k option)"
 
-#INCLUDE_HASKELL SEL4/Model/PSpace.lhs bodies_only Data.Map=DataMap NOT PSpace ptrBits ptrBitsForSize lookupAround maybeToMonad typeError alignError alignCheck sizeCheck objBits deletionIsSafe cNodePartialOverlap pointerInUserData ksASIDMapSafe deleteRange
+#INCLUDE_HASKELL SEL4/Model/PSpace.lhs bodies_only Data.Map=DataMap NOT PSpace ptrBits ptrBitsForSize lookupAround maybeToMonad typeError alignError alignCheck sizeCheck objBits deletionIsSafe deletionIsSafe_delete_locale cNodePartialOverlap pointerInUserData ksASIDMapSafe deleteRange
 
 end

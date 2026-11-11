@@ -1,3 +1,5 @@
+cabal-version:          3.0
+
 --
 -- Copyright 2014, General Dynamics C4 Systems
 --
@@ -5,13 +7,18 @@
 --
 
 name:                   SEL4
-version:                1.5
-cabal-version:          1.18
+version:                13
 build-type:             Custom
-license:                GPL
+license:                GPL-2.0-only
 author:                 Philip Derrin et. al., NICTA
 synopsis:               Executable specification for the seL4 Kernel
-tested-with:            GHC == 7.8.3
+tested-with:            GHC == 9.10.3
+homepage:               http://sel4.systems/
+
+custom-setup
+  setup-depends:
+    base  == 4.20.*,
+    Cabal == 3.12.1.*
 
 Flag FFI
     description:        Include the C language bindings
@@ -33,10 +40,14 @@ Flag ArchRiscV
     description:        Include RISC-V 64-bit modules and platforms
     default:            False
 
+Flag ArchAArch64
+    description:        Include AArch 64-bit modules and platforms
+    default:            False
+
 Library
     exposed-modules:        SEL4
                             SEL4.Machine.Target
-    build-depends:          mtl==2.2.*, base==4.12.*, array, containers, transformers
+    build-depends:          mtl==2.3.*, base==4.20.*, array, containers, transformers
 
     if flag(FFI)
     -- FFIBindings currently relies on POSIX signal handlers.  This could
@@ -45,7 +56,6 @@ Library
         exposed-modules:    Simulation.FFIBindings
         include-dirs:       include
         install-includes:   sel4model.h gic.h
-                            dist/build/Simulation/FFIBindings_stub.h
     else
         build-depends:      unix
         include-dirs:       include
@@ -71,6 +81,7 @@ Library
                             SEL4.Object.CNode
                             SEL4.Object.Endpoint
                             SEL4.Object.TCB
+                            SEL4.Object.Domain
                             SEL4.Object.Instances
                             SEL4.Object.Structures
                             SEL4.Object.Interrupt
@@ -93,11 +104,9 @@ Library
     if flag(ArchArm)
         other-modules:
                             SEL4.Machine.Hardware.ARM.KZM
-                            SEL4.Machine.Hardware.ARM.Exynos4210
                             SEL4.Machine.Hardware.ARM.Sabre
                             SEL4.Machine.Hardware.ARM.Callbacks
                             SEL4.Machine.Hardware.GICInterface
-                            SEL4.Machine.Hardware.MCTInterface
                             SEL4.Machine.Hardware.MPTimerInterface
 
                             SEL4.API.Types.ARM
@@ -113,7 +122,9 @@ Library
                             SEL4.Object.Interrupt.ARM
                             SEL4.Object.Instances.ARM
                             SEL4.Object.TCB.ARM
+                            SEL4.Object.Domain.ARM
                             SEL4.Model.StateData.ARM
+                            SEL4.Model.PSpace.ARM
                             SEL4.Machine.RegisterSet.ARM
                             SEL4.Machine.Hardware.ARM
 
@@ -136,7 +147,9 @@ Library
                             SEL4.Object.Instances.ARM
                             SEL4.Object.VCPU.ARM
                             SEL4.Object.TCB.ARM
+                            SEL4.Object.Domain.ARM
                             SEL4.Model.StateData.ARM
+                            SEL4.Model.PSpace.ARM
                             SEL4.Machine.RegisterSet.ARM
                             SEL4.Machine.Hardware.ARM
 
@@ -157,7 +170,10 @@ Library
                             SEL4.Object.Instances.X64
                             SEL4.Object.IOPort.X64
                             SEL4.Object.TCB.X64
+                            SEL4.Object.Domain.X64
+                            SEL4.Object.FPU.X64
                             SEL4.Model.StateData.X64
+                            SEL4.Model.PSpace.X64
                             SEL4.Machine.RegisterSet.X64
                             SEL4.Machine.Hardware.X64
 
@@ -178,11 +194,38 @@ Library
                             SEL4.Object.Interrupt.RISCV64
                             SEL4.Object.Instances.RISCV64
                             SEL4.Object.TCB.RISCV64
+                            SEL4.Object.Domain.RISCV64
                             SEL4.Model.StateData.RISCV64
+                            SEL4.Model.PSpace.RISCV64
                             SEL4.Machine.RegisterSet.RISCV64
                             SEL4.Machine.Hardware.RISCV64
 
                             SEL4.Machine.Hardware.RISCV64.HiFive
+
+    if flag(ArchAArch64)
+        other-modules:
+                            SEL4.API.Types.AARCH64
+                            SEL4.API.InvocationLabels.AARCH64
+                            SEL4.API.Invocation.AARCH64
+                            SEL4.API.Failures.AARCH64
+                            SEL4.API.Faults.AARCH64
+                            SEL4.Kernel.VSpace.AARCH64
+                            SEL4.Kernel.Thread.AARCH64
+                            SEL4.Kernel.Hypervisor.AARCH64
+                            SEL4.Object.ObjectType.AARCH64
+                            SEL4.Object.Structures.AARCH64
+                            SEL4.Object.Interrupt.AARCH64
+                            SEL4.Object.Instances.AARCH64
+                            SEL4.Object.VCPU.AARCH64
+                            SEL4.Object.TCB.AARCH64
+                            SEL4.Object.Domain.AARCH64
+                            SEL4.Object.FPU.AARCH64
+                            SEL4.Model.StateData.AARCH64
+                            SEL4.Model.PSpace.AARCH64
+                            SEL4.Machine.RegisterSet.AARCH64
+                            SEL4.Machine.Hardware.AARCH64
+
+                            SEL4.Machine.Hardware.AARCH64.TX2
 
     hs-source-dirs:         src
     ghc-prof-options:       -auto-all -fprof-auto
@@ -192,6 +235,9 @@ Library
                             -fno-warn-unrecognised-pragmas
                             -fno-warn-unused-binds
                             -fno-warn-unused-imports -fno-warn-unused-matches
+                            -fno-warn-incomplete-record-updates
+                            -fno-warn-incomplete-uni-patterns
+                            -fno-warn-x-partial
 
     cpp-options:
                             -- set via Setup.hs hook

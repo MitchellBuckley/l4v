@@ -23,7 +23,7 @@ end
 
 declare [[populate_globals=true]]
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 type_synonym cghost_state = "(machine_word \<rightharpoonup> vmpage_size) * (machine_word \<rightharpoonup> nat)
     * ghost_assertions"
@@ -90,11 +90,19 @@ lemmas ctcb_offset_defs = ctcb_offset_def ctcb_size_bits_def
 
 cond_sorry_modifies_proofs SORRY_MODIFIES_PROOFS
 
-install_C_file "../c/build/$L4V_ARCH/kernel_all.c_pp"
+(* no modifies theorems, because we re-prove them later in kernel_all_substitute *)
+install_C_file no_modifies "../c/build/$L4V_ARCH/kernel_all.c_pp"
   [machinety=machine_state, ghostty=cghost_state]
 
-(* hide them again *)
+text \<open>Hide unqualified names conflicting with Kernel_Config names. Force use of Kernel_C prefix
+  for these:\<close>
+hide_const (open)
+  numDomains
 
+text \<open>Add a more usable name for the collection of ThreadState definitions\<close>
+lemmas ThreadState_defs = StrictC'_thread_state_defs
+
+(* hide vmpage sizes again *)
 hide_const
  vmpage_size.ARMSmallPage
  vmpage_size.ARMLargePage
@@ -102,7 +110,6 @@ hide_const
  vmpage_size.ARMSuperSection
 
 (* re-allow fully qualified accesses (for consistency). Slightly clunky *)
-
 context Arch begin
 
 global_naming "ARM.vmpage_size"

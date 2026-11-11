@@ -35,29 +35,20 @@ session Refine in "refine" = BaseRefine +
   directories
     "$L4V_ARCH"
   theories [condition = "REFINE_QUICK_AND_DIRTY", quick_and_dirty]
-    "$L4V_ARCH/Refine"
-    "$L4V_ARCH/RAB_FN"
-    "$L4V_ARCH/EmptyFail_H"
-    "$L4V_ARCH/Init_R"
+    "RefineToplevel_R"
   theories [condition = "SKIP_REFINE_PROOFS", quick_and_dirty, skip_proofs]
-    "$L4V_ARCH/Refine"
-    "$L4V_ARCH/RAB_FN"
-    "$L4V_ARCH/EmptyFail_H"
-    "$L4V_ARCH/Init_R"
+    "RefineToplevel_R"
   theories
-    "$L4V_ARCH/Refine"
-    "$L4V_ARCH/RAB_FN"
-    "$L4V_ARCH/EmptyFail_H"
-    "$L4V_ARCH/Init_R"
+    "RefineToplevel_R"
 
-(*
- * This theory is in a separate session because the proofs currently
- * only work for ARM.
- *)
-session RefineOrphanage in "refine/$L4V_ARCH/orphanage" = Refine +
+session RefineOrphanage in "refine/orphanage" = Refine +
   description \<open>Proof that the kernel does not orphan threads.\<close>
+  directories
+    "$L4V_ARCH"
+  theories [condition = "REFINE_QUICK_AND_DIRTY", quick_and_dirty]
+    "ArchOrphanage"
   theories
-    "Orphanage"
+    "ArchOrphanage"
 
 session BaseRefine in "refine/base" = AInvs +
   description \<open>Background theory and libraries for refinement proof.\<close>
@@ -71,14 +62,11 @@ session AInvs in "invariant-abstract" = ASpec +
   directories
     "$L4V_ARCH"
   theories [condition = "SKIP_AINVS_PROOFS", quick_and_dirty, skip_proofs]
-    "KernelInit_AI"
-    "$L4V_ARCH/ArchDetSchedSchedule_AI"
+    "AInvsToplevel_AI"
   theories [condition = "AINVS_QUICK_AND_DIRTY", quick_and_dirty]
-    "KernelInit_AI"
-    "$L4V_ARCH/ArchDetSchedSchedule_AI"
+    "AInvsToplevel_AI"
   theories
-    "KernelInit_AI"
-    "$L4V_ARCH/ArchDetSchedSchedule_AI"
+    "AInvsToplevel_AI"
 
 (*
  * C Refinement proof.
@@ -150,6 +138,8 @@ session Access in "access-control" = AInvs +
     "ExampleSystem"
 
 session InfoFlow in "infoflow" = Access +
+  directories
+    "$L4V_ARCH"
   theories
     "InfoFlow_Image_Toplevel"
 
@@ -164,9 +154,10 @@ session InfoFlowCBase in "infoflow/refine/base" = CRefine +
     "Include_IF_C"
 
 session InfoFlowC in "infoflow/refine" = InfoFlowCBase +
+  directories
+    "$L4V_ARCH"
   theories
-    "Noninterference_Refinement"
-    "Example_Valid_StateH"
+    "InfoFlowC_Image_Toplevel"
 
 (*
  * capDL
@@ -215,16 +206,3 @@ session SimplExport in "asmrefine/export" = CSpec +
     "$L4V_ARCH"
   theories
     "SEL4SimplExport"
-
-(*
- * Libraries
- *)
-(* unused:
-session AutoLevity = AutoLevity_Base +
-  theories
-   "../lib/autolevity_buckets/AutoLevity_Top"
-
-session AutoLevity_Base = Word_Lib +
-  theories
-    "../lib/autolevity_buckets/AutoLevity_Base"
-*)

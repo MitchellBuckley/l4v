@@ -8,13 +8,26 @@ theory CNode_AC
 imports ArchAccess_AC
 begin
 
+(* Note: exporting the following diverges from AInvs interfaces where valid_arch_state is
+   permitted to depend on caps (due to supporting X64). If X64 access control is to go ahead,
+   these will need more careful management. *)
+arch_requalify_facts
+  set_cap_valid_arch_state
+  cap_insert_simple_valid_arch_state
+
+lemmas [wp] = set_cap_valid_arch_state cap_insert_simple_valid_arch_state
+
+crunch set_untyped_cap_as_full
+  for valid_arch_state[wp]: valid_arch_state
+
+
 section\<open>CNode-specific AC.\<close>
 
 
 (* FIXME: Move. *)
-lemma tcb_domain_map_wellformed_ekheap[intro!, simp]:
-  "ekheap (P s) = ekheap s \<Longrightarrow> tcb_domain_map_wellformed aag (P s) = tcb_domain_map_wellformed aag s"
-  by (simp add: tcb_domain_map_wellformed_aux_def get_etcb_def)
+lemma tcb_domain_map_wellformed_etcbs_of[intro!, simp]:
+  "etcbs_of (P s) = etcbs_of s \<Longrightarrow> tcb_domain_map_wellformed aag (P s) = tcb_domain_map_wellformed aag s"
+  by (simp add: tcb_domain_map_wellformed_aux_def)
 
 (* FIXME: for some reason crunch does not discover the right precondition *)
 lemma set_cap_integrity_autarch:
@@ -26,11 +39,7 @@ lemma integrity_cdt_list_as_list_integ:
    list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st s"
   by (fastforce elim: integrity_cdt_listE list_integE intro: list_integI integrity_cdt_list_intros)
 
-crunches cap_swap_ext,cap_move_ext,empty_slot_ext
-  for ekheap[wp]: "\<lambda>s. P (ekheap s)"
-  and ready_queues[wp]: "\<lambda>s. P (ready_queues s)"
-
-crunches set_untyped_cap_as_full
+crunch set_untyped_cap_as_full
   for integrity_autarch: "integrity aag X st"
 
 
@@ -55,26 +64,20 @@ locale CNode_AC_1 =
        state_asids_to_policy_arch aag caps (as :: arch_state) vrefs \<subseteq> pasPolicy aag \<rbrakk>
        \<Longrightarrow> state_asids_to_policy_arch aag (caps(ptr \<mapsto> cap, ptr' \<mapsto> cap')) as vrefs \<subseteq> pasPolicy aag"
   and state_vrefs_tcb_upd:
-    "get_tcb tptr s = Some y \<Longrightarrow> state_vrefs (s\<lparr>kheap := kheap s(tptr \<mapsto> TCB tcb)\<rparr>) = state_vrefs s"
+    "tcb_at tptr s \<Longrightarrow> state_vrefs (s\<lparr>kheap := (kheap s)(tptr \<mapsto> TCB tcb)\<rparr>) = state_vrefs s"
   and state_vrefs_simple_type_upd:
     "\<lbrakk> ko_at ko p s; is_simple_type ko; a_type ko = a_type (f (val :: 'b)) \<rbrakk>
-       \<Longrightarrow> state_vrefs (s\<lparr>kheap := kheap s(p \<mapsto> f val)\<rparr>) = state_vrefs s"
+       \<Longrightarrow> state_vrefs (s\<lparr>kheap := (kheap s)(p \<mapsto> f val)\<rparr>) = state_vrefs s"
   and a_type_arch_object_not_tcb[simp]:
     "a_type (ArchObj arch_kernel_obj) \<noteq> ATCB"
-  and set_cap_state_vrefs[wp]:
-    "\<And>P. set_cap cap slot \<lbrace>\<lambda>s :: det_ext state. P (state_vrefs s)\<rbrace>"
+  and set_cap_state_vrefs:
+    "\<And>P. set_cap cap slot \<lbrace>\<lambda>s :: det_state. P (state_vrefs s)\<rbrace>"
   and set_cdt_state_vrefs[wp]:
-    "\<And>P. set_cdt t \<lbrace>\<lambda>s :: det_ext state. P (state_vrefs s)\<rbrace>"
+    "\<And>P. set_cdt t \<lbrace>\<lambda>s :: det_state. P (state_vrefs s)\<rbrace>"
   and set_cdt_state_asids_to_policy[wp]:
-    "\<And>P. set_cdt t \<lbrace>\<lambda>s. P (state_asids_to_policy aag s)\<rbrace>"
+    "\<And>P. set_cdt t \<lbrace>\<lambda>s::det_state. P (state_asids_to_policy aag s)\<rbrace>"
   and arch_post_cap_deletion_integrity[wp]:
     "arch_post_cap_deletion acap \<lbrace>integrity aag X st\<rbrace>"
-  and arch_post_cap_deletion_cur_domain[wp]:
-    "\<And>P. arch_post_cap_deletion acap \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
-  and arch_finalise_cap_cur_domain:
-    "\<And>P. arch_finalise_cap acap final \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
-  and prepare_thread_delete_cur_domain:
-    "\<And>P. prepare_thread_delete p \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
   and maskInterrupt_underlying_memory[wp]:
     "\<And>P. maskInterrupt m irq \<lbrace>\<lambda>s. P (underlying_memory s)\<rbrace>"
   and maskInterrupt_device_state[wp]:
@@ -83,30 +86,31 @@ locale CNode_AC_1 =
     "\<And>Q a b c d e.
      \<lbrakk> \<lbrace>list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st and Q\<rbrace>
        cap_insert_ext a b c d e
-       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace>;
-       \<And>P. cap_insert_ext a b c d e \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>; \<And>P. cap_insert_ext a b c d e \<lbrace>\<lambda>s. P (ready_queues s)\<rbrace> \<rbrakk>
+       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace> \<rbrakk>
        \<Longrightarrow> \<lbrace>integrity aag X st and Q\<rbrace> cap_insert_ext a b c d e \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   and cap_move_ext_list_integ_lift:
     "\<And>Q a b c d.
      \<lbrakk> \<lbrace>list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st and Q\<rbrace>
        cap_move_ext a b c d
-       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace>;
-       \<And>P. cap_move_ext a b c d \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>; \<And>P. cap_move_ext a b c d \<lbrace>\<lambda>s. P (ready_queues s)\<rbrace> \<rbrakk>
+       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace> \<rbrakk>
        \<Longrightarrow> \<lbrace>integrity aag X st and Q\<rbrace> cap_move_ext a b c d \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   and cap_swap_ext_extended_list_integ_lift:
     "\<And>Q a b c d.
      \<lbrakk> \<lbrace>list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st and Q\<rbrace>
        cap_swap_ext a b c d
-       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace>;
-       \<And>P. cap_swap_ext a b c d \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>; \<And>P. cap_swap_ext a b c d \<lbrace>\<lambda>s. P (ready_queues s)\<rbrace> \<rbrakk>
+       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace> \<rbrakk>
        \<Longrightarrow> \<lbrace>integrity aag X st and Q\<rbrace> cap_swap_ext a b c d \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   and empty_slot_extended_list_integ_lift:
     "\<And>Q a b.
      \<lbrakk> \<lbrace>list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st and Q\<rbrace>
        empty_slot_ext a b
-       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace>;
-       \<And>P. empty_slot_ext a b \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>; \<And>P. empty_slot_ext a b \<lbrace>\<lambda>s. P (ready_queues s)\<rbrace> \<rbrakk>
+       \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st\<rbrace> \<rbrakk>
        \<Longrightarrow> \<lbrace>integrity aag X st and Q\<rbrace> empty_slot_ext a b \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
+  and set_irq_state_respects[wp]:
+    "\<lbrace>integrity aag X st and K (is_subject_irq aag irq)\<rbrace>
+     set_irq_state irqst irq
+     \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
+
 begin
 
 lemma set_original_integrity_autarch:
@@ -171,7 +175,7 @@ definition authorised_cnode_inv ::
 
 lemma resolve_address_bits_authorised_aux:
   "s \<turnstile> \<lbrace>pas_refined aag and K (is_cnode_cap (fst (cap, cref))
-                               \<longrightarrow> (\<forall>x \<in> obj_refs (fst (cap, cref)). is_subject aag x))\<rbrace>
+                               \<longrightarrow> (\<forall>x \<in> obj_refs_ac (fst (cap, cref)). is_subject aag x))\<rbrace>
        resolve_address_bits (cap, cref)
        \<lbrace>\<lambda>rv s. is_subject aag (fst (fst rv))\<rbrace>, \<lbrace>\<lambda>rv. \<top>\<rbrace>"
 unfolding resolve_address_bits_def
@@ -191,7 +195,7 @@ proof (induct arbitrary: s rule: resolve_address_bits'.induct)
 qed
 
 lemma resolve_address_bits_authorised[wp]:
-  "\<lbrace>pas_refined aag and K (is_cnode_cap cap \<longrightarrow> (\<forall>x \<in> obj_refs cap. is_subject aag x))\<rbrace>
+  "\<lbrace>pas_refined aag and K (is_cnode_cap cap \<longrightarrow> (\<forall>x \<in> obj_refs_ac cap. is_subject aag x))\<rbrace>
    resolve_address_bits (cap, cref)
    \<lbrace>\<lambda>rv s. is_subject aag (fst (fst rv))\<rbrace>, -"
   apply (unfold validE_R_def)
@@ -201,20 +205,20 @@ lemma resolve_address_bits_authorised[wp]:
   done
 
 lemma lookup_slot_for_cnode_op_authorised[wp]:
-  "\<lbrace>pas_refined aag and K (is_cnode_cap croot \<longrightarrow> (\<forall>x \<in> obj_refs croot. is_subject aag x))\<rbrace>
+  "\<lbrace>pas_refined aag and K (is_cnode_cap croot \<longrightarrow> (\<forall>x \<in> obj_refs_ac croot. is_subject aag x))\<rbrace>
    lookup_slot_for_cnode_op is_source croot ptr depth
    \<lbrace>\<lambda>rv s. is_subject aag (fst rv)\<rbrace>, -"
   apply (simp add: lookup_slot_for_cnode_op_def split del: if_split)
   apply (wp whenE_throwError_wp hoare_drop_imps
             resolve_address_bits_authorised
-              [THEN hoare_post_imp_R[where Q'="\<lambda>x s. is_subject aag (fst (fst x))"]]
+              [THEN hoare_strengthen_postE_R[where Q'="\<lambda>x s. is_subject aag (fst (fst x))"]]
          | wpc | fastforce)+
   done
 
 (* FIXME MOVE *)
 lemma is_cnode_into_is_subject:
   "\<lbrakk> pas_cap_cur_auth aag cap; pas_refined aag s; is_cnode_cap cap \<rbrakk>
-     \<Longrightarrow> \<forall>x\<in>obj_refs cap. is_subject aag x"
+     \<Longrightarrow> \<forall>x\<in>obj_refs_ac cap. is_subject aag x"
   by (clarsimp simp: is_cap_simps cap_auth_conferred_def
                      pas_refined_all_auth_is_owns aag_cap_auth_def)
 
@@ -242,21 +246,20 @@ lemma decode_cnode_inv_authorised:
   apply (simp add: authorised_cnode_inv_def decode_cnode_invocation_def
                    split_def whenE_def unlessE_def set_eq_iff
              cong: if_cong Invocations_A.cnode_invocation.case_cong split del: if_split)
-   apply (wpsimp wp: hoare_vcg_all_lift hoare_vcg_const_imp_lift_R hoare_vcg_all_lift_R lsfco_cte_at
-               simp: simp_thms if_simps fst_conv snd_conv Invocations_A.cnode_invocation.simps K_def
-          | wp (once) get_cap_cur_auth)+
+  apply (wpsimp wp: hoare_vcg_all_lift hoare_vcg_const_imp_liftE_R hoare_vcg_all_liftE_R lsfco_cte_at
+         | wp (once) get_cap_cur_auth)+
   apply (subgoal_tac "\<forall>n. n < length excaps
                           \<longrightarrow> (is_cnode_cap (excaps ! n)
-                               \<longrightarrow> (\<forall>x\<in>obj_refs (excaps ! n). is_subject aag x))")
+                               \<longrightarrow> (\<forall>x\<in>obj_refs_ac (excaps ! n). is_subject aag x))")
    apply (fastforce simp: invs_valid_objs is_cnode_into_is_subject)
   apply (intro allI impI is_cnode_into_is_subject; fastforce)
   done
 
-lemma set_cap_thread_states[wp]:
-  "set_cap cap ptr \<lbrace>\<lambda>s. P (thread_states s)\<rbrace>"
+lemma set_cap_thread_st_auth[wp]:
+  "set_cap cap ptr \<lbrace>\<lambda>s. P (thread_st_auth s)\<rbrace>"
   apply (wpsimp wp: get_object_wp simp: set_cap_def split_def set_object_def)
   apply (fastforce simp: obj_at_def get_tcb_def tcb_states_of_state_def
-                         thread_states_def rsubst[where P=P, OF _ ext])
+                         thread_st_auth_def rsubst[where P=P, OF _ ext])
   done
 
 lemma set_cap_tcb_states_of_state[wp]:
@@ -302,7 +305,7 @@ lemma set_cap_pas_refined:
    \<lbrace>\<lambda>_. pas_refined aag\<rbrace>"
   apply (simp add: pas_refined_def state_objs_to_policy_def aag_cap_auth_def)
   apply (rule hoare_pre)
-   apply (wp set_cap_caps_of_state  | wps)+
+   apply (wp set_cap_caps_of_state set_cap_state_vrefs  | wps)+
   apply clarsimp
   apply (intro conjI)  \<comment> \<open>auth_graph_map\<close>
     apply (clarsimp dest!: auth_graph_map_memD)
@@ -373,42 +376,8 @@ lemma cap_swap_for_delete_respects[wp]:
    \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   by (wpsimp simp: cap_swap_for_delete_def)
 
-lemma dmo_no_mem_respects:
-  assumes p: "\<And>P. mop \<lbrace>\<lambda>ms. P (underlying_memory ms)\<rbrace>"
-  assumes q: "\<And>P. mop \<lbrace>\<lambda>ms. P (device_state ms)\<rbrace>"
-  shows "do_machine_op mop \<lbrace>integrity aag X st\<rbrace>"
-  unfolding do_machine_op_def
-  apply (rule hoare_pre)
-   apply (simp add: split_def)
-   apply wp
-  apply (clarsimp simp: integrity_def)
-  apply (rule conjI)
-   apply clarsimp
-   apply (drule_tac x = x in spec)+
-   apply (erule (1) use_valid [OF _ p])
-  apply clarsimp
-  apply (drule_tac x = x in spec)+
-  apply (erule (1) use_valid [OF _ q])
-  done
-
-lemma set_irq_state_respects[wp]:
-  "\<lbrace>integrity aag X st and K (is_subject_irq aag irq)\<rbrace>
-   set_irq_state irqst irq
-   \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
-  unfolding set_irq_state_def
-  by (wpsimp wp: dmo_no_mem_respects simp: integrity_subjects_def integrity_interrupts_def)
-
 end
 
-
-(* FIXME: MOVE *)
-(* Only works after a hoare_pre! *)
-lemma dmo_wp:
-  assumes mopv: "\<And>s. \<lbrace>P s\<rbrace> mop \<lbrace>\<lambda>a b. R a (s\<lparr>machine_state := b\<rparr>)\<rbrace>"
-  shows "\<lbrace>\<lambda>s. P s (machine_state s)\<rbrace> do_machine_op mop \<lbrace>R\<rbrace>"
-  by (wpsimp simp: do_machine_op_def use_valid[OF _ mopv])
-
-lemmas cases_simp_options = cases_simp_option cases_simp_option[where 'a="'b \<times> 'c", simplified]
 
 (* FIXME MOVE *)
 lemma cdt_change_allowed_all_children:
@@ -426,7 +395,8 @@ named_theorems wp_not_transferable
 
 context CNode_AC_1 begin
 
-crunch respects[wp]: deleted_irq_handler "integrity aag X st"
+crunch deleted_irq_handler
+  for respects[wp]: "integrity aag X st"
 
 lemma post_cap_deletion_integrity[wp]:
  "\<lbrace>integrity aag X s and K (cleanup_info_wf cleanup_info aag)\<rbrace>
@@ -447,7 +417,7 @@ lemma empty_slot_integrity_spec:
                  empty_slot_extended_list_integ_lift empty_slot_list_integrity[where m="cdt s"]
          | simp add: set_cdt_def | wpc)+
   apply (safe; \<comment> \<open>for speedup\<close>
-         clarsimp simp add: integrity_def,
+         (clarsimp simp add: integrity_def)?,
          blast intro: cca_owned cdt_change_allowed_all_children)
   done
 
@@ -463,12 +433,6 @@ lemma empty_slot_integrity[wp,wp_not_transferable]:
 
 end
 
-
-(* FIXME MOVE next to obj_atE *)
-lemma ko_atD:
-  "ko_at obj pos s \<Longrightarrow> kheap s pos = Some obj"
-  by (blast elim: obj_atE)
-
 lemma reply_masters_mdbD1:
  "\<lbrakk> reply_masters_mdb m cs ; cs slot = Some (ReplyCap t True R) \<rbrakk>
     \<Longrightarrow> m slot = None"
@@ -477,27 +441,22 @@ lemma reply_masters_mdbD1:
 lemma reply_cap_no_grand_parent:
   "\<lbrakk> m \<Turnstile> pptr \<rightarrow>* slot ; reply_mdb m cs ; cs slot = Some (ReplyCap t False R) \<rbrakk>
      \<Longrightarrow> pptr = slot \<or> (m \<Turnstile> pptr \<leadsto> slot \<and> (\<exists> R'. cs pptr = Some (ReplyCap t True R')))"
-  apply (clarsimp simp add:reply_mdb_def del:disjCI)
+  apply (clarsimp simp: reply_mdb_def del: disjCI)
   apply (erule(1) reply_caps_mdbE)
   apply (drule(1) reply_masters_mdbD1)
-  apply (erule rtrancl.cases,blast)
+  apply (erule rtrancl.cases, blast)
   apply (erule rtrancl.cases, simp add: cdt_parent_of_def)
   apply (simp add: cdt_parent_of_def)
   done
 
-(* FIXME MOVE to lib*)
-lemma pred_neg_simp[simp]:
-  "(not P) s \<longleftrightarrow> \<not> (P s)"
-  by (simp add:pred_neg_def)
-
 (* FIXME MOVE ? *)
-crunches set_cdt_list, update_cdt_list
+crunch set_cdt_list, update_cdt_list
   for cdt[wp]: "\<lambda>s. P (cdt s)"
   and kheap[wp]: "\<lambda>s. P (kheap s)"
   and valid_mdb[wp]: "\<lambda>s. P (valid_mdb s)"
   and valid_objs[wp]: "\<lambda>s. P (valid_objs s)"
   and arch_state[wp]: "\<lambda>s. P (arch_state s)"
-  and thread_states[wp]: "\<lambda>s. P (thread_states s)"
+  and thread_st_auth[wp]: "\<lambda>s. P (thread_st_auth s)"
   and caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
   and is_original_cap[wp]: "\<lambda>s. P (is_original_cap s)"
   and interrupt_irq_node[wp]: "\<lambda>s. P (interrupt_irq_node s)"
@@ -506,7 +465,11 @@ crunches set_cdt_list, update_cdt_list
 
 locale CNode_AC_2 = CNode_AC_1 +
   assumes integrity_asids_set_cap_Nullcap:
-    "\<lbrace>(=) s\<rbrace> set_cap NullCap slot \<lbrace>\<lambda>_. integrity_asids aag subjects x (s :: det_ext state)\<rbrace>"
+    "\<lbrace>(=) st\<rbrace> set_cap NullCap slot \<lbrace>\<lambda>_. integrity_asids aag subjects x a (st :: det_state)\<rbrace>"
+  assumes integrity_hyp_set_cap_Nullcap:
+    "\<lbrace>(=) st\<rbrace> set_cap NullCap slot \<lbrace>\<lambda>_. integrity_hyp aag subjects x st\<rbrace>"
+  assumes integrity_fpu_set_cap_Nullcap:
+    "\<lbrace>(=) st\<rbrace> set_cap NullCap slot \<lbrace>\<lambda>_. integrity_fpu aag subjects x st\<rbrace>"
   and set_original_state_asids_to_policy[wp]:
     "\<And>P. set_original slot v \<lbrace>\<lambda>s. P (state_asids_to_policy aag s)\<rbrace>"
   and set_original_state_objs_to_policy[wp]:
@@ -521,7 +484,7 @@ locale CNode_AC_2 = CNode_AC_1 +
     "\<And>P. update_cdt_list f \<lbrace>\<lambda>s. P (state_asids_to_policy aag s)\<rbrace>"
 begin
 
-crunches set_original
+crunch set_original
   for tcb_domain_map_wellformed[wp]: "\<lambda>s. P (tcb_domain_map_wellformed aag s)"
   and state_irqs_to_policy[wp]: "\<lambda>s. P (state_irqs_to_policy aag s)"
   and cdt_change_allowed[wp]: "\<lambda>s. P (cdt_change_allowed' aag slot s)"
@@ -546,8 +509,8 @@ lemma set_cap_integrity_deletion_aux:
      apply wpc
          apply wp+
     apply (wp get_object_wp)
-   apply wps
-   apply (wp integrity_asids_set_cap_Nullcap hoare_vcg_all_lift)
+   apply (wp integrity_asids_set_cap_Nullcap integrity_hyp_set_cap_Nullcap
+             integrity_fpu_set_cap_Nullcap hoare_vcg_all_lift | wps)+
   apply (safe ; clarsimp simp add: cte_wp_at_caps_of_state dest!: ko_atD)
        (* cnode *)
        subgoal for s obj addr cnode_size content cap'
@@ -628,6 +591,9 @@ lemma set_cap_integrity_deletion[wp_transferable]:
    apply (wpsimp wp: set_cap_integrity_autarch)
   apply (wpsimp wp: set_cap_integrity_deletion_aux)
   by (fastforce dest: cca_to_transferable_or_subject simp: cte_wp_at_caps_of_state)
+
+crunch update_cdt_list
+  for state_hyp_refs_of[wp]: "\<lambda>s. P (state_hyp_refs_of s)"
 
 lemma update_cdt_list_pas_refined[wp]:
   "update_cdt_list f \<lbrace>pas_refined aag\<rbrace>"
@@ -734,7 +700,7 @@ lemmas[monad_commute_wp] =
 
 (* Sort-of VCG for monad_commute goals *)
 lemma wpc_helper_monad_commute:
-  "monad_commute P f g \<Longrightarrow> wpc_helper (P, P') (Q, Q') (monad_commute P f g)"
+  "monad_commute P f g \<Longrightarrow> wpc_helper (P, P', P'') (Q, Q', Q'') (monad_commute P f g)"
   by (clarsimp simp: wpc_helper_def)
 
 wpc_setup "\<lambda>m. monad_commute P f m" wpc_helper_monad_commute
@@ -827,9 +793,6 @@ lemma set_cap_empty_slot_ext_comm:
   apply (case_tac y; simp add: return_def fail_def split: option.splits)
   done
 
-(* FIXME: MOVE *)
-lemmas bind_eqI' = NonDetMonadVCG.bind_eqI[OF _ refl]
-
 lemma K_bind_assoc:
   "(do (do f; g od); h od) = (do f; g; h od)"
   by (simp add: bind_assoc)
@@ -856,7 +819,7 @@ lemma empty_slot_shuffle:
        empty_slot_ext slot slot_p;
        set_original slot False;
        set_cdt c;
-       post_cap_deletion NullCap od :: (det_ext state \<Rightarrow> _))"
+       post_cap_deletion NullCap od :: (det_state \<Rightarrow> _))"
   by (simp only: set_cdt_empty_slot_ext_comm[THEN K_bind_eqI', simplified K_bind_assoc]
                  set_cdt_set_original_comm[THEN K_bind_eqI', simplified K_bind_assoc]
                  set_cdt_set_cap_comm[THEN K_bind_eqI', simplified K_bind_assoc]
@@ -875,7 +838,7 @@ lemma empty_slot_integrity_transferable[wp_transferable]:
    apply (simp add: set_cdt_def)
    apply (wp set_original_wp)
        apply (rename_tac cdtv x)
-       apply (rule_tac Q = "\<lambda>_ s'. integrity aag X s s'\<and> cdtv = cdt s \<and>
+       apply (rule_tac Q'="\<lambda>_ s'. integrity aag X s s'\<and> cdtv = cdt s \<and>
                             is_original_cap s = is_original_cap s'"
                        in hoare_post_imp)
         apply (clarsimp simp add: integrity_def)
@@ -912,22 +875,10 @@ lemma set_cdt_pas_refined:
               split: if_split_asm | blast)+
   done
 
-lemma pas_refined_original_cap_update[simp]:
-  "pas_refined aag (is_original_cap_update f s) = pas_refined aag s"
-  by (simp add: pas_refined_def state_objs_to_policy_def)
-
-lemma pas_refined_machine_state_update[simp]:
-  "pas_refined aag (machine_state_update f s) = pas_refined aag s"
-  by (simp add: pas_refined_def state_objs_to_policy_def state_refs_of_def)
-
-lemma pas_refined_interrupt_states_update[simp]:
-  "pas_refined aag (interrupt_states_update f s) = pas_refined aag s"
-  by (simp add: pas_refined_def state_objs_to_policy_def state_refs_of_def)
-
-crunches deleted_irq_handler
+crunch deleted_irq_handler
   for pas_refined[wp]: "pas_refined aag"
 
-crunches set_untyped_cap_as_full
+crunch set_untyped_cap_as_full
   for pas_refined: "pas_refined aag"
 
 lemmas set_untyped_cap_as_full_pas_refined'[wp] = set_untyped_cap_as_full_pas_refined[simplified]
@@ -943,11 +894,6 @@ lemma update_cdt_pas_refined:
   apply (wp set_cdt_pas_refined)
   apply simp
   done
-
-lemma state_objs_to_policy_more_update[simp]:
-  "state_objs_to_policy (trans_state f s) =
-   state_objs_to_policy s"
-  by (simp add: state_objs_to_policy_def)
 
 end
 
@@ -979,10 +925,10 @@ lemma set_untyped_cap_as_full_is_transferable[wp]:
   using untyped_not_transferable max_free_index_update_preserve_untyped by simp
 
 lemma set_untyped_cap_as_full_is_transferable':
-  "\<lbrace>\<lambda>s. is_transferable ((caps_of_state s(slot2 \<mapsto> new_cap)) slot3) \<and>
+  "\<lbrace>\<lambda>s. is_transferable (((caps_of_state s)(slot2 \<mapsto> new_cap)) slot3) \<and>
         Some src_cap = (caps_of_state s slot)\<rbrace>
    set_untyped_cap_as_full src_cap new_cap slot
-   \<lbrace>\<lambda>_ s. is_transferable ((caps_of_state s(slot2 \<mapsto> new_cap)) slot3)\<rbrace>"
+   \<lbrace>\<lambda>_ s. is_transferable (((caps_of_state s)(slot2 \<mapsto> new_cap)) slot3)\<rbrace>"
   apply (clarsimp simp: set_untyped_cap_as_full_def)
   apply safe
   apply (wp,fastforce)+
@@ -996,8 +942,10 @@ lemma aag_cap_auth_NullCap [simp]:
   unfolding aag_cap_auth_def
   by (simp add: clas_no_asid)
 
-crunch thread_states[wp]: set_cdt "\<lambda>s. P (thread_states s)"
-crunch thread_bound_ntfns[wp]: set_cdt "\<lambda>s. P (thread_bound_ntfns s)"
+crunch set_cdt
+  for thread_st_auth[wp]: "\<lambda>s. P (thread_st_auth s)"
+crunch set_cdt
+  for thread_bound_ntfns[wp]: "\<lambda>s. P (thread_bound_ntfns s)"
 
 
 locale CNode_AC_3 = CNode_AC_2 +
@@ -1017,6 +965,9 @@ locale CNode_AC_3 = CNode_AC_2 +
     "arch_post_cap_deletion irqopt \<lbrace>pas_refined aag\<rbrace>"
   and aobj_ref'_same_aobject:
     "same_aobject_as ao' ao \<Longrightarrow> aobj_ref' ao = aobj_ref' ao'"
+  and thread_set_arch_trivT:
+    "(\<And>tcb. tcb_arch (f tcb) = tcb_arch tcb)
+     \<Longrightarrow> thread_set f t \<lbrace>\<lambda>s :: det_state. P (state_hyp_refs_of s)\<rbrace>"
 begin
 
 lemma cap_insert_pas_refined:
@@ -1055,7 +1006,8 @@ lemma cap_insert_pas_refined':
                 simp: cte_wp_at_caps_of_state Option.is_none_def)
 
 lemma cap_insert_pas_refined_not_transferable:
-  "\<lbrace>pas_refined aag and valid_mdb and not cte_wp_at is_transferable_cap src_slot
+  "\<lbrace>pas_refined aag and valid_mdb
+                    and not cte_wp_at is_transferable_cap src_slot
                     and K (is_subject aag (fst dest_slot) \<and> is_subject aag (fst src_slot)
                                                           \<and> pas_cap_cur_auth aag new_cap) \<rbrace>
    cap_insert new_cap src_slot dest_slot
@@ -1063,9 +1015,10 @@ lemma cap_insert_pas_refined_not_transferable:
    by (wpsimp wp: cap_insert_pas_refined')
 
 lemma cap_insert_pas_refined_same_object_as:
-  "\<lbrace>pas_refined aag and valid_mdb and cte_wp_at (same_object_as new_cap) src_slot
-                     and K (is_subject aag (fst dest_slot) \<and> is_subject aag (fst src_slot) \<and>
-                            (\<not> is_master_reply_cap new_cap) \<and> pas_cap_cur_auth aag new_cap)\<rbrace>
+  "\<lbrace>pas_refined aag and valid_mdb
+                    and cte_wp_at (same_object_as new_cap) src_slot
+                    and K (is_subject aag (fst dest_slot) \<and> is_subject aag (fst src_slot) \<and>
+                           (\<not> is_master_reply_cap new_cap) \<and> pas_cap_cur_auth aag new_cap)\<rbrace>
    cap_insert new_cap src_slot dest_slot
    \<lbrace>\<lambda>_. pas_refined aag\<rbrace>"
   apply (wp cap_insert_pas_refined)
@@ -1103,6 +1056,7 @@ lemma empty_slot_pas_refined[wp, wp_not_transferable]:
                       pas_refined_mem[OF sta_cdt] pas_refined_mem[OF sta_cdt_transferable]
                       pas_refined_Control)
 
+
 lemma empty_slot_pas_refined_transferable[wp_transferable]:
   "\<lbrace>pas_refined aag and valid_mdb and (\<lambda>s. is_transferable (caps_of_state s slot))\<rbrace>
    empty_slot slot irqopt
@@ -1116,7 +1070,7 @@ lemma empty_slot_pas_refined_transferable[wp_transferable]:
                       pas_refined_mem[OF sta_cdt] pas_refined_mem[OF sta_cdt_transferable])
 
 lemma obj_ref_weak_derived:
-  "weak_derived cap cap' \<Longrightarrow> obj_refs cap = obj_refs cap'"
+  "weak_derived cap cap' \<Longrightarrow> obj_refs_ac cap = obj_refs_ac cap'"
   unfolding obj_refs_def weak_derived_def copy_of_def same_object_as_def
   by (cases cap; fastforce simp: is_cap_simps aobj_ref'_same_aobject split: cap.splits)
 
@@ -1131,7 +1085,7 @@ lemma cap_swap_pas_refined[wp]:
   apply (rule hoare_pre)
    apply (wp add: tcb_domain_map_wellformed_lift | simp split del: if_split)+
         apply (simp only:pas_refined_def state_objs_to_policy_def)
-        apply (wps | wp set_cdt_cdt_ct_ms_rvk set_cap_caps_of_state)+
+        apply (wps | wp set_cap_state_vrefs set_cdt_cdt_ct_ms_rvk set_cap_caps_of_state)+
   apply (clarsimp simp: pas_refined_def aag_cap_auth_def state_objs_to_policy_def
                         cte_wp_at_caps_of_state
                  split: if_split_asm split del: if_split)
@@ -1161,7 +1115,8 @@ lemma cap_swap_pas_refined[wp]:
      apply (simp split: if_splits add: aag_wellformed_refl)
      by (erule subsetD;
          force simp: is_transferable_weak_derived intro!: sbta_cdt_transferable auth_graph_map_memI)+
-  by (blast intro: state_bits_to_policy.intros auth_graph_map_memI)
+   apply (blast intro: state_bits_to_policy.intros auth_graph_map_memI)+
+  done
 
 lemma cap_swap_for_delete_pas_refined[wp]:
   "\<lbrace>pas_refined aag and invs and K (is_subject aag (fst slot) \<and> is_subject aag (fst slot'))\<rbrace>
@@ -1173,6 +1128,9 @@ lemma cap_swap_for_delete_pas_refined[wp]:
   apply (fastforce dest!: cap_cur_auth_caps_of_state)
   done
 
+(* FIXME AC: move aobj_of_simps lemmas into generic context *)
+lemmas aobj_of_simps[simp] = aobj_of_def[split_simps kernel_object.split]
+
 lemma sts_respects_restart_ep:
   "\<lbrace>integrity aag X st and
     (\<lambda>s. \<exists>ep. aag_has_auth_to aag Reset ep \<and> st_tcb_at (blocked_on ep) thread s)\<rbrace>
@@ -1181,7 +1139,7 @@ lemma sts_respects_restart_ep:
   apply (simp add: set_thread_state_def)
   apply (wpsimp wp: set_object_wp)
   apply (erule integrity_trans)
-  apply (clarsimp simp: integrity_def obj_at_def st_tcb_at_def get_tcb_def)
+  apply (clarsimp simp: integrity_def obj_at_def st_tcb_at_def get_tcb_def integrity_arch_kh_upds)
   apply (rule_tac tro_tcb_restart [OF refl refl])
     apply (fastforce dest!: get_tcb_SomeD)
    apply (fastforce dest!: get_tcb_SomeD)
@@ -1197,7 +1155,7 @@ lemma set_endpoint_respects:
   apply (wp get_object_wp)
   apply (clarsimp simp: obj_at_def partial_inv_def a_type_def)
   apply (erule integrity_trans)
-  apply (clarsimp simp: integrity_def tro_ep)
+  apply (clarsimp simp: integrity_def tro_ep integrity_arch_kh_upds)
   done
 
 end
@@ -1207,23 +1165,28 @@ lemma mapM_mapM_x_valid:
   "\<lbrace>P\<rbrace> mapM_x f xs \<lbrace>\<lambda>rv. Q\<rbrace> = \<lbrace>P\<rbrace> mapM f xs \<lbrace>\<lambda>rv. Q\<rbrace>"
   by (simp add: mapM_x_mapM liftM_def[symmetric] hoare_liftM_subst)
 
+\<comment> \<open>FIXME: move to ainvs\<close>
+lemma set_thread_state_act_scheduler_action_lift:
+  "\<lbrakk>\<And>f s. P (scheduler_action_update f s) = P s\<rbrakk> \<Longrightarrow> set_thread_state_act t \<lbrace>P\<rbrace>"
+  apply (simp add: set_thread_state_act_def set_scheduler_action_def)
+  by (wpsimp wp: gts_wp)
 
 lemma sts_thread_bound_ntfns[wp]:
   "set_thread_state t st \<lbrace>\<lambda>s. P (thread_bound_ntfns s)\<rbrace>"
   apply (simp add: set_thread_state_def)
-  apply (wpsimp wp: set_object_wp dxo_wp_weak)
+  apply (wpsimp wp: set_object_wp set_thread_state_act_scheduler_action_lift)
   apply (clarsimp simp: thread_bound_ntfns_def get_tcb_def
                  split: if_split option.splits kernel_object.splits
                  elim!: rsubst[where P=P, OF _ ext])
   done
 
-lemma sts_thread_states[wp]:
-  "\<lbrace>\<lambda>s. P ((thread_states s)(t := tcb_st_to_auth st))\<rbrace>
+lemma sts_thread_st_auth[wp]:
+  "\<lbrace>\<lambda>s. P ((thread_st_auth s)(t := tcb_st_to_auth st))\<rbrace>
    set_thread_state t st
-   \<lbrace>\<lambda>_ s. P (thread_states s)\<rbrace>"
+   \<lbrace>\<lambda>_ s. P (thread_st_auth s)\<rbrace>"
   apply (simp add: set_thread_state_def)
-  apply (wpsimp wp: set_object_wp dxo_wp_weak)
-  apply (clarsimp simp: get_tcb_def thread_states_def tcb_states_of_state_def
+  apply (wpsimp wp: set_object_wp set_thread_state_act_scheduler_action_lift)
+  apply (clarsimp simp: get_tcb_def thread_st_auth_def tcb_states_of_state_def
                  elim!: rsubst[where P=P, OF _ ext])
   done
 
@@ -1232,16 +1195,9 @@ lemma sbn_thread_bound_ntfns[wp]:
    set_bound_notification t ntfn
    \<lbrace>\<lambda>_ s. P (thread_bound_ntfns s)\<rbrace>"
   apply (simp add: set_bound_notification_def)
-  apply (wpsimp wp: set_object_wp dxo_wp_weak)
+  apply (wpsimp wp: set_object_wp)
   apply (clarsimp simp: get_tcb_def thread_bound_ntfns_def
                  elim!: rsubst[where P=P, OF _ ext])
-  done
-
-(* FIXME move to AInvs *)
-lemma set_thread_state_ekheap[wp]:
-  "set_thread_state t st \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>"
-  apply (simp add: set_thread_state_def)
-  apply (wpsimp wp: set_scheduler_action_wp simp: set_thread_state_ext_def)
   done
 
 lemma set_simple_ko_tcb_states_of_state[wp]:
@@ -1249,18 +1205,18 @@ lemma set_simple_ko_tcb_states_of_state[wp]:
   apply (simp add: set_simple_ko_def set_object_def)
   apply (wp get_object_wp)
   apply clarify
-  apply (clarsimp simp: thread_states_def obj_at_def get_tcb_def tcb_states_of_state_def
+  apply (clarsimp simp: thread_st_auth_def obj_at_def get_tcb_def tcb_states_of_state_def
                         partial_inv_def a_type_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm if_splits)
   done
 
-lemma set_simple_ko_thread_states[wp]:
-  "set_simple_ko f ptr val \<lbrace>\<lambda>s. P (thread_states s)\<rbrace>"
+lemma set_simple_ko_thread_st_auth[wp]:
+  "set_simple_ko f ptr val \<lbrace>\<lambda>s. P (thread_st_auth s)\<rbrace>"
   apply (simp add: set_simple_ko_def set_object_def)
   apply (wp get_object_wp)
   apply clarify
-  apply (clarsimp simp: thread_states_def obj_at_def get_tcb_def tcb_states_of_state_def
+  apply (clarsimp simp: thread_st_auth_def obj_at_def get_tcb_def tcb_states_of_state_def
                         partial_inv_def a_type_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm if_splits)
@@ -1277,28 +1233,20 @@ lemma set_simple_ko_thread_bound_ntfns[wp]:
                  split: kernel_object.split_asm if_splits)
   done
 
-(* FIXME move to AInvs *)
-lemma set_simple_ko_ekheap[wp]:
-  "set_simple_ko f ptr ep \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>"
-  apply (simp add: set_simple_ko_def)
-  apply (wpsimp wp: get_object_wp)
-  done
-
 
 context CNode_AC_3 begin
 
 lemma sts_st_vrefs[wp]:
-  "set_thread_state t st \<lbrace>\<lambda>s :: det_ext state. P (state_vrefs s)\<rbrace>"
-  apply (simp add: set_thread_state_def del: set_thread_state_ext_extended.dxo_eq)
-  apply (wpsimp wp: set_object_wp dxo_wp_weak)
-  apply (clarsimp simp: state_vrefs_tcb_upd
+  "set_thread_state t st \<lbrace>\<lambda>s :: det_state. P (state_vrefs s)\<rbrace>"
+  apply (simp add: set_thread_state_def)
+  apply (wpsimp wp: set_object_wp set_thread_state_act_scheduler_action_lift)
+  apply (clarsimp simp: state_vrefs_tcb_upd obj_at_def is_obj_defs
                  elim!: rsubst[where P=P, OF _ ext]
                  dest!: get_tcb_SomeD)
   done
 
 lemma set_thread_state_pas_refined:
-  "\<lbrace>pas_refined aag and
-    K (\<forall>r \<in> tcb_st_to_auth st. abs_has_auth_to aag (snd r) t (fst r))\<rbrace>
+  "\<lbrace>pas_refined aag and K (\<forall>r \<in> tcb_st_to_auth st. abs_has_auth_to aag (snd r) t (fst r))\<rbrace>
    set_thread_state t st
    \<lbrace>\<lambda>_. pas_refined aag\<rbrace>"
   apply (simp add: pas_refined_def state_objs_to_policy_def)
@@ -1311,7 +1259,7 @@ lemma set_thread_state_pas_refined:
   done
 
 lemma set_simple_ko_vrefs[wp]:
-  "set_simple_ko f ptr (val :: 'b) \<lbrace>\<lambda>s :: det_ext state. P (state_vrefs s)\<rbrace>"
+  "set_simple_ko f ptr (val :: 'b) \<lbrace>\<lambda>s :: det_state. P (state_vrefs s)\<rbrace>"
   apply (simp add: set_simple_ko_def set_object_def)
   apply (wp get_object_wp)
   apply (fastforce simp: state_vrefs_simple_type_upd obj_at_def elim!: rsubst[where P=P, OF _ ext])
@@ -1325,30 +1273,30 @@ lemma set_simple_ko_pas_refined[wp]:
   apply simp
   done
 
-lemma thread_set_st_vrefs[wp]:
-  "thread_set f t \<lbrace>\<lambda>s :: det_ext state. P (state_vrefs s)\<rbrace>"
+lemma thread_set_state_vrefs:
+  "thread_set f t \<lbrace>\<lambda>s :: det_state. P (state_vrefs s)\<rbrace>"
   apply (simp add: thread_set_def)
   apply (wpsimp wp: set_object_wp)
-  apply (clarsimp simp: state_vrefs_tcb_upd
-                 elim!: rsubst[where P=P, OF _ ext] dest!: get_tcb_SomeD)
+  apply (clarsimp simp: state_vrefs_tcb_upd obj_at_def is_obj_defs
+                 dest!: get_tcb_SomeD)
   done
 
 end
 
 
-lemma thread_set_thread_states_trivT:
+lemma thread_set_thread_st_auth_trivT:
   assumes st: "\<And>tcb. tcb_state (f tcb) = tcb_state tcb"
-  shows "thread_set f t \<lbrace>\<lambda>s. P (thread_states s)\<rbrace>"
+  shows "thread_set f t \<lbrace>\<lambda>s. P (thread_st_auth s)\<rbrace>"
   apply (simp add: thread_set_def)
   apply (wpsimp wp: set_object_wp)
-  apply (clarsimp simp: st get_tcb_def thread_states_def tcb_states_of_state_def
+  apply (clarsimp simp: st get_tcb_def thread_st_auth_def tcb_states_of_state_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm)
   done
 
 lemma thread_set_thread_bound_ntfns_trivT:
   assumes ntfn: "\<And>tcb. tcb_bound_notification (f tcb) = tcb_bound_notification tcb"
-  shows "thread_set f t \<lbrace>\<lambda>s :: det_ext state. P (thread_bound_ntfns s)\<rbrace>"
+  shows "thread_set f t \<lbrace>\<lambda>s :: det_state. P (thread_bound_ntfns s)\<rbrace>"
   apply (simp add: thread_set_def)
   apply (wpsimp wp: set_object_wp)
   apply (clarsimp simp: ntfn get_tcb_def thread_bound_ntfns_def tcb_states_of_state_def
@@ -1359,17 +1307,40 @@ lemma thread_set_thread_bound_ntfns_trivT:
 
 context CNode_AC_3 begin
 
+\<comment> \<open>FIXME: move\<close>
+\<comment> \<open>FIXME: horrible proof, domains_of_state_aux could maybe be (etcbs_of s ||> etcb_domain) directly\<close>
+lemma tcb_domain_map_wellformed_lift_strong:
+  assumes 1: "\<And>P. f \<lbrace>\<lambda>s. P (etcbs_of s ||> etcb_domain)\<rbrace>"
+  shows "f \<lbrace>tcb_domain_map_wellformed aag\<rbrace>"
+  apply (clarsimp simp: valid_def  elim!: tcb_domain_map_wellformed_mono[rotated] domains_of_state_aux.cases)
+  apply (subgoal_tac "(etcbs_of s ||> etcb_domain) ptr = Some (etcb_domain tcb)")
+   apply (auto simp: in_opt_map_Some_eq intro!: domtcbs)[1]
+  apply (rule ccontr)
+  apply (frule (1) use_valid[OF _ 1], fastforce simp: in_opt_map_Some_eq)
+  done
+
+lemma thread_set_edomains:
+  "\<lbrakk>\<And>x. tcb_domain (f x) = tcb_domain x\<rbrakk> \<Longrightarrow>
+  thread_set f tptr \<lbrace>\<lambda>s. P (etcbs_of s ||> etcb_domain)\<rbrace>"
+  unfolding thread_set_def
+  apply (wpsimp wp: set_object_wp get_object_wp)
+  by (auto elim!: rsubst[where P=P] dest!: get_tcb_SomeD simp: etcbs_of'_def opt_map_def)
+
 lemma thread_set_pas_refined_triv:
   assumes cps: "\<And>tcb. \<forall>(getF, v)\<in>ran tcb_cap_cases. getF (f tcb) = getF tcb"
        and st: "\<And>tcb. tcb_state (f tcb) = tcb_state tcb"
       and ntfn: "\<And>tcb. tcb_bound_notification (f tcb) = tcb_bound_notification tcb"
+      and arch: "\<And>tcb. tcb_arch (f tcb) = tcb_arch tcb"
+       and dom: "\<And>tcb. tcb_domain (f tcb) = tcb_domain tcb"
      shows "thread_set f t \<lbrace>pas_refined aag\<rbrace>"
-  by (wpsimp wp: tcb_domain_map_wellformed_lift simp: pas_refined_def state_objs_to_policy_def
+  by (wpsimp wp: tcb_domain_map_wellformed_lift_strong thread_set_state_vrefs thread_set_edomains[OF dom]
+           simp: pas_refined_def state_objs_to_policy_def
       | wps thread_set_caps_of_state_trivial[OF cps]
-            thread_set_thread_states_trivT[OF st]
+            thread_set_thread_st_auth_trivT[OF st]
+            thread_set_arch_trivT[OF arch]
             thread_set_thread_bound_ntfns_trivT[OF ntfn])+
 
-lemmas thread_set_pas_refined = thread_set_pas_refined_triv[OF ball_tcb_cap_casesI]
+lemmas thread_set_pas_refined = thread_set_pas_refined_triv[OF ball_tcb_cap_casesI, simplified]
 
 end
 
@@ -1398,16 +1369,17 @@ lemma set_ntfn_respects:
   apply (wp get_object_wp)
   apply (clarsimp simp: obj_at_def partial_inv_def a_type_def)
   apply (erule integrity_trans)
-  apply (clarsimp simp: integrity_def tro_ntfn)
+  apply (clarsimp simp: integrity_def tro_ntfn integrity_arch_kh_upds)
   done
 
-crunch integrity_autarch: thread_set "integrity aag X st"
+crunch thread_set
+  for integrity_autarch: "integrity aag X st"
 
 end
 
 
 lemma sta_ts_mem:
-  "\<lbrakk> thread_states s x = S; r \<in> S \<rbrakk> \<Longrightarrow> (x, snd r, fst r) \<in> state_objs_to_policy s"
+  "\<lbrakk> thread_st_auth s x = S; r \<in> S \<rbrakk> \<Longrightarrow> (x, snd r, fst r) \<in> state_objs_to_policy s"
   using sta_ts by force
 
 lemma get_cap_auth_wp:
@@ -1423,7 +1395,7 @@ lemma get_cap_auth_wp:
 lemma get_cap_auth_conferred:
   "\<lbrace>pas_refined aag and K (is_subject aag (fst slot))\<rbrace>
    get_cap slot
-   \<lbrace>\<lambda>rv s. \<forall>x\<in>obj_refs rv. \<forall>a \<in> cap_auth_conferred rv. aag_has_auth_to aag a x\<rbrace>"
+   \<lbrace>\<lambda>rv s. \<forall>x\<in>obj_refs_ac rv. \<forall>a \<in> cap_auth_conferred rv. aag_has_auth_to aag a x\<rbrace>"
   apply (wp get_cap_wp)
   apply (clarsimp simp: cte_wp_at_caps_of_state)
   apply (drule sta_caps, simp+)
@@ -1456,7 +1428,7 @@ definition auth_derived :: "cap \<Rightarrow> cap \<Rightarrow> bool" where
  "auth_derived cap cap' \<equiv>
     (cap_asid' cap \<subseteq> cap_asid' cap')
   \<and> (untyped_range cap = untyped_range cap')
-  \<and> (obj_refs cap = obj_refs cap')
+  \<and> (obj_refs_ac cap = obj_refs_ac cap')
   \<and> (cap_auth_conferred cap \<subseteq> cap_auth_conferred cap')
   \<and> (cap_irqs_controlled cap = cap_irqs_controlled cap')"
 
@@ -1490,10 +1462,11 @@ lemma auth_derived_caps_of_state_impls:
   apply (auto dest: pas_refined_mem[OF sta_untyped] pas_refined_mem[OF sta_caps])
   done
 
-crunch cur_domain[wp]: deleted_irq_handler "\<lambda>s. P (cur_domain s)"
+crunch deleted_irq_handler
+  for cur_domain[wp]: "\<lambda>s. P (cur_domain s)"
 
 lemma preemption_point_cur_domain[wp]:
-  "preemption_point \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
+  "preemption_point \<lbrace>\<lambda>s::det_state. P (cur_domain s)\<rbrace>"
   by (wp preemption_point_inv', simp+)
 
 lemma cnode_inv_auth_derivations_If_Insert_Move:
@@ -1505,23 +1478,26 @@ lemma cnode_inv_auth_derivations_If_Insert_Move:
 context CNode_AC_3 begin
 
 lemma post_cap_deletion_cur_domain[wp]:
-  "post_cap_deletion c \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
+  "post_cap_deletion c \<lbrace>\<lambda>s::det_state. P (cur_domain s)\<rbrace>"
   by (wpsimp simp: post_cap_deletion_def)
 
-crunch cur_domain[wp]: cap_swap_for_delete, empty_slot "\<lambda>s. P (cur_domain s)"
-  (wp: crunch_wps select_wp hoare_vcg_if_lift2 simp: unless_def)
+crunch cap_swap_for_delete, empty_slot
+  for cur_domain[wp]: "\<lambda>s::det_state. P (cur_domain s)"
+  (wp: crunch_wps hoare_vcg_if_lift2 simp: unless_def)
 
-crunch cur_domain[wp]: finalise_cap "\<lambda>s. P (cur_domain s)"
-  (wp: crunch_wps select_wp hoare_vcg_if_lift2 simp: unless_def)
+crunch finalise_cap
+  for cur_domain[wp]: "\<lambda>s::det_state. P (cur_domain s)"
+  (wp: crunch_wps hoare_vcg_if_lift2 simp: unless_def)
 
 lemma rec_del_cur_domain[wp]:
-  "rec_del call \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
+  "rec_del call \<lbrace>\<lambda>s::det_state. P (cur_domain s)\<rbrace>"
   by (rule rec_del_preservation; wp)
 
-crunch cur_domain[wp]: cap_delete  "\<lambda>s. P (cur_domain s)"
+crunch cap_delete
+  for cur_domain[wp]: "\<lambda>s::det_state. P (cur_domain s)"
 
 lemma cap_revoke_cur_domain[wp]:
-  "cap_revoke slot \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
+  "cap_revoke slot \<lbrace>\<lambda>s::det_state. P (cur_domain s)\<rbrace>"
   by (rule cap_revoke_preservation2; wp)
 
 end
@@ -1540,33 +1516,33 @@ locale CNode_AC_4 = CNode_AC_3 +
     "arch_cap_auth_conferred (acap_rights_update (acap_rights acap \<inter> R) acap)
      \<subseteq> arch_cap_auth_conferred acap"
   and arch_derive_cap_auth_derived:
-    "\<lbrace>\<lambda>s :: det_ext state. cte_wp_at (auth_derived (ArchObjectCap cap)) src_slot s\<rbrace>
+    "\<lbrace>\<lambda>s :: det_state. cte_wp_at (auth_derived (ArchObjectCap cap)) src_slot s\<rbrace>
      arch_derive_cap cap
      \<lbrace>\<lambda>rv s. cte_wp_at (auth_derived rv) src_slot s\<rbrace>, -"
   and arch_derive_cap_clas:
-    "\<lbrace>\<lambda>s :: det_ext state. cap_links_asid_slot aag p (ArchObjectCap acap) \<rbrace>
+    "\<lbrace>\<lambda>s :: det_state. cap_links_asid_slot aag p (ArchObjectCap acap) \<rbrace>
      arch_derive_cap acap
      \<lbrace>\<lambda>rv s. cap_links_asid_slot aag p rv\<rbrace>, -"
   and arch_derive_cap_obj_refs_auth:
-    "\<lbrace>K (\<forall>r\<in>obj_refs (ArchObjectCap cap).
+    "\<lbrace>K (\<forall>r\<in>obj_refs_ac (ArchObjectCap cap).
          \<forall>auth\<in>cap_auth_conferred (ArchObjectCap cap). aag_has_auth_to aag auth r)\<rbrace>
      arch_derive_cap cap
-     \<lbrace>\<lambda>x s :: det_ext state. \<forall>r\<in>obj_refs x.
+     \<lbrace>\<lambda>x s :: det_state. \<forall>r\<in>obj_refs_ac x.
                              \<forall>auth \<in> cap_auth_conferred x. aag_has_auth_to aag auth r\<rbrace>, -"
   and arch_derive_cap_obj_refs_subset:
-    "\<lbrace>\<lambda>s :: det_ext state. (\<forall>x \<in> aobj_ref' acap. P x s)\<rbrace>
+    "\<lbrace>\<lambda>s :: det_state. (\<forall>x \<in> aobj_ref' acap. P x s)\<rbrace>
      arch_derive_cap acap
-     \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs rv. P x s\<rbrace>, -"
+     \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs_ac rv. P x s\<rbrace>, -"
   and arch_derive_cap_cli:
     "\<lbrace>K (cap_links_irq aag l (ArchObjectCap ac))\<rbrace>
      arch_derive_cap ac
-     \<lbrace>\<lambda>x (s :: det_ext state). cap_links_irq aag l x\<rbrace>, -"
+     \<lbrace>\<lambda>x (s :: det_state). cap_links_irq aag l x\<rbrace>, -"
   and arch_derive_cap_untyped_range_subset:
     "\<lbrace>\<lambda>s. \<forall>x \<in> untyped_range (ArchObjectCap acap). P x s\<rbrace>
      arch_derive_cap acap
      \<lbrace>\<lambda>rv s. \<forall>x \<in> untyped_range rv. P x s\<rbrace>, -"
   and arch_update_cap_obj_refs_subset:
-    "\<lbrakk> x \<in> obj_refs (arch_update_cap_data pres data cap) \<rbrakk> \<Longrightarrow> x \<in> aobj_ref' cap"
+    "\<lbrakk> x \<in> obj_refs_ac (arch_update_cap_data pres data cap) \<rbrakk> \<Longrightarrow> x \<in> aobj_ref' cap"
   and arch_update_cap_untyped_range_empty[simp]:
     "untyped_range (arch_update_cap_data pres data cap) = {}"
   and arch_update_cap_irqs_controlled_empty[simp]:
@@ -1580,7 +1556,7 @@ locale CNode_AC_4 = CNode_AC_3 +
 begin
 
 lemma derive_cap_auth_derived:
-  "\<lbrace>\<lambda>s :: det_ext state. cap \<noteq> NullCap \<longrightarrow> cte_wp_at (auth_derived cap) src_slot s\<rbrace>
+  "\<lbrace>\<lambda>s :: det_state. cap \<noteq> NullCap \<longrightarrow> cte_wp_at (auth_derived cap) src_slot s\<rbrace>
    derive_cap src_slot cap
    \<lbrace>\<lambda>rv s. rv \<noteq> NullCap \<longrightarrow> cte_wp_at (auth_derived rv) src_slot s\<rbrace>, -"
   apply (wpsimp wp: arch_derive_cap_auth_derived simp: derive_cap_def | wp hoare_drop_imps)+
@@ -1625,7 +1601,7 @@ lemma get_cap_auth_derived:
   done
 
 lemma decode_cnode_invocation_auth_derived:
-  "\<lbrace>\<top> :: det_ext state \<Rightarrow> bool\<rbrace>
+  "\<lbrace>\<top> :: det_state \<Rightarrow> bool\<rbrace>
    decode_cnode_invocation label args cap excaps
    \<lbrace>cnode_inv_auth_derivations\<rbrace>,-"
   apply (simp add: decode_cnode_invocation_def split_def whenE_def unlessE_def split del: if_split)
@@ -1637,7 +1613,7 @@ lemma decode_cnode_invocation_auth_derived:
   done
 
 lemma derive_cap_clas:
-  "\<lbrace>\<lambda>s :: det_ext state. cap_links_asid_slot aag p b \<rbrace>
+  "\<lbrace>\<lambda>s :: det_state. cap_links_asid_slot aag p b \<rbrace>
    derive_cap a b
    \<lbrace>\<lambda>rv s. cap_links_asid_slot aag p rv\<rbrace>, -"
   apply (simp add: derive_cap_def  cong: cap.case_cong)
@@ -1647,15 +1623,15 @@ lemma derive_cap_clas:
   done
 
 lemma derive_cap_obj_refs_auth:
-  "\<lbrace>\<lambda>s :: det_ext state. (\<forall>r\<in>obj_refs cap. \<forall>auth\<in>cap_auth_conferred cap. aag_has_auth_to aag auth r)\<rbrace>
+  "\<lbrace>\<lambda>s :: det_state. (\<forall>r\<in>obj_refs_ac cap. \<forall>auth\<in>cap_auth_conferred cap. aag_has_auth_to aag auth r)\<rbrace>
    derive_cap slot cap
-   \<lbrace>\<lambda>x s. (\<forall>r\<in>obj_refs x. \<forall>auth\<in>cap_auth_conferred x. aag_has_auth_to aag auth r) \<rbrace>, -"
+   \<lbrace>\<lambda>x s. (\<forall>r\<in>obj_refs_ac x. \<forall>auth\<in>cap_auth_conferred x. aag_has_auth_to aag auth r) \<rbrace>, -"
   by (wpsimp wp: arch_derive_cap_obj_refs_auth simp: derive_cap_def)
 
 lemma derive_cap_cli:
   "\<lbrace>K (cap_links_irq aag l cap)\<rbrace>
    derive_cap slot cap
-   \<lbrace>\<lambda>x s :: det_ext state. cap_links_irq aag l x\<rbrace>, -"
+   \<lbrace>\<lambda>x s :: det_state. cap_links_irq aag l x\<rbrace>, -"
   unfolding derive_cap_def
   apply (rule hoare_pre)
   apply (wp arch_derive_cap_cli | wpc | simp add: comp_def cli_no_irqs)+
@@ -1664,9 +1640,9 @@ lemma derive_cap_cli:
 
 (* FIXME: move *)
 lemma derive_cap_obj_refs_subset:
-  "\<lbrace>\<lambda>s :: det_ext state. \<forall>x \<in> obj_refs cap. P x s\<rbrace>
+  "\<lbrace>\<lambda>s :: det_state. \<forall>x \<in> obj_refs_ac cap. P x s\<rbrace>
    derive_cap slot cap
-   \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs rv. P x s\<rbrace>, -"
+   \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs_ac rv. P x s\<rbrace>, -"
   unfolding derive_cap_def
   apply (rule hoare_pre)
   apply (simp cong: cap.case_cong)
@@ -1676,7 +1652,7 @@ lemma derive_cap_obj_refs_subset:
 
 (* FIXME: move *)
 lemma derive_cap_untyped_range_subset:
-  "\<lbrace>\<lambda>s :: det_ext state. \<forall>x \<in> untyped_range cap. P x s\<rbrace>
+  "\<lbrace>\<lambda>s :: det_state. \<forall>x \<in> untyped_range cap. P x s\<rbrace>
    derive_cap slot cap
    \<lbrace>\<lambda>rv s. \<forall>x \<in> untyped_range rv. P x s\<rbrace>, -"
   unfolding derive_cap_def
@@ -1693,7 +1669,7 @@ lemmas derive_cap_aag_caps =
   derive_cap_cli
 
 lemma derive_cap_cap_cur_auth [wp]:
-  "\<lbrace>\<lambda>s :: det_ext state. pas_cap_cur_auth aag cap\<rbrace>
+  "\<lbrace>\<lambda>s :: det_state. pas_cap_cur_auth aag cap\<rbrace>
    derive_cap slot cap
    \<lbrace>\<lambda>rv s. pas_cap_cur_auth aag rv\<rbrace>, -"
   unfolding aag_cap_auth_def
@@ -1702,39 +1678,9 @@ lemma derive_cap_cap_cur_auth [wp]:
   apply simp
   done
 
-(* FIXME AC: replace ArchIpc_AI.update_cap_data_closedform with the following *)
-lemma update_cap_data_closedform:
-  "update_cap_data pres w cap =
-   (case cap of
-      EndpointCap r badge rights \<Rightarrow>
-        if badge = 0 \<and> \<not> pres then (EndpointCap r (w && mask badge_bits) rights) else NullCap
-    | NotificationCap r badge rights \<Rightarrow>
-        if badge = 0 \<and> \<not> pres then (NotificationCap r (w && mask badge_bits) rights) else NullCap
-    | CNodeCap r bits guard \<Rightarrow>
-        if word_bits < fst (update_cnode_cap_data w) + bits
-        then NullCap
-        else CNodeCap r bits ((\<lambda>g''. drop (size g'' - fst (update_cnode_cap_data w)) (to_bl g''))
-                             (snd (update_cnode_cap_data w)))
-    | ThreadCap r \<Rightarrow> ThreadCap r
-    | DomainCap \<Rightarrow> DomainCap
-    | UntypedCap d p n idx \<Rightarrow> UntypedCap d p n idx
-    | NullCap \<Rightarrow> NullCap
-    | ReplyCap t m rights \<Rightarrow> ReplyCap t m rights
-    | IRQControlCap \<Rightarrow> IRQControlCap
-    | IRQHandlerCap irq \<Rightarrow> IRQHandlerCap irq
-    | Zombie r b n \<Rightarrow> Zombie r b n
-    | ArchObjectCap cap \<Rightarrow> arch_update_cap_data pres w cap)"
-  by (cases cap,
-         simp_all only: cap.simps update_cap_data_def is_ep_cap.simps if_False if_True
-                        is_ntfn_cap.simps is_cnode_cap.simps is_arch_cap_def word_size
-                        cap_ep_badge.simps badge_update_def o_def cap_rights_update_def
-                        simp_thms cap_rights.simps Let_def split_def
-                        the_cnode_cap_def fst_conv snd_conv fun_app_def the_arch_cap_def
-                  cong: if_cong)
-
 (* FIXME: move *)
 lemma update_cap_obj_refs_subset:
-  "x \<in> obj_refs (update_cap_data P dt cap) \<Longrightarrow> x \<in> obj_refs cap"
+  "x \<in> obj_refs_ac (update_cap_data P dt cap) \<Longrightarrow> x \<in> obj_refs_ac cap"
   by (cases cap; simp add: update_cap_data_closedform arch_update_cap_obj_refs_subset split: if_splits)
 
 (* FIXME: move *)

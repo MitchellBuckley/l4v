@@ -7,7 +7,8 @@
 theory Crunch_Instances_Trace
 imports
   Crunch
-  TraceMonadVCG
+  Monads.Trace_No_Fail
+  Monads.Trace_More_RG
 begin
 
 lemmas [crunch_param_rules] = Let_def return_bind returnOk_bindE
@@ -25,6 +26,7 @@ fun get_trace_monad_state_type
 structure CrunchValidInstance : CrunchInstance =
 struct
   val name = "valid";
+  val prefix_name_scheme = false;
   type extra = term;
   val eq_extra = ae_conv;
   fun parse_extra ctxt extra
@@ -54,6 +56,7 @@ structure CrunchValid : CRUNCH = Crunch(CrunchValidInstance);
 structure CrunchNoFailInstance : CrunchInstance =
 struct
   val name = "no_fail";
+  val prefix_name_scheme = true;
   type extra = unit;
   val eq_extra = op =;
   fun parse_extra ctxt extra
@@ -82,6 +85,7 @@ structure CrunchNoFail : CRUNCH = Crunch(CrunchNoFailInstance);
 structure CrunchValidEInstance : CrunchInstance =
 struct
   val name = "valid_E";
+  val prefix_name_scheme = false;
   type extra = term * term;
   fun eq_extra ((a, b), (c, d)) = (ae_conv (a, c) andalso ae_conv (b, d));
   fun parse_extra ctxt extra
@@ -111,6 +115,7 @@ structure CrunchValidE : CRUNCH = Crunch(CrunchValidEInstance);
 structure CrunchPrefixClosedInstance : CrunchInstance =
 struct
   val name = "prefix_closed";
+  val prefix_name_scheme = false;
   type extra = unit;
   val eq_extra = op =;
   fun parse_extra ctxt extra
@@ -136,16 +141,16 @@ structure CrunchPrefixClosed : CRUNCH = Crunch(CrunchPrefixClosedInstance);
 \<close>
 
 setup \<open>
-  add_crunch_instance "" (CrunchValid.crunch_x, CrunchValid.crunch_ignore_add_del)
+  add_crunch_instance "" (CrunchValid.crunch_x, CrunchValid.crunch_ignore_add_dels)
 \<close>
 setup \<open>
-  add_crunch_instance "valid" (CrunchValid.crunch_x, CrunchValid.crunch_ignore_add_del)
+  add_crunch_instance "valid" (CrunchValid.crunch_x, CrunchValid.crunch_ignore_add_dels)
 \<close>
 setup \<open>
-  add_crunch_instance "no_fail" (CrunchNoFail.crunch_x, CrunchNoFail.crunch_ignore_add_del)
+  add_crunch_instance "no_fail" (CrunchNoFail.crunch_x, CrunchNoFail.crunch_ignore_add_dels)
 \<close>
 setup \<open>
-  add_crunch_instance "pfx_closed" (CrunchPrefixClosed.crunch_x, CrunchPrefixClosed.crunch_ignore_add_del)
+  add_crunch_instance "pfx_closed" (CrunchPrefixClosed.crunch_x, CrunchPrefixClosed.crunch_ignore_add_dels)
 \<close>
 
 end

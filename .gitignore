@@ -8,12 +8,17 @@
 *.lev
 *.o
 *~
+*.orig
+*.rej
 .*.attrib_trace
 .*.skip
 *.lev
 *#*#
 
 /spec/cspec/c/build
+/spec/cspec/c/config-build
+/spec/cspec/c/export
+/spec/cspec/c/overlays/*/overlay.dts
 
 /spec/haskell/stack.yaml.lock
 /spec/haskell/doc/**/*.aux
@@ -30,8 +35,10 @@
 /spec/design/ARM_HYP/*.thy
 /spec/design/RISCV64/*.thy
 /spec/design/X64/*.thy
+/spec/design/AARCH64/*.thy
 
 /spec/machine/*/MachineTypes.thy
+/spec/machine/*/Kernel_Config.thy
 
 CFunDump.txt
 umm_types.txt
@@ -47,6 +54,12 @@ umm_types.txt
 /tools/c-parser/StrictC.grm.sig
 /tools/c-parser/StrictC.grm.sml
 /tools/c-parser/StrictC.lex.sml
+/tools/c-parser/doc/*.aux
+/tools/c-parser/doc/*.bbl
+/tools/c-parser/doc/*.blg
+/tools/c-parser/doc/*.log
+/tools/c-parser/doc/*.toc
+/tools/c-parser/doc/ctranslation.pdf
 
 /camkes/adl-spec/camkes.ML
 

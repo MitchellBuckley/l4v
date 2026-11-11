@@ -71,8 +71,6 @@ fun funkysplit [_,b,c] = [b,c]
 
 fun real_base_name name = name |> Long_Name.explode |> funkysplit |> Long_Name.implode (*Handles locales properly-ish*)
 
-fun handle_int exn func = if Exn.is_interrupt exn then Exn.reraise exn else func
-
 val Thm : (Facts.ref * Token.src list) -> ((Facts.ref * Token.src list), xstring) sum = Inl
 val Constant : xstring -> ((Facts.ref * Token.src list), xstring) sum = Inr
 val thms = lefts
@@ -87,6 +85,13 @@ val simp_sect = ("simp", Parse.thm >> Thm);
 val simp_del_sect = ("simp_del", Parse.thm >> Thm);
 val rule_sect = ("rule", Parse.thm >> Thm);
 val rule_del_sect = ("rule_del", Parse.thm >> Thm);
+val wp_comb_sect = ("wp_comb", Parse.thm >> Thm);
+val wp_comb_del_sect = ("wp_comb_del", Parse.thm >> Thm);
+val cong_sect = ("cong", Parse.thm >> Thm);
+
+val crunch_sections =
+  [wp_sect,wp_del_sect,wps_sect,ignore_sect,simp_sect,simp_del_sect,rule_sect,rule_del_sect,
+   ignore_del_sect,wp_comb_sect,wp_comb_del_sect,cong_sect]
 
 fun read_const ctxt = Proof_Context.read_const {proper = true, strict = false} ctxt;
 
@@ -109,6 +114,8 @@ signature CrunchInstance =
 sig
     (* The name of the property. *)
     val name : string;
+    (* Which naming scheme to use - true for prefix, false for suffix*)
+    val prefix_name_scheme : bool
     (* The type of any parameters of the property beyond a (optional) precondition
        and the function being crunched. *)
     type extra;
@@ -143,11 +150,12 @@ end
 signature CRUNCH =
 sig
     type extra;
-    (* Crunch configuration: theory, naming scheme, name space, wp rules, wps_rules,
-    constants to ignore, simp rules, constants to not ignore, unfold rules*)
-    type crunch_cfg = {ctxt: local_theory, prp_name: string, nmspce: string option,
-        wp_rules: (string * thm) list, wps_rules: thm list, igs: string list, simps: thm list,
-        ig_dels: string list, rules: thm list};
+    (* Crunch configuration: theory, property name, name space, wp rules, wps_rules,
+       constants to ignore, simp rules, constants to not ignore, unfold rules *)
+    type crunch_cfg =
+      {ctxt: local_theory, prp_name: string, nmspce: string option,
+       wp_rules: (string * thm) list, wps_rules: thm list, igs: string list,
+       simps: thm list, ig_dels: string list, rules: thm list};
 
     (* Crunch takes a configuration, a precondition, any extra information needed, a debug stack,
     a constant name, and a list of previously proven theorems, and returns a theorem for
@@ -161,7 +169,7 @@ sig
          -> (string * ((Facts.ref * Token.src list), xstring) sum) list
          -> string list -> local_theory -> local_theory;
 
-    val crunch_ignore_add_del : string list -> string list -> theory -> theory
+    val crunch_ignore_add_dels : string list -> string list -> local_theory -> local_theory
 
     val mism_term_trace : (term * extra) list Unsynchronized.ref
 end
@@ -171,26 +179,44 @@ struct
 
 type extra = Instance.extra;
 
-type crunch_cfg = {ctxt: local_theory, prp_name: string, nmspce: string option,
-    wp_rules: (string * thm) list, wps_rules: thm list, igs: string list, simps: thm list,
-    ig_dels: string list, rules: thm list};
+type crunch_cfg =
+  {ctxt: local_theory, prp_name: string, nmspce: string option,
+   wp_rules: (string * thm) list, wps_rules: thm list, igs: string list,
+   simps: thm list, ig_dels: string list, rules: thm list};
 
 structure CrunchIgnore = Theory_Data
 (struct
     type T = string list
     val empty = []
-    val extend = I
     val merge = Library.merge (op =);
 end);
 
-fun crunch_ignore_add thms thy =
-  CrunchIgnore.map (curry (Library.merge (op =)) thms) thy
+fun crunch_ignore_add' thm =
+  CrunchIgnore.map (curry (Library.merge (op =)) [thm])
 
-fun crunch_ignore_del thms thy =
-  CrunchIgnore.map (Library.subtract (op =) thms) thy
+fun crunch_ignore_add thm lthy =
+  if Library.member (op =) (CrunchIgnore.get (Proof_Context.theory_of lthy)) thm
+  then (Proof_Context.markup_const lthy thm ^ " is already in the crunch ignore set for "
+        ^ Instance.name |> warning; lthy)
+  else Local_Theory.raw_theory (crunch_ignore_add' thm) lthy;
 
-fun crunch_ignore_add_del adds dels =
-  crunch_ignore_add adds #> crunch_ignore_del dels
+fun crunch_ignore_adds thms =
+  fold (curry (op #>)) (map crunch_ignore_add thms) I;
+
+fun crunch_ignore_del' thm =
+  CrunchIgnore.map (Library.subtract (op =) [thm])
+
+fun crunch_ignore_del thm lthy =
+  if Library.member (op =) (CrunchIgnore.get (Proof_Context.theory_of lthy)) thm
+  then Local_Theory.raw_theory (crunch_ignore_del' thm) lthy
+  else (Proof_Context.markup_const lthy thm ^ " is not in the crunch ignore set for "
+        ^ Instance.name |> warning; lthy);
+
+fun crunch_ignore_dels thms =
+  fold (curry (op #>)) (map crunch_ignore_del thms) I;
+
+fun crunch_ignore_add_dels adds dels =
+  crunch_ignore_adds adds #> crunch_ignore_dels dels
 
 fun crunch_ignores cfg ctxt =
   subtract (op =) (#ig_dels cfg) (#igs cfg @ CrunchIgnore.get (Proof_Context.theory_of ctxt))
@@ -208,6 +234,7 @@ fun simps_of n = n ^ simps_sfx;
 fun num_args t = length (binder_types t) - 1;
 
 fun real_const_from_name const nmspce ctxt =
+  \<^try>\<open>
     let
       val qual::locale::nm::nil = Long_Name.explode const;
       val SOME some_nmspce = nmspce;
@@ -216,7 +243,7 @@ fun real_const_from_name const nmspce ctxt =
      in
        nm
      end
-     handle exn => handle_int exn const;
+  catch _ => const\<close>;
 
 
 fun get_monad ctxt f xs = if is_Const f then
@@ -254,13 +281,19 @@ fun maybe_thms thy name = get_thms thy name handle ERROR _ => []
 fun thy_maybe_thms thy name = Global_Theory.get_thms thy name handle ERROR _ => []
 
 fun add_thm thm atts name ctxt =
-  Local_Theory.notes [((Binding.name name, atts), [([thm], atts)])] ctxt |> #2
+  Local_Theory.notes [((Binding.name name, atts), [([thm], [])])] ctxt |> #2
 
-fun get_thm_name (cfg : crunch_cfg) const_name
-  = if read_const (#ctxt cfg) (Long_Name.base_name const_name)
+fun get_thm_name (cfg : crunch_cfg) const_name =
+  let val const_name' =
+    if read_const (#ctxt cfg) (Long_Name.base_name const_name)
          = read_const (#ctxt cfg) const_name
-      then Long_Name.base_name const_name ^ "_" ^ (#prp_name cfg)
-      else space_implode "_" (space_explode "." const_name @ [#prp_name cfg])
+    then Long_Name.base_name const_name
+    else space_implode "_" (space_explode "." const_name)
+  in
+    if Instance.prefix_name_scheme
+    then (#prp_name cfg) ^ "_" ^ const_name'
+    else const_name' ^ "_" ^ (#prp_name cfg)
+  end;
 
 fun get_stored cfg n = get_thm (#ctxt cfg) (get_thm_name cfg n)
 
@@ -356,12 +389,14 @@ fun eq_cname (Const (s, _)) (Const (t, _)) = (s = t)
   | eq_cname _ _ = false
 
 fun resolve_abbreviated ctxt abbrev =
-  let
+  \<^try>\<open>
+    let
       val (abbrevn,_) = dest_Const abbrev
       val origin = (head_of (snd ((Consts.the_abbreviation o Proof_Context.consts_of) ctxt abbrevn)));
       val (originn,_) = dest_Const origin;
       val (_::_::_::nil) = Long_Name.explode originn;
-    in origin end handle exn => handle_int exn abbrev
+    in origin end
+  catch _ => abbrev\<close>;
 
 fun map_consts f =
       let
@@ -409,10 +444,14 @@ fun induct_inst ctxt const goal nmspce =
        then error ("Unfold rule generated for " ^ const ^ " does not apply")
        else (ms', induct_inst_simplified) end
 
-fun unfold_data ctxt constn goal nmspce NONE = (
-    induct_inst ctxt constn goal nmspce handle exn => handle_int exn
-    unfold ctxt constn goal nmspce handle exn => handle_int exn
-    error ("unfold_data: couldn't find defn or induct rule for " ^ constn))
+fun unfold_data ctxt constn goal nmspce NONE =
+    \<^try>\<open>
+      induct_inst ctxt constn goal nmspce
+    catch _ =>
+      \<^try>\<open>
+        unfold ctxt constn goal nmspce
+      catch _ =>
+        error ("unfold_data: couldn't find defn or induct rule for " ^ constn)\<close>\<close>
   | unfold_data ctxt constn goal _ (SOME thm) =
     let
       val trivial_rule = Thm.trivial goal
@@ -466,7 +505,7 @@ fun get_inst_precond ctxt pre extra (mapply, goal) = let
        match what we were trying to prove, thus a THM exception from RS *)
   handle THM _ => NONE;
 
-fun split_precond (Const (@{const_name pred_conj}, _) $ P $ Q)
+fun split_precond (Const (@{const_name inf}, _) $ P $ Q)
     = split_precond P @ split_precond Q
   | split_precond (Abs (n, T, @{const "HOL.conj"} $ P $ Q))
     = maps (split_precond o Envir.eta_contract) [Abs (n, T, P), Abs (n, T, Q)]
@@ -490,7 +529,7 @@ fun combine_preconds ctxt pre pres = let
       |> remove (op aconv) pre |> distinct (op aconv)
       |> filter (precond_needed ctxt pre ctxt);
     val T = fastype_of pre;
-    val conj = Const (@{const_name pred_conj}, T --> T --> T)
+    val conj = Const (@{const_name inf}, T --> T --> T)
   in case pres' of
       [] => pre
     | _ => let val precond = foldl1 (fn (a, b) => conj $ a $ b) pres'
@@ -722,8 +761,8 @@ fun crunch cfg pre extra stack const' thms =
     let
       val _ = "crunching constant: " ^ Proof_Context.markup_const ctxt const |> writeln;
       val const_term = read_const ctxt const;
-      val goal = make_goal const_term const pre extra ctxt
-                 handle exn => handle_int exn (raise WrongType);
+      val goal =
+        \<^try>\<open>make_goal const_term const pre extra ctxt catch _ => raise WrongType\<close>;
       val _ = debug_trace_bl
         [K (Pretty.str "goal: "), fn () => Syntax.pretty_term ctxt goal]
     in (* first check: has this constant already been done or supplied? *)
@@ -752,13 +791,17 @@ fun crunch cfg pre extra stack const' thms =
                                           (ms ~~ goals);
             in fold (fn pre' => fn goal => collect_preconds pre' goal pre extra ctxt'') preconds goal end;
           val goal' = if Instance.has_preconds then collect_preconds' pre else goal;
+          val _ =
+            if Instance.has_preconds andalso not (Term.aconv_untyped (get_precond goal, get_precond goal'))
+            then Output.information ("Lemma generated for " ^ Proof_Context.markup_const ctxt const ^ " has side-conditions.")
+            else ();
           val goal_prop = HOLogic.mk_Trueprop goal';
 
           val ctxt''' = ctxt'' |> Proof_Context.augment goal_prop
           val _ = writeln ("attempting: " ^ Syntax.string_of_term ctxt''' goal_prop);
           fun wp' wp_rules = wp ctxt (map snd (thms @ #wp_rules cfg) @ goals' @ wp_rules)
           val thm = Goal.prove_future ctxt''' [] [] goal_prop
-              ( (*DupSkip.goal_prove_wrapper *) (fn _ =>
+              (fn _ =>
               resolve_tac ctxt''' [rule] 1
                 THEN maybe_cheat_tac ctxt'''
               THEN ALLGOALS (simp_tac ctxt''')
@@ -783,7 +826,7 @@ fun crunch cfg pre extra stack const' thms =
                   CHANGED_GOAL (simp_tac ctxt''')
                 ) n))
               THEN proof_failed_warnings const stack cfg wp' ctxt'''
-              )) |> singleton (Proof_Context.export ctxt''' ctxt)
+              ) |> singleton (Proof_Context.export ctxt''' ctxt)
         in (SOME thm, (get_thm_name cfg const, thm) :: thms') end
     end
     handle WrongType =>
@@ -795,15 +838,17 @@ fun crunch cfg pre extra stack const' thms =
 fun get_locale_origins full_const_names ctxt =
   let
     fun get_locale_origin abbrev =
-      let
-        (*Check if the given const is an abbreviation*)
-        val (origin,_) = dest_Const (head_of (snd ((Consts.the_abbreviation o Proof_Context.consts_of) ctxt abbrev)));
-        (*Check that the origin can be broken into 3 parts (i.e. it is from a locale) *)
-        val [_,_,_] = Long_Name.explode origin;
-        (*Remember the theory for the abbreviation*)
+      \<^try>\<open>
+        let
+          (*Check if the given const is an abbreviation*)
+          val (origin,_) = dest_Const (head_of (snd ((Consts.the_abbreviation o Proof_Context.consts_of) ctxt abbrev)));
+          (*Check that the origin can be broken into 3 parts (i.e. it is from a locale) *)
+          val [_,_,_] = Long_Name.explode origin;
+          (*Remember the theory for the abbreviation*)
 
-        val [qual,nm] = Long_Name.explode abbrev
-      in SOME qual end handle exn => handle_int exn NONE
+          val [qual,nm] = Long_Name.explode abbrev
+        in SOME qual end
+      catch _ => NONE\<close>
   in fold (curry (fn (abbrev,qual) => case (get_locale_origin abbrev) of
                                         SOME q => SOME q
                                       | NONE => NONE)) full_const_names NONE
@@ -836,6 +881,15 @@ fun crunch_x atts extra prp_name wpigs consts ctxt =
                           |> get_thms_from_facts ctxt
         val rules = rules @ Named_Theorems.get ctxt @{named_theorems crunch_rules}
 
+        val wp_combs = wpigs |> filter (fn (s,_) => s = #1 wp_comb_sect) |> map #2 |> thms
+                    |> get_thms_from_facts ctxt
+
+        val wp_comb_dels = wpigs |> filter (fn (s,_) => s = #1 wp_comb_del_sect) |> map #2 |> thms
+                    |> get_thms_from_facts ctxt
+
+        val congs = wpigs |> filter (fn (s,_) => s = #1 cong_sect) |> map #2 |> thms
+                    |> get_thms_from_facts ctxt
+
         fun mk_wp thm =
            let val ms = Thm.prop_of thm |> monads_of ctxt;
                 val m = if length ms = 1
@@ -856,20 +910,27 @@ fun crunch_x atts extra prp_name wpigs consts ctxt =
                     (const_terms ~~ full_const_names)
 
         val wp_dels = get_thms_from_facts ctxt wp_dels';
-        val ctxt' = fold (fn thm => fn ctxt => Thm.proof_attributes [WeakestPre.wp_del] thm ctxt |> snd)
-                          wp_dels ctxt;
+        val ctxt' =
+          ctxt delsimps simp_dels
+          |> fold (fn thm => fn ctxt => Thm.proof_attributes [WeakestPre.wp_del] thm ctxt |> snd)
+                  wp_dels
+          |> fold (fn thm => fn ctxt => Thm.proof_attributes [WeakestPre.combs_add] thm ctxt |> snd)
+                  wp_combs
+          |> fold (fn thm => fn ctxt => Thm.proof_attributes [WeakestPre.combs_del] thm ctxt |> snd)
+                  wp_comb_dels
+          |> fold Simplifier.add_cong congs;
 
-        val ctxt'' = ctxt' delsimps simp_dels;
-
-        val (_, thms) = funkyfold (crunch {ctxt = ctxt'', prp_name = prp_name, nmspce = nmspce,
-              wp_rules = wp_rules, wps_rules = wps_rules, igs = igs, simps = simps,
-              ig_dels = ig_dels, rules = rules} pre' extra' [])
-            full_const_names [];
+        val crunch_cfg =
+          {ctxt = ctxt', prp_name = prp_name, nmspce = nmspce, wp_rules = wp_rules,
+           wps_rules = wps_rules, igs = igs, simps = simps, ig_dels = ig_dels,
+           rules = rules}
+        val (_, thms) =
+          funkyfold (crunch crunch_cfg pre' extra' []) full_const_names [];
         val _ = if null thms then warning "crunch: no theorems proven" else ();
 
         val atts' = map (Attrib.check_src ctxt) atts;
 
-        val ctxt''' = fold (fn (name, thm) => add_thm thm atts' name) thms ctxt;
+        val new_ctxt = fold (fn (name, thm) => add_thm thm atts' name) thms ctxt;
     in
         Pretty.writeln
           (Pretty.big_list "proved:"
@@ -878,7 +939,7 @@ fun crunch_x atts extra prp_name wpigs consts ctxt =
                                       [Pretty.str (n ^ ": "),
                                        Syntax.pretty_term ctxt (Thm.prop_of t)])
                                 thms));
-        ctxt'''
+        new_ctxt
     end
 
 end

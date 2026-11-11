@@ -17,12 +17,16 @@ lemmas cte_index_repair_sym = cte_index_repair[symmetric]
 
 lemmas of_nat_inj32 = of_nat_inj[where 'a=32, folded word_bits_def]
 
-context begin
-interpretation Arch .
+context Arch begin arch_global_naming
 
-(* Move to Deterministic_AI*)
-crunch valid_etcbs[wp]: copy_global_mappings valid_etcbs (wp: mapM_x_wp')
+(* FIXME arch-split: missing from ArchCSpaceInvPre_AI on this architecture *)
+lemma set_cap_aobjs_of[wp]:
+  "set_cap cap ptr \<lbrace>\<lambda>s. P (aobjs_of s)\<rbrace>"
+  unfolding set_cap_def
+  apply (wpsimp wp: set_object_wp get_object_wp)
+  apply (auto simp: opt_map_def obj_at_def aobj_of_def split: option.splits elim!: rsubst[where P=P])
+  done
 
-end
+end (* Arch *)
 
 end

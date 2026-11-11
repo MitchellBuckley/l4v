@@ -7,20 +7,33 @@
 chapter "Platform Definitions"
 
 theory Platform
-imports
-  "Lib.Lib"
-  "Word_Lib.Word_Enum"
-  "Lib.Defs"
-  Setup_Locale
+  imports
+    Lib.Lib
+    Word_Lib.WordSetup
+    Lib.Defs
+    Setup_Locale
+    Kernel_Config
 begin
+
+section \<open>ABI Setup\<close>
+
+(* representation of C int literals, the default for any unadorned numeral *)
+type_synonym int_literal_len = "32 signed"
+type_synonym int_word = "int_literal_len word"
+
+section \<open>Platform Constants\<close>
 
 context Arch begin global_naming RISCV64
 
-type_synonym irq = "6 word" (* match IRQ_CNODE_SLOT_BITS in seL4 config *)
-type_synonym paddr = word64
+value_type irq_len = Kernel_Config.irqBits (* IRQ_CNODE_SLOT_BITS *)
+type_synonym irq = "irq_len word"
+type_synonym paddr = machine_word
 
-abbreviation (input) "toPAddr \<equiv> id"
-abbreviation (input) "fromPAddr \<equiv> id"
+abbreviation (input) toPAddr :: "machine_word \<Rightarrow> paddr" where
+  "toPAddr \<equiv> id"
+
+abbreviation (input) fromPAddr :: "paddr \<Rightarrow> machine_word" where
+  "fromPAddr \<equiv> id"
 
 (* Address space layout (from seL4/include/arch/riscv/arch/64/mode/hardware.h):
 
@@ -93,41 +106,34 @@ table entry|      |           PSpace            |   |
    of these constants.
 *)
 
-definition canonical_bit :: nat
-  where
+definition canonical_bit :: nat where
   "canonical_bit = 38"
 
-definition kdevBase :: word64
-  where
+definition kdevBase :: machine_word where
   "kdevBase = - (1 << 30)" (* 2^64 - 1 GiB *)
 
 lemma "kdevBase = 0xFFFFFFFFC0000000" (* Sanity check with C *)
   by (simp add: kdevBase_def)
 
-definition kernelELFBase :: word64
-  where
-  "kernelELFBase = - (1 << 31) + 0x4000000" (* 2^64 - 2 GiB + 2^26 *)
+definition kernelELFPAddrBase :: machine_word where
+  "kernelELFPAddrBase = physBase"
 
-lemma "kernelELFBase = 0xFFFFFFFF84000000" (* Sanity check with C *)
-  by (simp add: kernelELFBase_def)
+definition pptrTop :: machine_word where
+  "pptrTop \<equiv> - (1 << 31)"
 
-definition kernelELFPAddrBase :: word64
-  where
-  "kernelELFPAddrBase = 0x84000000"
+definition kernelELFBase :: machine_word where
+  "kernelELFBase = pptrTop + (kernelELFPAddrBase && mask 30)" (* 2^64 - 2 GiB + ... *)
 
-definition kernelELFBaseOffset :: word64
-  where
+definition kernelELFBaseOffset :: machine_word where
   "kernelELFBaseOffset = kernelELFBase - kernelELFPAddrBase"
 
-definition pptrBase :: word64
-  where
+definition pptrBase :: machine_word where
   "pptrBase = - (1 << canonical_bit)"
 
 lemma "pptrBase = 0xFFFFFFC000000000" (* Sanity check with C *)
   by (simp add: pptrBase_def canonical_bit_def)
 
-definition pptrUserTop :: word64
-  where
+definition pptrUserTop :: machine_word where
   "pptrUserTop \<equiv> mask canonical_bit && ~~mask 12" (* for page boundary alignment *)
 
 lemma "pptrUserTop = 0x0000003ffffff000" (* Sanity check with C *)
@@ -137,42 +143,36 @@ schematic_goal pptrUserTop_def': (* direct constant definition *)
   "RISCV64.pptrUserTop = numeral ?x"
   by (simp add: RISCV64.pptrUserTop_def canonical_bit_def mask_def del: word_eq_numeral_iff_iszero)
 
-definition paddrBase :: word64
-  where
+definition paddrBase :: machine_word where
   "paddrBase \<equiv> 0"
 
-definition pptrBaseOffset :: word64
-  where
+definition pptrBaseOffset :: machine_word where
   "pptrBaseOffset = pptrBase - paddrBase"
 
-definition ptrFromPAddr :: "paddr \<Rightarrow> word64"
-  where
+definition ptrFromPAddr :: "paddr \<Rightarrow> machine_word" where
   "ptrFromPAddr paddr \<equiv> paddr + pptrBaseOffset"
 
-definition addrFromPPtr :: "word64 \<Rightarrow> paddr"
-  where
+definition addrFromPPtr :: "machine_word \<Rightarrow> paddr" where
   "addrFromPPtr pptr \<equiv> pptr - pptrBaseOffset"
 
-definition addrFromKPPtr :: "word64 \<Rightarrow> paddr"
-  where
+definition addrFromKPPtr :: "machine_word \<Rightarrow> paddr" where
   "addrFromKPPtr pptr \<equiv> pptr - kernelELFBaseOffset"
 
-definition minIRQ :: "irq"
-  where
+definition minIRQ :: "irq" where
   "minIRQ \<equiv> 0"
 
-definition maxIRQ :: "irq"
-  where
-  "maxIRQ \<equiv> 54"
+(* maxIRQ is defined via Kernel_Config on this architecture *)
+definition maxIRQ :: "'a::numeral" where
+  "maxIRQ \<equiv> Kernel_Config.maxIRQ"
 
 (* Reserved by C to represent "not an IRQ" *)
-definition irqInvalid :: "irq"
-  where
+definition irqInvalid :: "irq" where
   "irqInvalid \<equiv> 0"
 
-definition pageColourBits :: nat
-  where
-  "pageColourBits \<equiv> undefined" \<comment> \<open>not implemented on this platform\<close>
-
 end
+
+(* we want to use the Platform constant in the global context instead of the arch-specific one from
+   Kernel_Config *)
+arch_requalify_consts (aliasing) maxIRQ
+
 end

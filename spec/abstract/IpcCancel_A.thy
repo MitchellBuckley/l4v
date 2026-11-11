@@ -14,19 +14,17 @@ theory IpcCancel_A
 imports ArchIpcCancel_A
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   arch_post_cap_deletion
   arch_gen_obj_refs
   arch_cap_cleanup_opt
+
+arch_requalify_consts
   faultRegister
   nextInstructionRegister
 
-requalify_types
+arch_requalify_types (A)
   arch_gen_obj_ref
-
-end
 
 text \<open>Getting and setting endpoint queues.\<close>
 definition
@@ -57,8 +55,8 @@ where
                         queue \<leftarrow> get_ep_queue ep;
                         set_endpoint epptr IdleEP;
                         mapM_x (\<lambda>t. do set_thread_state t Restart;
-                                       do_extended_op (tcb_sched_action (tcb_sched_enqueue) t) od) $ queue;
-                        do_extended_op (reschedule_required)
+                                       tcb_sched_action (tcb_sched_enqueue) t od) $ queue;
+                        reschedule_required
                      od
    od"
 
@@ -84,7 +82,7 @@ where
                 st \<leftarrow> get_thread_state t;
                 if blocking_ipc_badge st = badge then do
                   set_thread_state t Restart;
-                  do_extended_op (tcb_sched_action (tcb_sched_enqueue) t);
+                  tcb_sched_action (tcb_sched_enqueue) t;
                   return False od
                 else return True
             od);
@@ -92,7 +90,7 @@ where
                            [] \<Rightarrow> IdleEP
                          | _ \<Rightarrow> SendEP queue');
             set_endpoint epptr ep';
-            do_extended_op (reschedule_required)
+            reschedule_required
         od
   od"
 
@@ -139,8 +137,8 @@ where
      case ntfn_obj ntfn of WaitingNtfn queue \<Rightarrow> do
                       _ \<leftarrow> set_notification ntfnptr $ ntfn_set_obj ntfn IdleNtfn;
                       mapM_x (\<lambda>t. do set_thread_state t Restart;
-                                     do_extended_op (tcb_sched_action tcb_sched_enqueue t) od) queue;
-                      do_extended_op (reschedule_required)
+                                     tcb_sched_action tcb_sched_enqueue t od) queue;
+                      reschedule_required
                      od
                | _ \<Rightarrow> return ()
    od"
@@ -373,8 +371,8 @@ where
      cancel_ipc thread;
      state \<leftarrow> get_thread_state thread;
      (if state = Running then update_restart_pc thread else return ());
-     set_thread_state thread Inactive;
-     do_extended_op (tcb_sched_action (tcb_sched_dequeue) thread)
+     tcb_sched_action (tcb_sched_dequeue) thread;
+     set_thread_state thread Inactive
    od"
 
 end

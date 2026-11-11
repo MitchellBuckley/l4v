@@ -61,6 +61,7 @@ signature AUTOCORRES_TRACE = sig
         Proof.context -> (cterm -> thm) -> thm -> bool -> thm * SimpTrace option
 
   val print_ac_trace: thm RuleTrace -> string
+
   val writeFile: string -> string -> unit
 end;
 
@@ -69,7 +70,7 @@ structure AutoCorresTrace: AUTOCORRES_TRACE = struct
 (*
  * Custom unifier for trace_solve_tac.
  * Isabelle's built-in unifier has several problems:
- * 1. It gives up when the unifications become “complicated”, even if it is
+ * 1. It gives up when the unifications become "complicated", even if it is
  *    only due to variables needing large instantiations.
  *    This happens for trace_solve_tac because it unifies subgoals with subgoal proofs,
  *    thus it may instantiate a variable to an entire program term.
@@ -169,25 +170,28 @@ fun my_unify_fact_tac ctxt subproof n state =
   case my_typ_match stateterm proofterm of
      NONE => Seq.empty
    | SOME typinsts =>
-     (case Thm.instantiate (map (fn (v, t) => (v, ctyp_of' t)) (Utils.nubBy fst typinsts), []) state of
+     \<^try>\<open>
+     (case Thm.instantiate (TVars.make (map (fn (v, t) => (v, ctyp_of' t)) (Utils.nubBy fst typinsts)), Vars.empty) state of
        state' =>
         let val stateterm' = nth (Thm.prems_of state') (n-1) in
         case my_match stateterm' proofterm of
            NONE => Seq.empty
          | SOME substs =>
+            \<^try>\<open>
              let val substs' = Utils.nubBy #1 substs
                                |> map (fn (var, args, t') => (var, my_lambda args t'))
                                |> map (fn (v, t) => (v, cterm_of' t))
              in
-             case Thm.instantiate ([], substs') state of state' =>
-               (case Proof_Context.fact_tac ctxt [Variable.gen_all ctxt subproof] 1 state' |> Seq.pull of
-                   NONE => Seq.empty
-                 | r => Seq.make (fn () => r))
-             handle _ => Seq.empty
+             \<^try>\<open>
+               case Thm.instantiate (TVars.empty, Vars.make substs') state of state' =>
+                 (case Proof_Context.fact_tac ctxt [Variable.gen_all ctxt subproof] 1 state' |> Seq.pull of
+                     NONE => Seq.empty
+                   | r => Seq.make (fn () => r))
+             catch _ => Seq.empty\<close>
              end
-       handle _ => Seq.empty
+            catch _ => Seq.empty\<close>
       end)
-      handle _ => Seq.empty
+      catch _ => Seq.empty\<close>
   end
   end
 
@@ -202,7 +206,7 @@ datatype 'a RuleTrace = RuleTrace of {
 fun trace_steps (RuleTrace tr) = #step tr :: List.concat (map trace_steps (#trace tr))
 
 fun dest_rule_comb (Const (@{const_name "Trueprop"}, _) $ t) = dest_rule_comb t
-  | dest_rule_comb t = dest_rule_comb (Logic.dest_all t |> snd)
+  | dest_rule_comb t = dest_rule_comb (Logic.dest_all_global t |> snd)
                        handle TERM _ => strip_comb t
 fun get_rule_abstract t = dest_rule_comb t |> snd |> (fn args => nth args (length args - 2))
 
@@ -342,34 +346,27 @@ fun fconv_rule_maybe_traced ctxt conv thm do_trace =
 
 (* Display and debugging utils *)
 local
-fun dropQuotes s = if String.isPrefix "\"" s andalso String.isSuffix "\"" s
-                       then String.substring (s, 1, String.size s - 2) else s
-
-fun cterm_to_string no_markup =
-  Proof_Display.pp_cterm (fn _ => @{theory Pure})
-  #> Pretty.string_of
-  #> YXML.parse_body
-  #> (if no_markup then XML.content_of else YXML.string_of_body)
-  #> dropQuotes
-
-fun intercalate _ [] = []
-  | intercalate _ [x] = [x]
-  | intercalate l (x::xs) = x :: l @ intercalate l xs
+fun print_term ctxt t =
+  Pretty.pure_string_of (Syntax.pretty_term ctxt t)
 
 fun print_ac_trace' indent (RuleTrace tr) =
-  let val print_cterm = cterm_to_string true
-      val print_thm = Thm.cprop_of #> print_cterm
-      val indent' = indent ^ "  "
+  let
+    val ctxt = ML_PP.toplevel_context ()
+    val print_cterm = print_term ctxt o Thm.term_of
+    val print_thm = print_term ctxt o Thm.prop_of
+    val indent2 = indent ^ "  "
   in
     indent ^ "Subgoal: " ^ print_cterm (#input tr) ^ "\n" ^
     indent ^ "Output:  " ^ print_thm (#output tr) ^ "\n" ^
     (if null (#trace tr) then indent ^ "Proof: " ^ print_thm (#step tr |> fst) ^ "\n" else
        indent ^ "Proof:\n" ^
-       indent' ^ "Step: " ^ print_thm (#step tr |> fst) ^ "\n\n" ^
-       String.concat (map (print_ac_trace' indent') (#trace tr) |> intercalate ["\n"]))
+       indent2 ^ "Step: " ^ print_thm (#step tr |> fst) ^ "\n\n" ^
+       cat_lines (map (print_ac_trace' indent2) (#trace tr)))
   end
+
 in
 val print_ac_trace = print_ac_trace' ""
+
 end
 
 fun writeFile filename string =

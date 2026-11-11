@@ -21,11 +21,11 @@ imports
   TypHeapSimple
   HeapLift
   WordAbstract
-  "Lib.OptionMonadWP"
-  "Lib.Apply_Trace"
+  "Monads.Reader_Option_VCG"
+  "Eisbach_Tools.Apply_Trace"
   AutoCorresSimpset
-  "Lib.MkTermAntiquote"
-  "Lib.TermPatternAntiquote"
+  "ML_Utils.MkTermAntiquote"
+  "ML_Utils.TermPatternAntiquote"
   keywords "autocorres" :: thy_decl
 begin
 
@@ -33,6 +33,7 @@ begin
 declare word_neq_0_conv [simp del]
 declare neq0_conv [simp del]
 declare fun_upd_apply[simp del]
+declare of_int_and_nat[simp del]
 
 (* Remove wp combinators which are problematic for AutoCorres
    and restore some prior configuration. *)
@@ -41,9 +42,9 @@ declare hoare_wp_combs [wp del, wp_comb del]
 declare hoare_wp_state_combsE [wp del, wp_comb del]
 
 lemmas hoare_wp_combsE_autocorres [wp_comb]
-    = hoare_vcg_precond_impE hoare_vcg_precond_impE_R validE_validE_R
+    = hoare_weaken_preE hoare_weaken_preE_R validE_validE_R
 lemmas hoare_wp_combs_autocorres [wp_comb]
-    = hoare_vcg_precond_imp
+    = hoare_weaken_pre
 declare validNF_weaken_pre[wp_comb]
 declare validE_NF_weaken_pre[wp_comb]
 bundle nf_no_pre

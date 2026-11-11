@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
+ifndef L4V_ARCH
+$(error L4V_ARCH must be set, e.g. "ARM")
+endif
+
 ifndef CPARSER_PFX
 CPARSER_PFX := $(realpath $(dir $(lastword $(MAKEFILE_LIST))))
 endif
@@ -76,10 +80,6 @@ GRAMMAR_PRODUCTS = StrictC.lex.sml StrictC.grm.sig StrictC.grm.sml
 
 .PHONY: c-parser-deps
 c-parser-deps: $(GRAMMAR_PRODUCTS)
-
-# Regression targets.
-report-regression: .FORCE
-	@echo CParser cparser_test cparser_tools
 
 .PHONY: .FORCE
 .FORCE:

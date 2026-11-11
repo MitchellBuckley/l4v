@@ -1,6 +1,7 @@
 (*
- * Copyright 2014, General Dynamics C4 Systems
+ * Copyright 2022, Proofcraft Pty Ltd
  * Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
+ * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
  *)
@@ -64,39 +65,143 @@ lemma setDomain_ccorres:
           apply (rule ccorres_cond2[where R=\<top>], simp add: Collect_const_mem)
            apply (ctac add: tcbSchedEnqueue_ccorres)
           apply (rule ccorres_return_Skip)
-         apply (simp add: when_def to_bool_def)
-         apply (rule_tac R="\<lambda>s. rv = ksCurThread s"
+         apply (simp add: when_def)
+         apply (rule_tac R="\<lambda>s. curThread = ksCurThread s"
                     in ccorres_cond2)
            apply (clarsimp simp: rf_sr_ksCurThread)
-          apply (ctac add: rescheduleRequired_ccorres[unfolded dc_def])
+          apply (ctac add: rescheduleRequired_ccorres)
          apply (rule ccorres_return_Skip')
         apply simp
         apply (wp hoare_drop_imps weak_sch_act_wf_lift_linear)
        apply (simp add: guard_is_UNIV_def)
       apply simp
       apply wp
-     apply (rule_tac Q="\<lambda>_. all_invs_but_sch_extra and tcb_at' t and sch_act_simple
-                        and (\<lambda>s. rv = ksCurThread s)" in hoare_strengthen_post)
+     apply (rule_tac Q'="\<lambda>_. all_invs_but_sch_extra and tcb_at' t and sch_act_simple
+                            and (\<lambda>s. curThread = ksCurThread s)"
+              in hoare_strengthen_post)
       apply (wp threadSet_all_invs_but_sch_extra)
-     apply (clarsimp simp:valid_pspace_valid_objs' st_tcb_at_def[symmetric]
-       sch_act_simple_def st_tcb_at'_def o_def weak_sch_act_wf_def split:if_splits)
+     apply (fastforce simp: valid_pspace_valid_objs' st_tcb_at_def[symmetric]
+                            sch_act_simple_def st_tcb_at'_def weak_sch_act_wf_def
+                     split: if_splits)
     apply (simp add: guard_is_UNIV_def)
-   apply (rule_tac Q="\<lambda>_. invs' and tcb_at' t and sch_act_simple
-      and (\<lambda>s. rv = ksCurThread s \<and> (\<forall>p. t \<notin> set (ksReadyQueues s p)))" in hoare_strengthen_post)
+   apply (rule_tac Q'="\<lambda>_. invs' and tcb_at' t and sch_act_simple and (\<lambda>s. curThread = ksCurThread s)"
+            in hoare_strengthen_post)
     apply (wp weak_sch_act_wf_lift_linear tcbSchedDequeue_not_queued
-              tcbSchedDequeue_not_in_queue hoare_vcg_imp_lift hoare_vcg_all_lift)
+              hoare_vcg_imp_lift hoare_vcg_all_lift)
    apply (clarsimp simp: invs'_def valid_pspace'_def valid_state'_def)
   apply (fastforce simp: valid_tcb'_def tcb_cte_cases_def
                          invs'_def valid_state'_def valid_pspace'_def)
+  done
+
+lemma Arch_prepareSetDomain_ccorres:
+  "ccorres dc xfdc invs' UNIV [] (return ()) (Call Arch_prepareSetDomain_'proc)"
+  apply cinit'
+   apply (rule_tac R=\<top> and R'=UNIV in ccorres_return)
+   apply vcg
+   apply clarsimp
+  apply clarsimp
+  done
+
+lemma prepareSetDomain_ccorres:
+  "ccorres dc xfdc
+      (invs' and tcb_at' t)
+      (\<lbrace>\<acute>tptr = tcb_ptr_to_ctcb_ptr t\<rbrace> \<inter> \<lbrace>\<acute>dom = ucast d\<rbrace>) []
+      (prepareSetDomain t d) (Call prepareSetDomain_'proc)"
+  apply (cinit lift: tptr_' dom_')
+   apply (rule ccorres_cond_weak)
+    apply (ctac add: Arch_prepareSetDomain_ccorres)
+   apply (ctac add: ccorres_return_Skip)
+  apply clarsimp
   done
 
 lemma active_runnable':
   "active' state \<Longrightarrow> runnable' state"
   by (fastforce simp: runnable'_def)
 
-lemma decodeDomainInvocation_ccorres:
-  notes Collect_const[simp del]
-  shows
+lemma invokeDomainSetSet_ccorres:
+  "ccorres dc xfdc
+      (invs' and tcb_at' t and sch_act_simple
+             and (\<lambda>s. d \<le> maxDomain))
+      (\<lbrace>\<acute>tcb = tcb_ptr_to_ctcb_ptr t\<rbrace> \<inter> \<lbrace>\<acute>domain = ucast d\<rbrace>) hs
+      (domainSet t d)
+      (Call invokeDomainSetSet_'proc)"
+  apply (cinit lift: tcb_' domain_')
+   apply (simp add: liftE_def bind_assoc)
+   apply (ctac (no_vcg) add: prepareSetDomain_ccorres)
+    apply (ctac (no_vcg) add: setDomain_ccorres)
+   apply wpsimp+
+  done
+
+lemma invokeDomainScheduleSetStart_ccorres:
+  "ccorres dc xfdc invs' \<lbrace>unat \<acute>index___unsigned_long = idx\<rbrace> hs
+           (domainSetStart idx)
+           (Call invokeDomainScheduleSetStart_'proc)"
+  apply (cinit lift: index___unsigned_long_')
+   apply (rule ccorres_split_nothrow_novcg)
+       apply (rule ccorres_from_vcg[where P=\<top> and P'=UNIV and rrel=dc])
+       apply (rule allI, rule conseqPre, vcg)
+       apply (clarsimp simp: simpler_modify_def rf_sr_def cstate_relation_def Let_def
+                             carch_state_relation_def cmachine_state_relation_def)
+      apply ceqv
+     apply (rule ccorres_split_nothrow_novcg)
+         apply (rule ccorres_from_vcg[where P=\<top> and P'=UNIV and rrel=dc])
+         apply (rule allI, rule conseqPre, vcg)
+         apply (clarsimp simp: simpler_modify_def rf_sr_def cstate_relation_def Let_def
+                               carch_state_relation_def cmachine_state_relation_def)
+        apply ceqv
+       apply (rule ccorres_Guard_Seq)
+       apply (rule ccorres_lhs_assoc)
+       apply (rule ccorres_split_nothrow_novcg)
+           apply (rule ccorres_from_vcg[where P=\<top> and P'=UNIV and rrel=dc and xf=xfdc])
+           apply (rule allI, rule conseqPre, vcg)
+           apply (clarsimp simp: simpler_modify_def rf_sr_def cstate_relation_def Let_def
+                                 carch_state_relation_def cmachine_state_relation_def exec_gets
+                                 domScheduleLength_def cdom_schedule_relation_def)
+          apply ceqv
+         apply (ctac add: rescheduleRequired_ccorres)
+        apply wpsimp
+       apply (simp add: guard_is_UNIV_def)
+      apply wpsimp
+     apply (simp add: guard_is_UNIV_def domScheduleLength_def)
+    apply wpsimp
+   apply (simp add: guard_is_UNIV_def)
+  apply clarsimp
+  apply (frule invs_weak_sch_act_wf)
+  apply (fastforce simp: weak_sch_act_wf_def tcb_in_cur_domain'_def)
+  done
+
+lemma invokeDomainScheduleConfigure_ccorres:
+  "ccorres dc xfdc
+           (valid_domain_inv' (InvokeDomainScheduleConfigure idx dm duration))
+           (\<lbrace>unat \<acute>index___unsigned_long = idx\<rbrace> \<inter> \<lbrace>\<acute>domain = ucast dm\<rbrace> \<inter>
+            \<lbrace>\<acute>duration = duration\<rbrace>)
+           hs
+           (domainScheduleConfigure idx dm duration)
+           (Call invokeDomainScheduleConfigure_'proc)"
+  (* avoid rewriting ArrayBounds guard for numDomains = 1: *)
+  supply word_less_1[simp del] less_Suc0[simp del]
+  apply (cinit lift: index___unsigned_long_' domain_' duration_')
+   apply (rule ccorres_from_vcg
+               [where P="valid_domain_inv' (InvokeDomainScheduleConfigure idx dm duration)"
+                      and P'=UNIV
+                      and rrel=dc])
+   apply (rule allI, rule conseqPre, vcg)
+   apply (clarsimp simp: simpler_modify_def rf_sr_def cstate_relation_def Let_def
+                         carch_state_relation_def cmachine_state_relation_def
+                         valid_domain_inv'_def)
+   apply (simp add: cdom_schedule_relation_def word_less_nat_alt)
+   (* avoiding clarsimp/clarify for numDomains = 1 case *)
+   apply (rule allI, rule impI)
+   apply (rename_tac n)
+   apply (case_tac "idx = n"; simp)
+   apply (clarsimp simp: dom_schedule_entry_relation_def maxDomainDuration_def)
+   apply (rule conjI)
+    apply (clarsimp simp: le_mask_iff shiftr_over_or_dist and_mask2 word_size ucast_and_mask_drop)
+   apply (clarsimp simp: word_ao_dist and_mask_eq_iff_le_mask[symmetric])
+  apply simp
+  done
+
+lemma decodeDomainSetSetInvocation_ccorres:
   "interpret_excaps extraCaps' = excaps_map extraCaps \<Longrightarrow>
    ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
        (invs' and (\<lambda>s. ksCurThread s = thread)
@@ -107,24 +212,14 @@ lemma decodeDomainInvocation_ccorres:
               and (\<lambda>s. \<forall>v \<in> set extraCaps.
                              s \<turnstile>' fst v)
               and sysargs_rel args buffer)
-       (UNIV
-             \<inter> {s. unat (length___unsigned_long_' s) = length args}
-             \<inter> {s. current_extra_caps_' (globals s) = extraCaps'}
-             \<inter> {s. call_' s = from_bool isCall}
-             \<inter> {s. invLabel_' s = lab}
-             \<inter> {s. buffer_' s = option_to_ptr buffer}) []
-       (decodeDomainInvocation lab args extraCaps
-           >>= invocationCatch thread isBlocking isCall (uncurry InvokeDomain))
-  (Call decodeDomainInvocation_'proc)"
-  supply gen_invocation_type_eq[simp]
-  apply (cinit' lift: length___unsigned_long_' current_extra_caps_' call_' invLabel_' buffer_'
-                simp: decodeDomainInvocation_def list_case_If2 whenE_def)
-   apply (rule ccorres_Cond_rhs_Seq)
-    apply (simp add: throwError_bind invocationCatch_def invocation_eq_use_types
-               cong: StateSpace.state.fold_congs globals.fold_congs)
-    apply (rule syscall_error_throwError_ccorres_n)
-    apply (simp add: syscall_error_to_H_cases)
-   apply (simp add: invocation_eq_use_types)
+       (\<lbrace>unat \<acute>length___unsigned_long = length args\<rbrace>
+        \<inter> \<lbrace>\<acute>current_extra_caps = extraCaps' \<rbrace>
+        \<inter> \<lbrace>\<acute>buffer = option_to_ptr buffer\<rbrace>) []
+   (decodeDomainSet args extraCaps >>= invocationCatch thread isBlocking isCall InvokeDomain)
+   (Call decodeDomainSetSetInvocation_'proc)"
+  supply Collect_const[simp del]
+  apply (cinit' lift: length___unsigned_long_' current_extra_caps_' buffer_'
+                simp: decodeDomainSet_def list_case_If2 whenE_def)
    apply (rule ccorres_Cond_rhs_Seq)
     apply (simp add: throwError_bind invocationCatch_def
                cong: StateSpace.state.fold_congs globals.fold_congs)
@@ -134,14 +229,15 @@ lemma decodeDomainInvocation_ccorres:
    apply (rule ccorres_add_return)
    apply (rule ccorres_rhs_assoc)+
    apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=0 and buffer=buffer])
-     apply (simp add: numDomains_def hd_conv_nth word_le_nat_alt)
+     apply (simp add: hd_conv_nth word_le_nat_alt)
+     apply (simp add: unat_scast_numDomains)
      apply (rule ccorres_Cond_rhs_Seq)
-      apply (simp add: throwError_bind invocationCatch_def numDomains_def
-                       hd_conv_nth word_le_nat_alt
+      apply (simp add: throwError_bind invocationCatch_def
+                       hd_conv_nth word_le_nat_alt unat_numDomains_to_H
                  cong: StateSpace.state.fold_congs globals.fold_congs)
       apply (rule syscall_error_throwError_ccorres_n)
       apply (simp add: syscall_error_to_H_cases)
-     apply (simp add: null_def excaps_map_def)
+     apply (simp add: excaps_map_def unat_numDomains_to_H)
      apply (rule ccorres_Cond_rhs_Seq)
       apply (simp add: throwError_bind invocationCatch_def
                        interpret_excaps_test_null
@@ -171,15 +267,16 @@ lemma decodeDomainInvocation_ccorres:
         apply (rule syscall_error_throwError_ccorres_n)
         apply (simp add: syscall_error_to_H_cases)
        apply (simp add: Collect_const returnOk_def uncurry_def)
-       apply (simp (no_asm) add: ccorres_invocationCatch_Inr split_def
-                                 performInvocation_def liftE_bindE bind_assoc)
+       apply (simp (no_asm) add: ccorres_invocationCatch_Inr split_def invokeDomain_def
+                                 performInvocation_def bindE_assoc)
+       apply (simp (no_asm) add: liftE_bindE)
        apply (ctac add: setThreadState_ccorres)
          apply csymbr
-         apply (ctac add: setDomain_ccorres)
+         apply (ctac add: invokeDomainSetSet_ccorres)
            apply (rule ccorres_alternative2)
            apply (ctac add: ccorres_return_CE)
           apply wp
-         apply (vcg exspec=setDomain_modifies)
+         apply (vcg exspec=invokeDomainSetSet_modifies)
         apply (wp sts_invs_minor')
        apply (vcg exspec=setThreadState_modifies)
       apply wp
@@ -191,24 +288,348 @@ lemma decodeDomainInvocation_ccorres:
    apply clarsimp
    apply (vcg exspec=getSyscallArg_modifies)
 
-  apply (clarsimp simp: valid_tcb_state'_def invs_valid_queues' invs_valid_objs'
-                        invs_queues invs_sch_act_wf' ct_in_state'_def pred_tcb_at'
+  apply (clarsimp simp: valid_tcb_state'_def invs_valid_objs'
+                        invs_sch_act_wf' ct_in_state'_def pred_tcb_at'
                         rf_sr_ksCurThread word_sle_def word_sless_def sysargs_rel_to_n
-                        mask_eq_iff_w2p mask_eq_iff_w2p word_size "StrictC'_thread_state_defs"
-                        maxDomain_def numDomains_def)
+                        mask_eq_iff_w2p word_size ThreadState_defs)
   apply (rule conjI)
    apply (clarsimp simp: linorder_not_le isCap_simps)
    apply (rule conjI, clarsimp simp: unat64_eq_of_nat)
    apply clarsimp
    apply (drule_tac x="extraCaps ! 0" and P="\<lambda>v. valid_cap' (fst v) s" in bspec)
-    apply (clarsimp simp: nth_mem interpret_excaps_test_null excaps_map_def)
+    apply (clarsimp simp: interpret_excaps_test_null excaps_map_def)
    apply (clarsimp simp: valid_cap_simps' pred_tcb'_weakenE active_runnable')
-   apply (rule conjI)
+   apply (intro conjI; fastforce?)
     apply (fastforce simp: tcb_st_refs_of'_def elim:pred_tcb'_weakenE)
-   apply (simp add: word_le_nat_alt unat_ucast)
-  apply (clarsimp simp: ucast_ucast_len word_less_nat_alt
-                        ccap_relation_def cap_to_H_simps cap_thread_cap_lift)
+   apply (simp add: word_le_nat_alt unat_ucast unat_numDomains_to_H le_maxDomain_eq_less_numDomains)
+  apply (clarsimp simp: ccap_relation_def cap_to_H_simps cap_thread_cap_lift)
+  (* args ! 0 can be contained in a domain-sized word *)
+  by (clarsimp simp: not_le unat_numDomains_to_H ucast_ucast_len[simplified word_less_nat_alt]
+               dest!: less_numDomains_is_domain)
+
+(* syscall_error_throwError_ccorres_n does not apply, because only the type of the syscall error
+   is being set *)
+lemma throw_syscall_error_type_ccorres:
+  "(\<And>exf lf. syscall_error_to_H (type_C_update (\<lambda>_. scast exc') exf) lf = Some exc) \<Longrightarrow>
+   ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
+           \<top> UNIV [SKIP]
+           (throwError exc >>= invocationCatch thread isBlocking isCall InvokeDomain)
+           (\<acute>current_syscall_error :== type_C_update (\<lambda>_. scast exc') \<acute>current_syscall_error;;
+            return_C ret__unsigned_long_'_update (\<lambda>s. scast EXCEPTION_SYSCALL_ERROR))"
+  apply (simp add: throwError_bind invocationCatch_def)
+  apply (rule ccorres_from_vcg_throws)
+  apply (rule allI, rule conseqPre, vcg)
+  apply (clarsimp simp: throwError_def return_def syscall_error_rel_def exception_defs)
   done
+
+lemma throw_IllegalOperation_ccorres:
+  "ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
+           \<top> UNIV [SKIP]
+           (throwError IllegalOperation >>= invocationCatch thread isBlocking isCall InvokeDomain)
+           (\<acute>current_syscall_error :== type_C_update (\<lambda>_. scast seL4_IllegalOperation) \<acute>current_syscall_error;;
+            return_C ret__unsigned_long_'_update (\<lambda>s. scast EXCEPTION_SYSCALL_ERROR))"
+  apply (rule throw_syscall_error_type_ccorres)
+  apply (simp add: syscall_error_to_H_cases)
+  done
+
+lemma ccorres_pre_ksDomSchedule:
+  assumes "\<And>rv. length rv = unat domScheduleLength \<Longrightarrow> ccorres r xf (P rv) (P' rv) hs (f rv) c"
+  shows "ccorres r xf
+                 (\<lambda>s. \<forall>rv. ksDomSchedule s = rv \<longrightarrow> P rv s)
+                 {s. \<forall>rv. cdom_schedule_relation rv (ksDomSchedule_' (globals s)) \<longrightarrow> s \<in> P' rv} hs
+                 (gets ksDomSchedule >>= f) c"
+  apply (rule ccorres_pre_gets, erule assms)
+   apply (clarsimp simp: rf_sr_def cstate_relation_def Let_def cdom_schedule_relation_def
+                         dom_schedule_len_def[symmetric] dom_schedule_len_val)
+  apply (clarsimp simp: rf_sr_def cstate_relation_def Let_def)
+  done
+
+lemma ccorres_pre_ksDomScheduleStart:
+  assumes "\<And>domSchedStart. ccorres r xf (P domSchedStart) (P' domSchedStart) hs (f domSchedStart) c"
+  shows "ccorres r xf
+                 (\<lambda>s. \<forall>domSchedStart. ksDomScheduleStart s = domSchedStart \<longrightarrow> P domSchedStart s)
+                 {s. \<forall>domSchedStart. unat (ksDomScheduleStart_' (globals s)) = domSchedStart \<longrightarrow>
+                                     s \<in> P' domSchedStart} hs
+                 (gets ksDomScheduleStart >>= f) c"
+  by (rule ccorres_pre_gets[where Q=\<top>], rule assms;
+      clarsimp simp: rf_sr_def cstate_relation_def Let_def)
+
+lemma dschedule_is_end_marker_ccorres:
+  "ccorres (\<lambda>rv rv'. rv = to_bool rv') ret__unsigned_long_'
+           (\<lambda>s. ksDomSchedule s = sched \<and> idx < length sched)
+           (\<lbrace>unat \<acute>index___unsigned_long = idx\<rbrace>) hs
+           (return (sched ! idx = domainEndMarker)) (Call dschedule_is_end_marker_'proc)"
+  supply word_less_1[simp del] (* avoid rewriting ArrayBounds guard for numDomains = 1 *)
+  apply (rule ccorres_from_vcg)
+  apply (rule allI, rule conseqPre, vcg)
+  apply (clarsimp simp: return_def)
+  apply (rename_tac \<sigma> s)
+  apply (prop_tac "cdom_schedule_relation (ksDomSchedule \<sigma>) (ksDomSchedule_' (globals s))")
+   apply (clarsimp simp: rf_sr_def cstate_relation_def Let_def)
+  apply (clarsimp simp: cdom_schedule_relation_def word_less_nat_alt to_bool_def
+                        dom_schedule_entry_relation_domainEndMarker
+                  cong: if_cong)
+  done
+
+lemma whenE_eq_return_whenE: (* FIXME: move to Lib, remove duplicates *)
+  "(whenE P f >>=E m) >>= g = do rv \<leftarrow> return P; (whenE rv f >>=E m) >>= g od"
+  by simp
+
+lemma bind_returnOK_case_sum: (* FIXME: move to Lib, remove duplicates *)
+  "doE y <- liftE m; returnOk x odE >>= case_sum (throwError \<circ> Inr) returnOk =
+   doE liftE m; returnOk x odE"
+  by monad_eq
+
+lemma decodeDomainScheduleSetStart_ccorres:
+  "ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
+       (invs' and (\<lambda>s. ksCurThread s = thread)
+              and sch_act_simple and ct_active'
+              and sysargs_rel args buffer)
+       (\<lbrace>unat \<acute>length___unsigned_long = length args\<rbrace>
+        \<inter> \<lbrace>\<acute>buffer = option_to_ptr buffer\<rbrace>) []
+   (decodeDomainSetStart args extraCaps >>= invocationCatch thread isBlocking isCall InvokeDomain)
+   (Call decodeDomainScheduleSetStart_'proc)"
+  supply Collect_const[simp del]
+  apply (cinit' lift: length___unsigned_long_' buffer_'
+                simp: decodeDomainSetStart_def)
+   apply (rule ccorres_Cond_rhs_Seq; ccorres_rewrite)
+    apply clarsimp
+    apply (rule throw_syscall_error_type_ccorres)
+    apply (simp add: syscall_error_to_H_cases)
+   apply (cases args; clarsimp simp: unat_eq_0)
+   apply (clarsimp simp: liftE_bindE bind_assoc)
+   apply (rule ccorres_pre_ksDomSchedule)
+   apply (rule ccorres_add_return)
+   apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=0 and buffer=buffer])
+     apply clarsimp
+     apply (rule ccorres_Cond_rhs_Seq)
+      apply ccorres_rewrite
+      apply (clarsimp simp: domScheduleLength_le_unat throwError_bind invocationCatch_def)
+      apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+      apply (rule ccorres_from_vcg_throws)
+      apply (rule allI, rule conseqPre, vcg)
+      apply (clarsimp simp: throwError_def return_def domScheduleLength_def exception_defs
+                            syscall_error_rel_def syscall_error_to_H_cases)
+     apply (clarsimp simp: domScheduleLength_le_unat)
+     apply (subst whenE_eq_return_whenE)
+     apply (ctac add: dschedule_is_end_marker_ccorres)
+       apply (clarsimp simp: to_bool_def)
+       apply (rule ccorres_Cond_rhs_Seq)
+        apply ccorres_rewrite
+        apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+        apply (clarsimp simp: to_bool_def throwError_bind invocationCatch_def)
+        apply (rule ccorres_from_vcg_throws)
+        apply (rule allI, rule conseqPre, vcg)
+        apply (clarsimp simp: throwError_def return_def domScheduleLength_def exception_defs
+                              syscall_error_rel_def syscall_error_to_H_cases)
+       apply (clarsimp simp: returnOk_bind invocationCatch_def liftE_bindE)
+       apply (ctac (no_vcg) add: setThreadState_ccorres)
+        apply (clarsimp simp: performInvocation_def bind_returnOK_case_sum bindE_assoc)
+        apply (clarsimp simp: liftE_bindE invokeDomain_def liftE_alternative returnOk_liftE[symmetric])
+        apply (ctac (no_vcg) add: invokeDomainScheduleSetStart_ccorres)
+         apply (rule ccorres_alternative2)
+         apply (rule ccorres_return_CE; simp)
+        apply (wp sts_invs_minor')+
+     apply clarsimp
+     apply (vcg exspec=dschedule_is_end_marker_modifies)
+    apply (clarsimp simp: not_le word_less_nat_alt unat_scast_domScheduleLength)
+    apply (wp hoare_drop_imp)
+   apply clarsimp
+   apply (rule conseqPost[where A'="{}" and Q'="\<lbrace>\<acute>ksCurThread = tcb_ptr_to_ctcb_ptr thread\<rbrace>"])
+     apply (vcg exspec=getSyscallArg_modifies)
+    apply clarsimp
+   apply clarsimp
+  apply (clarsimp simp: sysargs_rel_to_n ct_in_state'_def pred_tcb_at' st_tcb_at'_def
+                        rf_sr_ksCurThread)
+  apply (rule conjI, clarsimp simp: unat_eq_0) (* args \<noteq> [] *)
+  apply (rule conjI, fastforce)+ (* invs' components *)
+  apply normalise_obj_at' (* obj_at' predicates on current thread *)
+  apply fastforce
+  done
+
+lemma mode_parseTimeArg_ccorres:
+  "ccorres (\<lambda>_ rv. rv = parseTimeArg n args) ret__unsigned_longlong_'
+     (sysargs_rel args buffer and sysargs_rel_n args buffer n)
+     (\<lbrace>unat \<acute>i = n\<rbrace> \<inter> \<lbrace>\<acute>buffer = option_to_ptr buffer\<rbrace>) []
+     (return ()) (Call mode_parseTimeArg_'proc)"
+  apply (cinit' lift: i_' buffer_')
+   apply (rule ccorres_add_return2)
+   apply (ctac add: getSyscallArg_ccorres_foo[where n=n and args=args and buffer=buffer])
+     apply (fastforce intro: ccorres_return_C)
+    apply wp
+   apply (vcg exspec=getSyscallArg_modifies)
+  apply (clarsimp simp: parseTimeArg_def)
+  done
+
+schematic_goal maxDomainDuration_fold:
+  "numeral ?n = unat maxDomainDuration"
+  by (simp add: maxDomainDuration_def mask_def)
+
+lemma unat_ucast_domain_len_numDomains:
+  "unat x < numDomains \<Longrightarrow> unat (ucast x :: domain) < numDomains" for x::machine_word
+  using numDomains_fits_domainBits
+  by (auto simp: unat_ucast_unat_id domainBits_def)
+
+lemma scast_numDomains_minus_one:
+  "scast (Kernel_C.numDomains - 1) = (word_of_nat (numDomains - Suc 0) :: machine_word)"
+  using numDomains_not_zero
+  apply (simp add: word_of_nat_minus scast_eq del: Word.of_int_sint)
+  apply (subst signed_arith_sint)
+   apply (cut_tac numDomains_fits_domainBits)
+   apply (simp add: sint_numDomains_to_H word_size domainBits_def)
+  apply (simp add: sint_numDomains_to_H)
+  done
+
+lemma decodeDomainScheduleConfigure_ccorres:
+  "ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
+       (invs' and (\<lambda>s. ksCurThread s = thread)
+              and sch_act_simple and ct_active'
+              and sysargs_rel args buffer)
+       (\<lbrace>unat \<acute>length___unsigned_long = length args\<rbrace>
+        \<inter> \<lbrace>\<acute>buffer = option_to_ptr buffer\<rbrace>) []
+   (decodeDomainConfigure args extraCaps >>= invocationCatch thread isBlocking isCall InvokeDomain)
+   (Call decodeDomainScheduleConfigure_'proc)"
+  supply Collect_const[simp del] unat_scast_domScheduleLength_m1[simp]
+  apply (cinit' lift: length___unsigned_long_' buffer_'
+                simp: decodeDomainConfigure_def)
+   apply (drule sym[where t="length args"])
+   apply (clarsimp simp: timeArgLen_def)
+   apply (rule ccorres_Cond_rhs_Seq)
+    apply ccorres_rewrite
+    apply (clarsimp simp: word_less_nat_alt)
+    apply (rule throw_syscall_error_type_ccorres)
+    apply (simp add: syscall_error_to_H_cases)
+   apply ccorres_rewrite
+   apply (clarsimp simp: word_less_nat_alt liftE_bindE bind_assoc)
+   apply (rule ccorres_pre_ksDomSchedule)
+   apply (rule ccorres_add_return)
+   apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=0 and buffer=buffer])
+     apply (rule ccorres_add_return)
+     apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=1 and buffer=buffer])
+       apply (rule ccorres_add_return)
+       apply (ctac add: mode_parseTimeArg_ccorres[where args=args and n=2 and buffer=buffer])
+         apply (clarsimp simp: word_le_nat_alt unat_scast_domScheduleLength)
+         apply (rule ccorres_Guard_Seq)
+         apply (rule ccorres_Cond_rhs_Seq)
+          apply ccorres_rewrite
+          apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+          apply (clarsimp simp: throwError_bind invocationCatch_def unat_scast_domScheduleLength)
+          apply (rule ccorres_from_vcg_throws)
+          apply (rule allI, rule conseqPre, vcg)
+          apply (clarsimp simp: throwError_def return_def domScheduleLength_def exception_defs
+                                syscall_error_rel_def syscall_error_to_H_cases)
+         apply (clarsimp simp: unat_scast_numDomains unat_numDomains_to_H sint_numDomains_to_H)
+         apply (rule ccorres_Cond_rhs_Seq)
+          apply ccorres_rewrite
+          apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+          apply (clarsimp simp: throwError_bind invocationCatch_def)
+          apply (rule ccorres_from_vcg_throws)
+          apply (rule allI, rule conseqPre, vcg)
+          apply (cut_tac numDomains_fits_domainBits)
+          apply (clarsimp simp: throwError_def return_def domScheduleLength_def exception_defs
+                                syscall_error_rel_def syscall_error_to_H_cases domainBits_def
+                                scast_numDomains_minus_one)
+         apply (clarsimp simp: maxDomainDuration_fold)
+         apply (rule ccorres_Cond_rhs_Seq)
+          apply ccorres_rewrite
+          apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+          apply (clarsimp simp: throwError_bind invocationCatch_def)
+          apply (rule ccorres_from_vcg_throws)
+          apply (rule allI, rule conseqPre, vcg)
+          apply (clarsimp simp: throwError_def return_def exception_defs
+                                syscall_error_rel_def syscall_error_to_H_cases)
+         apply clarsimp
+         apply (rule ccorres_Cond_rhs_Seq)
+          apply ccorres_rewrite
+          apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+          apply (clarsimp simp: throwError_bind invocationCatch_def)
+          apply (rule ccorres_from_vcg_throws)
+          apply (rule allI, rule conseqPre, vcg)
+          apply (clarsimp simp: throwError_def return_def exception_defs
+                                syscall_error_rel_def syscall_error_to_H_cases)
+         apply (clarsimp simp del: de_Morgan_conj simp: bind_assoc)
+         apply (rule ccorres_pre_ksDomScheduleStart)
+         apply (rule_tac C'="{s. unat (args ! 0) = domSchedStart \<and> parseTimeArg 2 args = 0}" and
+                         Q'="\<lbrace>domSchedStart = unat \<acute>ksDomScheduleStart\<rbrace>"
+                         in ccorres_rewrite_cond_sr_Seq[where Q=\<top>])
+          apply clarsimp
+         apply (rule ccorres_Cond_rhs_Seq)
+          apply ccorres_rewrite
+          apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+          apply (clarsimp simp: throwError_bind invocationCatch_def)
+          apply (rule ccorres_from_vcg_throws)
+          apply (rule allI, rule conseqPre, vcg)
+          apply (clarsimp simp: throwError_def return_def exception_defs
+                                syscall_error_rel_def syscall_error_to_H_cases)
+         apply (clarsimp simp del: de_Morgan_conj
+                         simp: returnOk_bind invocationCatch_def liftE_bindE)
+         apply (ctac (no_vcg) add: setThreadState_ccorres)
+          apply (clarsimp simp: performInvocation_def bind_returnOK_case_sum bindE_assoc)
+          apply (clarsimp simp: liftE_bindE invokeDomain_def liftE_alternative returnOk_liftE[symmetric])
+          apply (ctac (no_vcg) add: invokeDomainScheduleConfigure_ccorres)
+           apply (rule ccorres_alternative2)
+           apply (rule ccorres_return_CE; simp)
+          apply (wp sts_invs_minor')
+         apply (clarsimp simp: valid_domain_inv'_def)
+         apply wp
+        apply clarsimp
+        apply wp
+       apply clarsimp
+       apply (vcg exspec=mode_parseTimeArg_modifies)
+      apply clarsimp
+      apply wp
+     apply (vcg exspec=getSyscallArg_modifies)
+    apply wp
+   apply (vcg exspec=getSyscallArg_modifies)
+  apply (drule sym[where t="length args"])
+  apply (clarsimp simp: sysargs_rel_to_n ct_in_state'_def pred_tcb_at' st_tcb_at'_def
+                        rf_sr_ksCurThread not_less not_le le_maxDomain_eq_less_numDomains
+                        unat_ucast_domain_len_numDomains)
+  apply (rule conjI; clarsimp)
+   apply (clarsimp simp: word_le_nat_alt)
+   apply (rule conjI, fastforce)+
+   apply (clarsimp simp: rf_sr_def cstate_relation_def Let_def cdom_schedule_relation_def
+                         domScheduleLength_def)
+  using numDomains_fits_domainBits
+  apply (simp add: word_less_nat_alt ucast_ucast_len domainBits_def domScheduleLength_def)
+  done
+
+lemma decodeDomainInvocation_ccorres:
+  "interpret_excaps extraCaps' = excaps_map extraCaps \<Longrightarrow>
+   ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
+       (invs' and (\<lambda>s. ksCurThread s = thread)
+              and sch_act_simple and ct_active'
+              and (excaps_in_mem extraCaps \<circ> ctes_of)
+              and (\<lambda>s. \<forall>v \<in> set extraCaps. \<forall>y \<in> zobj_refs' (fst v).
+                              ex_nonz_cap_to' y s)
+              and (\<lambda>s. \<forall>v \<in> set extraCaps.
+                             s \<turnstile>' fst v)
+              and sysargs_rel args buffer)
+       (\<lbrace>unat \<acute>length___unsigned_long = length args\<rbrace>
+        \<inter> \<lbrace>\<acute>current_extra_caps = extraCaps'\<rbrace>
+        \<inter> \<lbrace>\<acute>invLabel = label\<rbrace>
+        \<inter> \<lbrace>\<acute>buffer = option_to_ptr buffer\<rbrace>) []
+   (decodeDomainInvocation label args extraCaps >>=
+      invocationCatch thread isBlocking isCall InvokeDomain)
+   (Call decodeDomainInvocation_'proc)"
+  supply gen_invocation_type_eq[simp] invocation_eq_use_types[simp]
+  apply (cinit' lift: length___unsigned_long_' current_extra_caps_' invLabel_' buffer_'
+                simp: decodeDomainInvocation_def)
+   apply (drule sym[where t=label])
+   apply (rule ccorres_Cond_rhs)
+    apply (rule ccorres_trim_returnE; simp?)
+    apply (rule ccorres_call[OF decodeDomainSetSetInvocation_ccorres]; simp)
+   apply (rule ccorres_Cond_rhs)
+    apply (rule ccorres_trim_returnE; simp?)
+    apply (rule ccorres_call[OF decodeDomainScheduleConfigure_ccorres]; simp)
+   apply (rule ccorres_Cond_rhs)
+    apply (rule ccorres_trim_returnE; simp?)
+    apply (rule ccorres_call[OF decodeDomainScheduleSetStart_ccorres]; simp)
+   apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+   apply (cases "gen_invocation_type label"; simp add: throw_IllegalOperation_ccorres)
+  apply clarsimp
+  done
+
 
 (************************************************************************)
 (*                                                                      *)
@@ -226,7 +647,7 @@ lemma invokeCNodeDelete_ccorres:
    apply (rule ccorres_trim_returnE, simp, simp)
    apply (rule ccorres_callE)
        apply (rule cteDelete_ccorres[simplified])
-      apply (simp add: from_bool_def true_def)+
+      apply simp+
 done
 
 
@@ -246,7 +667,7 @@ lemma invokeCNodeRevoke_ccorres:
    apply (rule ccorres_trim_returnE, simp, simp)
    apply (rule ccorres_callE)
        apply (rule cteRevoke_ccorres[simplified])
-      apply (simp add: from_bool_def true_def)+
+      apply simp+
 done
 
 
@@ -379,7 +800,7 @@ lemma invokeCNodeRotate_ccorres:
      apply clarsimp
      apply (simp add: return_def)
     apply wp
-   apply (simp add: guard_is_UNIV_def dc_def xfdc_def)
+   apply (simp add: guard_is_UNIV_def)
   apply (clarsimp simp: valid_pspace'_def)
   apply (rule conjI, clarsimp)
   apply (clarsimp simp:cte_wp_at_ctes_of)
@@ -544,12 +965,10 @@ lemma hasCancelSendRights_spec:
    apply clarsimp
    apply (drule sym, drule (1) cap_get_tag_to_H)
    apply (clarsimp simp: hasCancelSendRights_def to_bool_def
-                         true_def false_def
                    split: if_split bool.splits)
   apply (rule impI)
   apply (case_tac cap,
-         auto simp: cap_get_tag_isCap_unfolded_H_cap cap_tag_defs
-                     from_bool_def false_def true_def hasCancelSendRights_def
+         auto simp: cap_get_tag_isCap_unfolded_H_cap cap_tag_defs hasCancelSendRights_def
               dest: cap_get_tag_isArchCap_unfolded_H_cap
               split: capability.splits bool.splits)[1]
   done
@@ -579,6 +998,7 @@ lemma decodeCNodeInvocation_ccorres:
            >>= invocationCatch thread isBlocking isCall InvokeCNode)
   (Call decodeCNodeInvocation_'proc)"
   supply if_cong[cong]
+  supply tl_drop_1[simp]
   apply (cases "\<not>isCNodeCap cp")
    apply (simp add: decodeCNodeInvocation_def
               cong: conj_cong)
@@ -627,9 +1047,7 @@ lemma decodeCNodeInvocation_ccorres:
                        del: Collect_const cong: call_ignore_cong)
            apply (rule ccorres_split_throws)
             apply (rule ccorres_rhs_assoc | csymbr)+
-            apply (simp add: invocationCatch_use_injection_handler
-                                  [symmetric, unfolded o_def]
-                             if_1_0_0 dc_def[symmetric]
+            apply (simp add: invocationCatch_use_injection_handler[symmetric]
                         del: Collect_const cong: call_ignore_cong)
             apply (rule ccorres_Cond_rhs_Seq)
              apply (simp add:if_P del: Collect_const)
@@ -703,7 +1121,7 @@ lemma decodeCNodeInvocation_ccorres:
                                                syscall_error_to_H_cases numeral_eqs)
                          apply (clarsimp simp: lookup_fault_missing_capability_lift
                                                mask_eq_iff_w2p word_size word_less_nat_alt
-                                               word_bits_def hd_conv_nth)
+                                               word_bits_def hd_conv_nth take_bit_Suc)
                         apply (simp add: whenE_def[where P=False]
                                          injection_handler_returnOk Collect_const[symmetric]
                                    cong: call_ignore_cong del: Collect_const)
@@ -712,8 +1130,7 @@ lemma decodeCNodeInvocation_ccorres:
                          apply (simp add: Collect_const[symmetric] del: Collect_const)
                          apply (rule ccorres_rhs_assoc)+
                          apply (rule ccorres_Cond_rhs_Seq)
-                          apply (simp add: injection_handler_throwError dc_def[symmetric]
-                                           if_P)
+                          apply (simp add: injection_handler_throwError if_P)
                           apply (rule syscall_error_throwError_ccorres_n)
                           apply (simp add: syscall_error_to_H_cases)
                          apply (simp add: list_case_helper injection_handler_returnOk
@@ -740,13 +1157,12 @@ lemma decodeCNodeInvocation_ccorres:
                                apply csymbr
                                apply (simp add: cap_get_tag_NullCap del: Collect_const)
                                apply (rule ccorres_Cond_rhs_Seq)
-                                apply (simp add: injection_handler_throwError whenE_def
-                                                 dc_def[symmetric])
+                                apply (simp add: injection_handler_throwError whenE_def)
                                 apply (rule syscall_error_throwError_ccorres_n)
                                 apply (simp add: syscall_error_to_H_cases)
                                apply (simp add: whenE_def injection_handler_returnOk
                                                 ccorres_invocationCatch_Inr performInvocation_def
-                                                bindE_assoc false_def)
+                                                bindE_assoc)
                                apply (ctac add: setThreadState_ccorres)
                                  apply (simp add: ccorres_cond_iffs)
                                  apply (ctac(no_vcg) add: invokeCNodeInsert_ccorres)
@@ -759,16 +1175,16 @@ lemma decodeCNodeInvocation_ccorres:
                                apply (vcg exspec=setThreadState_modifies)
                               apply simp
                               apply (wp injection_wp_E[OF refl])
-                              apply (rule hoare_post_imp_R)
-                               apply (rule_tac Q'="\<lambda>rv. valid_pspace' and valid_queues
+                              apply (rule hoare_strengthen_postE_R)
+                               apply (rule_tac Q'="\<lambda>rv. valid_pspace'
                                                     and valid_cap' rv and valid_objs'
                                                          and tcb_at' thread and (\<lambda>s. sch_act_wf (ksSchedulerAction s) s)"
-                                           in hoare_vcg_R_conj)
+                                           in hoare_vcg_conj_liftE_R)
                                 apply (rule deriveCap_Null_helper[OF deriveCap_derived])
                                apply wp
                               apply (clarsimp simp: cte_wp_at_ctes_of)
-                              apply (simp add: is_derived'_def badge_derived'_def
-                                               valid_tcb_state'_def)
+                              apply (fastforce simp: is_derived'_def badge_derived'_def
+                                                     valid_tcb_state'_def)
                              apply (simp add: Collect_const_mem all_ex_eq_helper)
                              apply (vcg exspec=deriveCap_modifies)
                             apply wp
@@ -817,12 +1233,11 @@ lemma decodeCNodeInvocation_ccorres:
                                    apply (simp add: cap_get_tag_NullCap del: Collect_const)
                                    apply (rule ccorres_Cond_rhs_Seq)
                                     apply (simp add: whenE_def injection_handler_returnOk
-                                                     invocationCatch_def injection_handler_throwError
-                                                     dc_def[symmetric])
+                                                     invocationCatch_def injection_handler_throwError)
                                     apply (rule syscall_error_throwError_ccorres_n)
                                     apply (simp add: syscall_error_to_H_cases)
                                    apply (simp add: whenE_def injection_handler_returnOk
-                                                    ccorres_invocationCatch_Inr false_def
+                                                    ccorres_invocationCatch_Inr
                                                     performInvocation_def bindE_assoc)
                                    apply (ctac add: setThreadState_ccorres)
                                      apply (simp add: ccorres_cond_iffs)
@@ -836,15 +1251,15 @@ lemma decodeCNodeInvocation_ccorres:
                                    apply (vcg exspec=setThreadState_modifies)
                                   apply (simp add: conj_comms valid_tcb_state'_def)
                                   apply (wp injection_wp_E[OF refl])
-                                  apply (rule hoare_post_imp_R)
-                                   apply (rule_tac Q'="\<lambda>rv. valid_pspace' and valid_queues
+                                  apply (rule hoare_strengthen_postE_R)
+                                   apply (rule_tac Q'="\<lambda>rv. valid_pspace'
                                                         and valid_cap' rv and valid_objs'
                                                              and tcb_at' thread and (\<lambda>s. sch_act_wf (ksSchedulerAction s) s)"
-                                               in hoare_vcg_R_conj)
+                                               in hoare_vcg_conj_liftE_R)
                                     apply (rule deriveCap_Null_helper [OF deriveCap_derived])
                                    apply wp
                                   apply (clarsimp simp: cte_wp_at_ctes_of)
-                                  apply (simp add: is_derived'_def badge_derived'_def)
+                                  apply (fastforce simp: is_derived'_def badge_derived'_def)
                                  apply (simp add: Collect_const_mem all_ex_eq_helper)
                                  apply (vcg exspec=deriveCap_modifies)
                                 apply (simp add: Collect_const_mem)
@@ -878,7 +1293,7 @@ lemma decodeCNodeInvocation_ccorres:
                                        in ccorres_gen_asm2)
                            apply csymbr
                            apply csymbr
-                           apply (simp add: cap_get_tag_NullCap true_def)
+                           apply (simp add: cap_get_tag_NullCap)
                            apply (ctac add: setThreadState_ccorres)
                              apply (simp add: ccorres_cond_iffs)
                              apply (ctac(no_vcg) add: invokeCNodeMove_ccorres)
@@ -897,7 +1312,7 @@ lemma decodeCNodeInvocation_ccorres:
                          apply (simp add: flip: Collect_const
                                     cong: call_ignore_cong)
                          apply (rule ccorres_Cond_rhs_Seq)
-                          apply (simp add: injection_handler_throwError dc_def[symmetric] if_P)
+                          apply (simp add: injection_handler_throwError if_P)
                           apply (rule syscall_error_throwError_ccorres_n)
                           apply (simp add: syscall_error_to_H_cases)
                          apply (simp add: if_not_P del: Collect_const)
@@ -916,15 +1331,14 @@ lemma decodeCNodeInvocation_ccorres:
                              apply csymbr
                              apply (simp add: cap_get_tag_isCap del: Collect_const)
                              apply (rule ccorres_Cond_rhs_Seq)
-                              apply (simp add: whenE_def injection_handler_throwError
-                                               dc_def[symmetric] numeral_eqs)
+                              apply (simp add: whenE_def injection_handler_throwError numeral_eqs)
                               apply (rule syscall_error_throwError_ccorres_n)
                               apply (simp add: syscall_error_to_H_cases)
                              apply (simp add: whenE_def injection_handler_returnOk
                                               ccorres_invocationCatch_Inr numeral_eqs
                                               performInvocation_def bindE_assoc)
                              apply (ctac add: setThreadState_ccorres)
-                               apply (simp add: true_def ccorres_cond_iffs)
+                               apply (simp add: ccorres_cond_iffs)
                                apply (ctac(no_vcg) add: invokeCNodeMove_ccorres)
                                  apply (rule ccorres_alternative2)
                                  apply (rule ccorres_return_CE, simp+)[1]
@@ -952,15 +1366,17 @@ lemma decodeCNodeInvocation_ccorres:
                      apply (rule validE_R_validE)
                      apply (rule_tac Q'="\<lambda>a b. cte_wp_at' (\<lambda>x. True) a b \<and> invs' b \<and>
                        tcb_at' thread b  \<and> sch_act_wf (ksSchedulerAction b) b \<and> valid_tcb_state' Restart b
-                       \<and> Q2 b" for Q2 in  hoare_post_imp_R)
-                       prefer 2
-                       apply (clarsimp simp:cte_wp_at_ctes_of)
-                       apply (drule ctes_of_valid')
-                         apply (erule invs_valid_objs')
-                        apply (clarsimp simp:valid_updateCapDataI invs_queues invs_valid_objs' invs_valid_pspace')
-                       apply (assumption)
-                     apply (wp hoare_vcg_all_lift_R injection_wp_E[OF refl]
-                               lsfco_cte_at' hoare_vcg_const_imp_lift_R
+                       \<and> Q2 b" for Q2 in  hoare_strengthen_postE_R)
+                      prefer 2
+                      apply (clarsimp simp:cte_wp_at_ctes_of)
+                      apply (drule ctes_of_valid')
+                       apply (erule invs_valid_objs')
+                      apply (frule invs_pspace_aligned')
+                      apply (frule invs_pspace_distinct')
+                      apply (clarsimp simp:valid_updateCapDataI invs_valid_objs' invs_valid_pspace')
+                      apply assumption
+                     apply (wp hoare_vcg_all_liftE_R injection_wp_E[OF refl]
+                               lsfco_cte_at' hoare_vcg_const_imp_liftE_R
                            )+
                     apply (simp add: Collect_const_mem word_sle_def word_sless_def
                                      all_ex_eq_helper)
@@ -1016,13 +1432,11 @@ lemma decodeCNodeInvocation_ccorres:
           apply (simp del: Collect_const)
           apply (rule ccorres_Cond_rhs_Seq)
            apply (simp add: injection_handler_returnOk bindE_assoc
-                            injection_bindE[OF refl refl] split_def
-                            dc_def[symmetric])
+                            injection_bindE[OF refl refl] split_def)
            apply (rule ccorres_split_throws)
             apply (rule ccorres_rhs_assoc)+
             apply (ctac add: ccorres_injection_handler_csum1 [OF ensureEmptySlot_ccorres])
-               apply (simp add: ccorres_invocationCatch_Inr performInvocation_def
-                                dc_def[symmetric] bindE_assoc)
+               apply (simp add: ccorres_invocationCatch_Inr performInvocation_def bindE_assoc)
                apply (ctac add: setThreadState_ccorres)
                  apply (ctac(no_vcg) add: invokeCNodeSaveCaller_ccorres)
                    apply (rule ccorres_alternative2)
@@ -1031,7 +1445,7 @@ lemma decodeCNodeInvocation_ccorres:
                  apply (wp sts_valid_pspace_hangers)+
                apply (simp add: Collect_const_mem)
                apply (vcg exspec=setThreadState_modifies)
-              apply (simp add: dc_def[symmetric])
+              apply simp
               apply (rule ccorres_split_throws)
                apply (rule ccorres_return_C_errorE, simp+)[1]
               apply vcg
@@ -1061,8 +1475,7 @@ lemma decodeCNodeInvocation_ccorres:
                                in ccorres_gen_asm2)
                 apply (simp del: Collect_const)
                 apply (rule ccorres_Cond_rhs_Seq)
-                 apply (simp add: unlessE_def whenE_def injection_handler_throwError
-                                  dc_def[symmetric] from_bool_0)
+                 apply (simp add: unlessE_def whenE_def injection_handler_throwError from_bool_0)
                  apply (rule syscall_error_throwError_ccorres_n)
                  apply (simp add: syscall_error_to_H_cases)
                 apply (simp add: unlessE_def whenE_def injection_handler_returnOk
@@ -1106,12 +1519,10 @@ lemma decodeCNodeInvocation_ccorres:
             apply (simp add: throwError_def return_def exception_defs
                              syscall_error_rel_def syscall_error_to_H_cases)
             apply clarsimp
-           apply (simp add: invocationCatch_use_injection_handler
-                                  [symmetric, unfolded o_def]
+           apply (simp add: invocationCatch_use_injection_handler[symmetric]
                        del: Collect_const)
            apply csymbr
            apply (simp add: interpret_excaps_test_null excaps_map_def
-                            if_1_0_0 dc_def[symmetric]
                        del: Collect_const)
            apply (rule ccorres_Cond_rhs_Seq)
             apply (simp add: throwError_bind invocationCatch_def)
@@ -1171,8 +1582,7 @@ lemma decodeCNodeInvocation_ccorres:
                                            del: Collect_const)
                                apply csymbr
                                apply (rule ccorres_Cond_rhs_Seq)
-                                apply (simp add: whenE_def injection_handler_throwError
-                                                 dc_def[symmetric])
+                                apply (simp add: whenE_def injection_handler_throwError)
                                 apply (rule syscall_error_throwError_ccorres_n)
                                 apply (simp add: syscall_error_to_H_cases)
                                apply (simp add: whenE_def[where P=False] injection_handler_returnOk
@@ -1218,10 +1628,9 @@ lemma decodeCNodeInvocation_ccorres:
                                      apply (simp add: syscall_error_to_H_cases
                                                       lookup_fault_missing_capability_lift)
                                      apply (simp add: mask_eq_iff_w2p word_less_nat_alt
-                                                      word_size word_bits_def)
+                                                      word_size word_bits_def take_bit_Suc)
                                     apply (simp add: whenE_def[where P=False] injection_handler_returnOk
-                                                     hd_conv_nth numeral_eqs[symmetric]
-                                                del: Collect_const)
+                                                     hd_conv_nth numeral_eqs[symmetric])
                                     apply (rule ccorres_move_c_guard_cte)
                                     apply (rule ccorres_symb_exec_r)
                                       apply (rule_tac xf'="newSrcCap_'" in ccorres_abstract, ceqv)
@@ -1235,8 +1644,7 @@ lemma decodeCNodeInvocation_ccorres:
                                         apply csymbr
                                         apply (simp add: cap_get_tag_NullCap del: Collect_const)
                                         apply (rule ccorres_Cond_rhs_Seq)
-                                         apply (simp add: whenE_def injection_handler_throwError
-                                                          dc_def[symmetric])
+                                         apply (simp add: whenE_def injection_handler_throwError)
                                          apply (rule syscall_error_throwError_ccorres_n)
                                          apply (simp add: syscall_error_to_H_cases)
                                         apply (simp add: whenE_def[where P=False] injection_handler_returnOk
@@ -1244,8 +1652,7 @@ lemma decodeCNodeInvocation_ccorres:
                                         apply csymbr
                                         apply (simp add: cap_get_tag_NullCap del: Collect_const)
                                         apply (rule ccorres_Cond_rhs_Seq)
-                                         apply (simp add: whenE_def injection_handler_throwError
-                                                          dc_def[symmetric])
+                                         apply (simp add: whenE_def injection_handler_throwError)
                                          apply (rule syscall_error_throwError_ccorres_n)
                                          apply (simp add: syscall_error_to_H_cases)
                                         apply (simp add: whenE_def injection_handler_returnOk
@@ -1259,7 +1666,7 @@ lemma decodeCNodeInvocation_ccorres:
                                             apply (rule ccorres_return_C_errorE, simp+)[1]
                                            apply wp
                                           apply (vcg exspec=invokeCNodeRotate_modifies)
-                                         apply (wp static_imp_wp)+
+                                         apply (wp hoare_weak_lift_imp)+
                                        apply (simp add: Collect_const_mem)
                                        apply (vcg exspec=setThreadState_modifies)
                                       apply (simp add: Collect_const_mem)
@@ -1298,13 +1705,12 @@ lemma decodeCNodeInvocation_ccorres:
                               apply (rule_tac Q'="\<lambda>rvb. invs'
                                                    and cte_at' rv and cte_at' rva
                                                    and tcb_at' thread"
-                                                        in hoare_post_imp_R)
+                                                        in hoare_strengthen_postE_R)
                                apply (wp lsfco_cte_at')
                               apply (clarsimp simp: cte_wp_at_ctes_of weak_derived_updateCapData
                                                     capBadge_updateCapData_True)
-                              apply (simp add: valid_tcb_state'_def)
-                              apply (auto simp:updateCapData_Untyped
-                                elim!: valid_updateCapDataI[OF ctes_of_valid'])[1]
+                              apply (auto simp: updateCapData_Untyped
+                                          elim!: valid_updateCapDataI[OF ctes_of_valid'])[1]
                              apply (simp add: Collect_const_mem all_ex_eq_helper)
                              apply (vcg exspec=lookupPivotSlot_modifies)
                             apply simp
@@ -1323,16 +1729,16 @@ lemma decodeCNodeInvocation_ccorres:
                       apply wp
                      apply simp
                      apply (vcg exspec=getSyscallArg_modifies)
-                    apply (wp static_imp_wp)
+                    apply (wp hoare_weak_lift_imp)
                    apply simp
                    apply (vcg exspec=getSyscallArg_modifies)
                   apply wp
                  apply simp
                  apply (vcg exspec=getSyscallArg_modifies)
-                apply (wp static_imp_wp)
+                apply (wp hoare_weak_lift_imp)
                apply simp
                apply (vcg exspec=getSyscallArg_modifies)
-              apply (wp static_imp_wp)
+              apply (wp hoare_weak_lift_imp)
              apply simp
              apply (vcg exspec=getSyscallArg_modifies)
             apply wp
@@ -1346,9 +1752,9 @@ lemma decodeCNodeInvocation_ccorres:
           apply (rule ccorres_return_C_errorE, simp+)[1]
          apply vcg
         apply simp
-        apply (wp injection_wp_E[OF refl] hoare_vcg_const_imp_lift_R
-                  hoare_vcg_all_lift_R lsfco_cte_at' static_imp_wp
-                | simp add: hasCancelSendRights_not_Null ctes_of_valid_strengthen
+        apply (wp injection_wp_E[OF refl] hoare_vcg_const_imp_liftE_R
+                  hoare_vcg_all_liftE_R lsfco_cte_at' hoare_weak_lift_imp
+                | simp add: hasCancelSendRights_isEndpointCap ctes_of_valid_strengthen
                       cong: conj_cong
                 | wp (once) hoare_drop_imps)+
        apply (simp add: all_ex_eq_helper)
@@ -1362,7 +1768,7 @@ lemma decodeCNodeInvocation_ccorres:
    apply simp
    apply (vcg exspec=getSyscallArg_modifies)
   apply (clarsimp simp: valid_tcb_state'_def invs_valid_objs' invs_valid_pspace'
-                        ct_in_state'_def pred_tcb_at' invs_queues
+                        ct_in_state'_def pred_tcb_at'
                         cur_tcb'_def word_sle_def word_sless_def
                         unat_lt2p[where 'a=machine_word_len, folded word_bits_def])
   apply (rule conjI)
@@ -1376,27 +1782,23 @@ lemma decodeCNodeInvocation_ccorres:
   apply (frule interpret_excaps_eq)
   apply (clarsimp simp: excaps_map_def mask_def[where n=4]
                         ccap_rights_relation_def rightsFromWord_wordFromRights
-                        "StrictC'_thread_state_defs" map_comp_Some_iff
+                        ThreadState_defs map_comp_Some_iff
                         rf_sr_ksCurThread hd_conv_nth hd_drop_conv_nth)
   apply ((rule conjI
             | clarsimp simp: rightsFromWord_wordFromRights
                              ccte_relation_def c_valid_cte_def
                              cl_valid_cte_def c_valid_cap_def
                              map_option_Some_eq2 neq_Nil_conv ccap_relation_def
-                             numeral_eqs hasCancelSendRights_not_Null
+                             numeral_eqs hasCancelSendRights_isEndpointCap
                              ccap_relation_NullCap_iff[symmetric]
-                             if_1_0_0 interpret_excaps_test_null
-                             mdbRevocable_CL_cte_to_H false_def true_def
+                             interpret_excaps_test_null mdbRevocable_CL_cte_to_H
             | clarsimp simp: typ_heap_simps'
             | frule length_ineq_not_Nil)+)
   done
 
 end
 
-context begin interpretation Arch . (*FIXME: arch_split*)
-
-crunch valid_queues[wp]: insertNewCap "valid_queues"
-  (wp: crunch_wps)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 lemmas setCTE_def3 = setCTE_def2[THEN eq_reflection]
 
@@ -1406,17 +1808,13 @@ lemma setCTE_sch_act_wf[wp]:
    \<lbrace>\<lambda>x s. sch_act_wf (ksSchedulerAction s) s \<rbrace>"
   by (wp sch_act_wf_lift setCTE_pred_tcb_at' setCTE_tcb_in_cur_domain')
 
-crunch sch_act_wf[wp]: insertNewCap "\<lambda>s. sch_act_wf (ksSchedulerAction s) s"
+crunch insertNewCap
+  for sch_act_wf[wp]: "\<lambda>s. sch_act_wf (ksSchedulerAction s) s"
   (wp: crunch_wps ignore: setCTE)
 
-crunch ksCurThread[wp]: deleteObjects "\<lambda>s. P (ksCurThread s)"
+crunch deleteObjects
+  for ksCurThread[wp]: "\<lambda>s. P (ksCurThread s)"
   (wp: crunch_wps simp: unless_def)
-
-(* FIXME RAF move to Retype_C to extend original *)
-crunches insertNewCap, Arch_createNewCaps, threadSet, Arch.createObject, doMachineOp
-  for gsCNodes[wp]: "\<lambda>s. P (gsCNodes s)"
-  (wp: crunch_wps setObject_ksPSpace_only
-   simp: unless_def updateObject_default_def crunch_simps)
 
 lemma deleteObjects_gsCNodes_at_pt:
   "\<lbrace>(\<lambda>s. P (gsCNodes s ptr))
@@ -1429,7 +1827,7 @@ lemma deleteObjects_gsCNodes_at_pt:
          | wp (once) hoare_drop_imps)+
   done
 
-crunches setThreadState, updateFreeIndex, preemptionPoint
+crunch setThreadState, updateFreeIndex, preemptionPoint
   for gsCNodes[wp]: "\<lambda>s. P (gsCNodes s)"
   (simp: unless_def whenE_def ignore_del: preemptionPoint)
 
@@ -1441,7 +1839,7 @@ lemma resetUntypedCap_gsCNodes_at_pt:
    \<lbrace>\<lambda>rv s. P (gsCNodes s ptr)\<rbrace>, -"
   apply (simp add: resetUntypedCap_def unlessE_def)
   apply (rule hoare_pre)
-   apply (wp mapME_x_wp' | simp add: unless_def)+
+   apply (wp mapME_x_wp' postResetUntyped_inv | simp add: unless_def)+
     apply (wp hoare_vcg_const_imp_lift
               deleteObjects_gsCNodes_at_pt
               getSlotCap_wp)+
@@ -1473,7 +1871,7 @@ lemma seL4_MessageInfo_lift_def2:
 
 lemma globals_update_id:
   "globals_update (t_hrs_'_update (hrs_htd_update id)) x = x"
-   by (simp add:id_def hrs_htd_update_def)
+   by (simp add: hrs_htd_update_def)
 
 lemma getObjectSize_spec:
   "\<forall>s. \<Gamma>\<turnstile>\<lbrace>s. \<acute>t \<le> of_nat (length (enum::object_type list) - 1)\<rbrace> Call getObjectSize_'proc
@@ -1528,7 +1926,7 @@ shows
  "\<lbrakk>ctes_of (s::kernel_state) (ptr_val p) = Some cte; is_aligned ptr bits; bits < word_bits;
   {ptr..ptr + 2 ^ bits - 1} \<inter> {ptr_val p..ptr_val p + mask cteSizeBits} = {}; ((clift hp) :: (cte_C ptr \<rightharpoonup> cte_C)) p = Some to\<rbrakk> \<Longrightarrow>
   (clift (hrs_htd_update (typ_clear_region ptr bits) hp) :: (cte_C ptr \<rightharpoonup> cte_C)) p = Some to"
-   apply (clarsimp simp:lift_t_def lift_typ_heap_def Fun.comp_def restrict_map_def split:if_splits)
+   apply (clarsimp simp:lift_t_def lift_typ_heap_def restrict_map_def split:if_splits)
    apply (intro conjI impI)
    apply (case_tac hp)
     apply (clarsimp simp:typ_clear_region_def hrs_htd_update_def)
@@ -1638,7 +2036,7 @@ lemma clearMemory_untyped_ccorres:
                   \<and> {ptr ..+ 2 ^ sz} \<subseteq> untypedRange cap
                   \<and> pspace_no_overlap' (capPtr cap) (capBlockSize cap) s)
               \<and> 2 ^ sz \<le> gsMaxObjectSize s)
-          and (\<lambda>_. is_aligned ptr sz \<and> sz \<ge> 3 \<and> sz \<le> reset_chunk_bits))
+          and (\<lambda>_. is_aligned ptr sz \<and> sz \<ge> 3 \<and> sz \<le> resetChunkBits))
       ({s. region_actually_is_bytes ptr (2 ^ sz) s}
             \<inter> {s. bits_' s = of_nat sz}
             \<inter> {s. ptr___ptr_to_void_' s = Ptr ptr})
@@ -1675,7 +2073,7 @@ lemma clearMemory_untyped_ccorres:
   apply (clarsimp simp: cte_wp_at_ctes_of)
   apply (frule ctes_of_valid'; clarify?)
   apply (clarsimp simp: isCap_simps valid_cap_simps' capAligned_def
-                        word_of_nat_less reset_chunk_bits_def
+                        word_of_nat_less Kernel_Config.resetChunkBits_def
                         word_bits_def unat_2p_sub_1)
   apply (cases "ptr = 0"; simp)
   apply (drule subsetD, rule intvl_self, simp)
@@ -1790,6 +2188,18 @@ lemma preemptionPoint_hrs_htd:
   "\<forall>\<sigma>. \<Gamma>\<turnstile>\<^bsub>/UNIV\<^esub> {\<sigma>} Call preemptionPoint_'proc \<lbrace>hrs_htd \<acute>t_hrs = hrs_htd \<^bsup>\<sigma>\<^esup>t_hrs\<rbrace>"
   by (rule allI, rule conseqPre, vcg, clarsimp simp: asm_spec_enabled elim!: asm_specE)
 
+lemma Arch_postResetUntyped_ccorres:
+  "sz < 2 ^ word_bits \<Longrightarrow>
+   ccorres dc xfdc
+     \<top> (\<lbrace>\<acute>deviceMemory = from_bool dev\<rbrace> \<inter> \<lbrace>\<acute>sizeBits = of_nat sz\<rbrace>) []
+     (postResetUntyped dev sz) (Call Arch_postResetUntyped_'proc)"
+  apply (cinit lift: deviceMemory_' sizeBits_')
+   apply (rule ccorres_when[where R=\<top>])
+    apply (clarsimp simp: from_bool_0 word_le_nat_alt unat_of_nat64 pageBits_def)
+   apply (ctac (no_vcg) add: ifence_ccorres)
+  apply clarsimp
+  done
+
 lemma resetUntypedCap_ccorres:
   notes upt.simps[simp del] Collect_const[simp del] replicate_numeral[simp del]
   shows
@@ -1836,15 +2246,15 @@ lemma resetUntypedCap_ccorres:
      apply (rule ccorres_Guard_Seq[where S=UNIV])?
      apply (rule ccorres_rhs_assoc2)
      apply (rule ccorres_split_nothrow)
-         apply (rule_tac idx="capFreeIndex (cteCap cte)"
-           in deleteObjects_ccorres[where p=slot, unfolded o_def])
+         apply (rule_tac idx="capFreeIndex (cteCap cte)" in deleteObjects_ccorres[where p=slot])
         apply ceqv
        apply clarsimp
-       apply (simp only: ccorres_seq_cond_raise)
+       apply (simp only: ccorres_seq_cond_raise if_to_top_of_bindE)
        apply (rule ccorres_cond[where R="\<top>"])
-         apply (clarsimp simp: reset_chunk_bits_def)
+         apply (clarsimp simp: Kernel_Config.resetChunkBits_def)
          apply (simp add: word_less_nat_alt unat_of_nat64 from_bool_0)
          apply blast
+        apply (simp add: liftE_bindE)
         apply (simp add: liftE_def bind_assoc shiftL_nat unless_def
                          when_def)
         apply (rule ccorres_rhs_assoc)+
@@ -1854,7 +2264,7 @@ lemma resetUntypedCap_ccorres:
              apply (ctac add: clearMemory_untyped_ccorres[where ut_slot=slot])
             apply (rule ccorres_return_Skip)
            apply ceqv
-          apply (rule ccorres_rhs_assoc2)+
+          apply (rule ccorres_rhs_assoc2)
           apply (rule ccorres_split_nothrow_novcg)
               apply (rule_tac cap'="cteCap cte" in updateFreeIndex_ccorres)
               apply (rule allI, rule conseqPre, vcg)
@@ -1865,13 +2275,16 @@ lemma resetUntypedCap_ccorres:
               apply (simp only: t_hrs_update_use_t_hrs mex_def meq_def)
               apply blast
              apply ceqv
-            apply (rule ccorres_return_CE'[unfolded returnOk_def o_apply], simp+)
+            apply (ctac add: Arch_postResetUntyped_ccorres)
+              apply (rule ccorres_return_CE'[unfolded returnOk_def o_apply], simp+)[1]
+             apply wp
+            apply (vcg exspec=Arch_postResetUntyped_modifies)
            apply wp
           apply (simp add: guard_is_UNIV_def)
          apply wp
         apply simp
         apply (vcg)
-       apply (rule_tac P="reset_chunk_bits \<le> capBlockSize (cteCap cte)
+       apply (rule_tac P="resetChunkBits \<le> capBlockSize (cteCap cte)
              \<and> of_nat (capFreeIndex (cteCap cte)) - 1
                  < (2 ^ capBlockSize (cteCap cte) :: addr)"
            in ccorres_gen_asm)
@@ -1884,7 +2297,6 @@ lemma resetUntypedCap_ccorres:
                         reset_name_seq_bound_helper2[simplified simp_thms]
                         Collect_True)
        apply ((rule ccorres_Guard_Seq[where S=UNIV])+)?
-       apply (rule ccorres_add_returnOk)
        apply (rule ccorres_splitE_novcg)
            apply (rule_tac P="capPtr (cteCap cte) \<le> getFreeRef (capPtr (cteCap cte))
                  (capFreeIndex (cteCap cte)) - 1"
@@ -1892,11 +2304,11 @@ lemma resetUntypedCap_ccorres:
            apply (rule_tac P="(\<exists>s. valid_cap' (cteCap cte) s)
                 \<and> \<not> capIsDevice (cteCap cte)" in ccorres_gen_asm)
            apply (rule_tac yf="\<lambda>ptr. ptr - (capPtr (cteCap cte))"
-                      and P="\<lambda>s. 2 ^ reset_chunk_bits \<le> gsMaxObjectSize s"
+                      and P="\<lambda>s. 2 ^ resetChunkBits \<le> gsMaxObjectSize s"
                       and F="\<lambda>n b idx. cte_wp_at' (\<lambda>cte'. \<exists>idx'. cteCap cte'
                                   = (cteCap cte)\<lparr> capFreeIndex := idx' \<rparr>
                               \<and> idx = (getFreeRef (capPtr (cteCap cte)) idx') - 1
-                                  && ~~ mask reset_chunk_bits) slot
+                                  && ~~ mask resetChunkBits) slot
                           and invs'
                           and (\<lambda>s. descendants_of' slot (ctes_of s) = {})
                           and pspace_no_overlap' (capPtr (cteCap cte)) (capBlockSize (cteCap cte))"
@@ -1906,16 +2318,16 @@ lemma resetUntypedCap_ccorres:
                  in mapME_x_simpl_sequence_fun_related)
               apply (rule nth_equalityI)
                apply (simp add: length_upto_enum_step)
-               apply (simp add: getFreeRef_def shiftr_div_2n_w reset_chunk_bits_def
+               apply (simp add: getFreeRef_def shiftr_div_2n_w Kernel_Config.resetChunkBits_def
                                 word_size)
               apply (simp add: length_upto_enum_step upto_enum_step_nth
                                less_Suc_eq_le nth_rev getFreeRef_def
-                               reset_chunk_bits_def shiftr_div_2n_w word_size
+                               Kernel_Config.resetChunkBits_def shiftr_div_2n_w word_size
                                and_not_mask shiftl_t2n)
              apply clarify
              apply (rule_tac Q="\<lambda>v. cte_wp_at' (\<lambda>cte. capFreeIndex (cteCap cte) = v) slot"
                    and Q'="\<top>\<top>" and V="\<lambda>v. x = (getFreeRef (capPtr (cteCap cte)) v) - 1
-                           && ~~ mask reset_chunk_bits"
+                           && ~~ mask resetChunkBits"
                    in ccorres_req_Ex)
               apply (clarsimp simp: cte_wp_at_ctes_of isCap_simps)
              apply (clarsimp simp add: shiftL_nat)
@@ -1984,7 +2396,7 @@ lemma resetUntypedCap_ccorres:
                   aligned_sub_aligned
                   aligned_intvl_offset_subset_ran
                   unat_le_helper Aligned.is_aligned_neg_mask)
-              apply (simp add: order_less_imp_le reset_chunk_bits_def untypedBits_defs)
+              apply (simp add: order_less_imp_le Kernel_Config.resetChunkBits_def untypedBits_defs)
 
              apply (clarsimp simp: in_set_conv_nth isCap_simps
                                    length_upto_enum_step upto_enum_step_nth
@@ -1996,8 +2408,8 @@ lemma resetUntypedCap_ccorres:
              apply (frule ctes_of_valid', clarify+)
              apply (clarsimp simp: valid_cap_simps')
              apply (strengthen ghost_assertion_size_logic[unfolded o_def, rotated, mk_strg I E]
-                               is_aligned_weaken[where y=2 and x=reset_chunk_bits]
-                               is_aligned_weaken[where y=8 and x=reset_chunk_bits]
+                               is_aligned_weaken[where y=2 and x=resetChunkBits]
+                               is_aligned_weaken[where y=8 and x=resetChunkBits]
                                is_aligned_no_overflow'[where n=8, simplified]
                                power_increasing[where a=2 and n=8, simplified]
                                region_actually_is_bytes_dom_s[mk_strg I E]
@@ -2012,7 +2424,7 @@ lemma resetUntypedCap_ccorres:
              apply (strengthen region_actually_is_bytes_subset[mk_strg I E]
                     heap_list_is_zero_mono[OF heap_list_update_eq]
                     order_trans [OF intvl_start_le
-                          aligned_intvl_offset_subset[where sz'=reset_chunk_bits]]
+                          aligned_intvl_offset_subset[where sz'=resetChunkBits]]
                     byte_regions_unmodified_actually_heap_list[mk_strg I E E]
                 | simp add: is_aligned_mult_triv2 hrs_mem_update)+
              apply (simp add: unat_sub word_le_nat_alt unat_sub[OF word_and_le2]
@@ -2021,7 +2433,7 @@ lemma resetUntypedCap_ccorres:
                                 OF power_strict_increasing])
              apply (case_tac idx')
               apply clarsimp
-              apply (simp add: addr_card_def card_word reset_chunk_bits_def mask_def)
+              apply (simp add: addr_card_def card_word Kernel_Config.resetChunkBits_def mask_def)
               apply (rule conjI)
                apply (rule is_aligned_add)
                 apply (erule is_aligned_weaken, simp add: minUntypedSizeBits_def)
@@ -2029,10 +2441,10 @@ lemma resetUntypedCap_ccorres:
               apply (simp add: is_aligned_def)
              apply clarsimp
              apply (simp add:  addr_card_def card_word is_aligned_def[of "0x100"]
-                               reset_chunk_bits_def)
+                               Kernel_Config.resetChunkBits_def)
              apply (simp add: unat_of_nat64[OF order_le_less_trans, rotated,
                                 OF power_strict_increasing])
-             apply (simp add: word_mod_2p_is_mask[symmetric] reset_chunk_bits_def
+             apply (simp add: word_mod_2p_is_mask[symmetric] Kernel_Config.resetChunkBits_def
                               unat_mod unat_of_nat mod_mod_cancel)
              apply (strengthen nat_le_Suc_less_imp[OF mod_less_divisor, THEN order_trans])
              apply simp
@@ -2050,9 +2462,9 @@ lemma resetUntypedCap_ccorres:
                                   hrs_mem_update)
             apply (frule(2) reset_untyped_inner_offs_helper, simp+)
             apply (clarsimp simp: valid_cap_simps')
-            apply (strengthen is_aligned_weaken[where y=2 and x=reset_chunk_bits]
+            apply (strengthen is_aligned_weaken[where y=2 and x=resetChunkBits]
                               ghost_assertion_size_logic[unfolded o_def, rotated, mk_strg I E]
-                              is_aligned_weaken[where y=8 and x=reset_chunk_bits]
+                              is_aligned_weaken[where y=8 and x=resetChunkBits]
                               is_aligned_no_overflow'[where n=8, simplified]
                               power_increasing[where a=2 and n=8, simplified]
                               region_actually_is_bytes_dom_s[mk_strg I E]
@@ -2063,7 +2475,7 @@ lemma resetUntypedCap_ccorres:
                                   aligned_offset_non_zero
                                   is_aligned_add_multI conj_comms
                                   region_actually_is_bytes_def)
-            apply (simp add: reset_chunk_bits_def is_aligned_def[of "0x100"])
+            apply (simp add: Kernel_Config.resetChunkBits_def is_aligned_def[of "0x100"])
             apply (rule is_aligned_add)
              apply (erule is_aligned_weaken, simp add: minUntypedSizeBits_def)
             apply (cut_tac is_aligned_mult_triv2[of _ 8, simplified])
@@ -2090,20 +2502,24 @@ lemma resetUntypedCap_ccorres:
                                  is_aligned_mask_out_add_eq_sub[OF is_aligned_weaken])
            apply (simp add: field_simps)
            apply (strengthen Aligned.is_aligned_neg_mask unat_le_helper)
-           apply (simp add: minUntypedSizeBits_def reset_chunk_bits_def[THEN arg_cong[where f="\<lambda>x. n \<le> x" for n]])
+           apply (simp add: minUntypedSizeBits_def Kernel_Config.resetChunkBits_def[unfolded atomize_eq, THEN arg_cong[where f="\<lambda>x. n \<le> x" for n]])
            apply (rule order_less_imp_le, erule order_le_less_trans[rotated],
              rule olen_add_eqv[THEN iffD2])
            apply (rule order_trans, rule word_mult_le_mono1, rule word_of_nat_le,
-             erule order_trans[rotated], simp, simp add: reset_chunk_bits_def)
+             erule order_trans[rotated], simp, simp add: Kernel_Config.resetChunkBits_def)
             apply (simp only: unat_power_lower64 shiftr_div_2n_w[symmetric]
                               word_size word_bits_def[symmetric])
             apply (rule nat_less_power_trans2)
              apply (rule order_less_le_trans[OF word_shiftr_lt])
              apply (simp add: word_bits_def)
-            apply (simp add: word_bits_def reset_chunk_bits_def)
+            apply (simp add: word_bits_def Kernel_Config.resetChunkBits_def)
            apply (simp add: field_simps)
           apply ceqv
-         apply (rule ccorres_return_CE, simp+)[1]
+         apply (simp add: liftE_def)
+         apply (ctac add: Arch_postResetUntyped_ccorres[simplified word_bits_def])
+           apply (rule ccorres_return_CE'[unfolded returnOk_def o_apply], simp+)[1]
+          apply wp
+         apply (vcg exspec=Arch_postResetUntyped_modifies)
         apply wp
        apply (simp add: ccHoarePost_def guard_is_UNIV_def)
       apply simp
@@ -2151,7 +2567,7 @@ lemma resetUntypedCap_ccorres:
     apply (simp add: getFreeRef_def nth_rev length_upto_enum_step
                      upto_enum_step_nth word_of_nat_le
                      is_aligned_mask_out_add_eq_sub[OF is_aligned_weaken])
-    apply (simp add: neg_mask_is_div' reset_chunk_bits_def word_size)
+    apply (simp add: neg_mask_is_div' Kernel_Config.resetChunkBits_def word_size)
     apply (safe, simp_all)[1]
    apply (simp add: getFreeRef_def)
    apply (strengthen is_aligned_no_wrap'[where off="a - b" for a b,
@@ -2352,7 +2768,7 @@ lemma invokeUntyped_Retype_ccorres:
             (Call invokeUntyped_Retype_'proc)"
       apply (cinit lift: retypeBase_' srcSlot_' reset_' newType_'
                          userSize_' deviceMemory_' destCNode_' destOffset_' destLength_'
-                   simp: when_def)
+                   simp: when_def archOverlap_def)
        apply (rule ccorres_move_c_guard_cte)
        apply csymbr
        apply (rule ccorres_abstract_cleanup)
@@ -2427,7 +2843,7 @@ lemma invokeUntyped_Retype_ccorres:
          apply (clarsimp simp: misc unat_of_nat_eq[OF range_cover.weak, OF cover])
          apply (vcg exspec=cap_untyped_cap_ptr_set_capFreeIndex_modifies)
         apply simp
-        apply (rule validE_validE_R, rule hoare_post_impErr,
+        apply (rule validE_validE_R, rule hoare_strengthen_postE,
                rule hoare_vcg_conj_liftE1[rotated, where Q="\<lambda>_ s.
                  case gsCNodes s cnodeptr of None \<Rightarrow> False
                    | Some n \<Rightarrow> length destSlots + unat start \<le> 2 ^ n"],
@@ -2612,7 +3028,7 @@ lemma mapME_ensureEmptySlot':
   apply (erule meta_allE)
   apply wp
   apply (fold validE_R_def)
-  apply (erule hoare_post_imp_R)
+  apply (erule hoare_strengthen_postE_R)
   apply clarsimp
   done
 
@@ -2621,7 +3037,7 @@ lemma mapME_ensureEmptySlot:
   mapME (\<lambda>x. injection_handler Inl (ensureEmptySlot (f x))) [S .e. (E::machine_word)]
   \<lbrace>\<lambda>rva s. \<forall>slot. S \<le> slot \<and> slot \<le> E \<longrightarrow>
            (\<exists>cte. cteCap cte = capability.NullCap \<and> ctes_of s (f slot) = Some cte)\<rbrace>, -"
-  apply (rule hoare_post_imp_R)
+  apply (rule hoare_strengthen_postE_R)
    apply (rule mapME_ensureEmptySlot')
   apply clarsimp
   done
@@ -2793,10 +3209,10 @@ lemma ctes_of_ex_cte_cap_to':
 
 
 lemma Arch_isFrameType_spec:
-  "\<forall>s. \<Gamma> \<turnstile> \<lbrace>s. unat \<acute>type \<le> fromEnum (maxBound::ArchTypes_H.object_type)\<rbrace>
+  "\<forall>s. \<Gamma> \<turnstile> \<lbrace>s. unat \<acute>type \<le> fromEnum (maxBound::object_type)\<rbrace>
              Call Arch_isFrameType_'proc
   \<lbrace> \<acute>ret__unsigned_long =
-     from_bool (isFrameType ((toEnum (unat \<^bsup>s\<^esup> type))::ArchTypes_H.object_type))\<rbrace>"
+     from_bool (isFrameType ((toEnum (unat \<^bsup>s\<^esup> type))::object_type))\<rbrace>"
   apply vcg
   apply (simp add: toEnum_object_type_to_H)
   apply (frule object_type_from_to_H)
@@ -2985,8 +3401,8 @@ lemma decodeUntypedInvocation_ccorres_helper:
                                         [OF lookupTargetSlot_ccorres,
                                             unfolded lookupTargetSlot_def])
                         apply (simp add: injection_liftE[OF refl])
-                        apply (simp add: liftE_liftM o_def split_def withoutFailure_def
-                                         hd_drop_conv_nth2 numeral_eqs[symmetric])
+                        apply (simp add: liftE_liftM split_def hd_drop_conv_nth2
+                                   cong: ccorres_all_cong)
                         apply (rule ccorres_nohs)
                         apply (rule ccorres_getSlotCap_cte_at)
                         apply (rule ccorres_move_c_guard_cte)
@@ -3046,7 +3462,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                                    [where Q=\<top> and Q'=\<top>, rotated -1])
                     apply vcg
                    apply (clarsimp simp:)
-                   apply (simp add: retypeFanOutLimit_def word_le_nat_alt
+                   apply (simp add: Kernel_Config.retypeFanOutLimit_def word_le_nat_alt
                                     linorder_not_le)
                    apply (auto simp: linorder_not_le unat_eq_0)[1]
                   apply (rule ccorres_from_vcg_throws[where P=\<top> and P'=UNIV])
@@ -3054,7 +3470,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                   apply (clarsimp simp: throwError_def return_def
                                         syscall_error_rel_def exception_defs
                                         syscall_error_to_H_cases)
-                  apply (simp add: retypeFanOutLimit_def)
+                  apply (simp add: Kernel_Config.retypeFanOutLimit_def)
                  apply (rule ccorres_split_when_throwError_cond
                                    [where Q=\<top> and Q'=\<top>, rotated -1])
                     apply vcg
@@ -3209,8 +3625,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                                                        performInvocation_def liftE_bindE bind_assoc)
                              apply (ctac add: setThreadState_ccorres)
                                apply (rule ccorres_trim_returnE, (simp (no_asm))+)
-                               apply (simp (no_asm) add: o_def dc_def[symmetric] bindE_assoc
-                                                         id_def[symmetric] bind_bindE_assoc)
+                               apply (simp (no_asm) add: bindE_assoc bind_bindE_assoc)
                                apply (rule ccorres_seq_skip'[THEN iffD1])
                                apply (ctac(no_vcg) add: invokeUntyped_Retype_ccorres[where start = "args!4"])
                                  apply (rule ccorres_alternative2)
@@ -3259,7 +3674,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                       apply vcg
                      apply (rule ccorres_guard_imp
                          [where Q =\<top> and Q' = UNIV,rotated],assumption+)
-                     apply (simp add: o_def)
+                     apply simp
                     apply (simp add: liftE_validE)
                     apply (rule checkFreeIndex_wp)
                    apply (clarsimp simp: ccap_relation_untyped_CL_simps shiftL_nat cap_get_tag_isCap
@@ -3276,8 +3691,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                                            unat_of_nat_APIType_capBits word_size hd_conv_nth length_ineq_not_Nil
                        not_less word_le_nat_alt isCap_simps valid_cap_simps')
                     apply (strengthen word_of_nat_less)
-                    apply (clarsimp simp: StrictC'_thread_state_defs mask_def true_def false_def
-                                          from_bool_0 ccap_relation_isDeviceCap2
+                    apply (clarsimp simp: ThreadState_defs mask_def ccap_relation_isDeviceCap2
                                    split: if_split)
                     apply (clarsimp simp: not_less shiftr_overflow maxUntypedSizeBits_def
                                           unat_of_nat_APIType_capBits)
@@ -3291,10 +3705,10 @@ lemma decodeUntypedInvocation_ccorres_helper:
                       and ex_cte_cap_to' (capCNodePtr rv)
                       and (\<lambda>s. case gsCNodes s (capCNodePtr rv) of None \<Rightarrow> False
                             | Some n \<Rightarrow> args ! 4 + args ! 5 - 1 < 2 ^ n)
-                      and sch_act_simple and ct_active'" in hoare_post_imp_R)
+                      and sch_act_simple and ct_active'" in hoare_strengthen_postE_R)
                    prefer 2
                    apply (clarsimp simp: invs_valid_objs' invs_mdb'
-                      invs_queues ct_in_state'_def pred_tcb_at')
+                                         ct_in_state'_def pred_tcb_at')
                    apply (subgoal_tac "ksCurThread s \<noteq> ksIdleThread sa")
                     prefer 2
                     apply clarsimp
@@ -3326,7 +3740,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                    apply (rule validE_R_validE)
                    apply (wp injection_wp_E[OF refl])
                   apply clarsimp
-                 apply (simp add: ccHoarePost_def xfdc_def)
+                 apply (simp add: ccHoarePost_def)
                  apply (simp only: whileAnno_def[where I=UNIV and V=UNIV, symmetric])
                  apply (rule_tac V=UNIV
                                 in HoarePartial.reannotateWhileNoGuard)
@@ -3339,7 +3753,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
                       \<and> invs' s \<and> ksCurThread s = thread
                       \<and> valid_cap' r s
                       \<and> (\<forall>rf\<in>cte_refs' r (irq_node' s). ex_cte_cap_to' rf s)
-                      \<and> sch_act_simple s \<and> ct_active' s" in hoare_post_imp_R)
+                      \<and> sch_act_simple s \<and> ct_active' s" in hoare_strengthen_postE_R)
                  apply clarsimp
                  apply (wp injection_wp_E[OF refl] getSlotCap_cap_to'
                            getSlotCap_capAligned
@@ -3383,8 +3797,7 @@ lemma decodeUntypedInvocation_ccorres_helper:
   apply (clarsimp simp: hd_drop_conv_nth2 hd_conv_nth neq_Nil_lengthI
                         ct_in_state'_def pred_tcb_at'
                         rf_sr_ksCurThread mask_eq_iff_w2p
-                        "StrictC'_thread_state_defs" numeral_eqs[symmetric]
-                        cap_get_tag_isCap cte_wp_at_ctes_of
+                        numeral_eqs[symmetric] cap_get_tag_isCap cte_wp_at_ctes_of
                         unat_eq_0 ccHoarePost_def)
   apply (rule conjI)
    apply (clarsimp simp: linorder_not_less isCap_simps)
@@ -3456,18 +3869,16 @@ shows
   apply (rule ccorres_guard_imp2)
    apply (rule monadic_rewrite_ccorres_assemble)
     apply (rule_tac isBlocking=isBlocking and isCall=isCall and buffer=buffer
-                in decodeUntypedInvocation_ccorres_helper[unfolded K_def])
+                in decodeUntypedInvocation_ccorres_helper)
     apply assumption
-   apply (rule monadic_rewrite_transverse)
+   apply (rule monadic_rewrite_trans[rotated])
     apply (rule monadic_rewrite_bind_head)
-    apply (rule monadic_rewrite_bindE[OF monadic_rewrite_refl])
-     apply (simp add: liftE_bindE stateAssert_def2 bind_assoc)
-     apply (rule monadic_rewrite_bind_tail)
-      apply (rule_tac P=x in monadic_rewrite_gen_asm)
-      apply simp
+    apply (simp add: liftE_bindE stateAssert_def2 bind_assoc)
+    apply (monadic_rewrite_r monadic_rewrite_if_r_True)
+    apply (monadic_rewrite_r_method monadic_rewrite_symb_exec_r_drop wpsimp)
       apply (rule monadic_rewrite_refl)
-     apply (wp | simp)+
-   apply (simp add: gets_bind_ign)
+     apply wpsimp
+    apply (rule monadic_rewrite_refl)
    apply (rule monadic_rewrite_refl)
   apply (clarsimp simp: ex_cte_cap_wp_to'_def excaps_in_mem_def)
   apply (drule(1) bspec)+

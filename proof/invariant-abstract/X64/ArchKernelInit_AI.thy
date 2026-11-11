@@ -14,7 +14,7 @@ imports
   Arch_AI
 begin
 
-context Arch begin global_naming X64 (*FIXME: arch_split*)
+context Arch begin arch_global_naming
 
 text \<open>
   Showing that there is a state that satisfies the abstract invariants.
@@ -58,7 +58,7 @@ lemma descendants_empty [simp]:
   "descendants_of x Map.empty = {}"
   by (clarsimp simp: descendants_of_def)
 
-lemma [simp]: "\<not>is_reply_cap Structures_A.NullCap"
+lemma reply_Null [simp]: "\<not>is_reply_cap NullCap"
   by (simp add: is_reply_cap_def)
 
 declare cap_range_NullCap [simp]
@@ -122,9 +122,8 @@ lemma init_irq_ptrs_eq:
   apply (erule_tac bnd="ucast (max_word :: irq) + 1"
               in shift_distinct_helper[rotated 3],
          safe intro!: plus_one_helper2,
-         simp_all add: ucast_le_ucast[where 'a=8 and 'b=64,simplified] up_ucast_inj_eq,
-         simp_all add: cte_level_bits_def word_bits_def up_ucast_inj_eq
-                       max_word_def)
+         simp_all add: ucast_le_ucast[where 'a=8 and 'b=64,simplified] up_ucast_inj_eq ucast_leq_mask,
+         simp_all add: cte_level_bits_def word_bits_def up_ucast_inj_eq mask_eq_exp_minus_1)
   done
 
 lemma in_kernel_base:
@@ -220,6 +219,10 @@ lemma cap_refs_respects_device_region_init[simp]:
    apply (clarsimp simp: cte_wp_at_caps_of_state cap_range_respects_device_region_def)
    done
 
+lemma tcb_cur_fpu_init_arch_tcb_False[simp]:
+  "tcb_cur_fpu init_arch_tcb = False"
+  by (simp add: init_arch_tcb_def)
+
 lemma kernel_mapping_slot: "0x1FF \<in> kernel_mapping_slots"
   by (auto simp: kernel_mapping_slots_def pptr_base_def pptrBase_def bit_simps)
 
@@ -238,7 +241,7 @@ done
 
 lemma invs_A:
   "invs init_A_st" (is "invs ?st")
-  supply is_aligned_def[THEN meta_eq_to_obj_eq, THEN iffD2, simp]
+  supply is_aligned_def[THEN iffD2, simp]
   supply image_cong_simp [cong del]
   apply (simp add: invs_def)
   apply (rule conjI)
@@ -265,14 +268,13 @@ lemma invs_A:
     apply (clarsimp simp: valid_cs_def word_bits_def cte_level_bits_def
                           init_irq_ptrs_all_ineqs valid_tcb_def
                    split: if_split_asm)
-     apply (clarsimp simp: vmsz_aligned_def is_aligned_addrFromPPtr_n table_size is_aligned_shift
-                           pageBits_def ptTranslationBits_def)
+    apply (clarsimp simp: vmsz_aligned_def is_aligned_addrFromPPtr_n table_size is_aligned_shift
+                          pageBits_def ptTranslationBits_def)
    apply (simp add: pspace_aligned_init_A pspace_distinct_init_A)
-   apply (rule conjI)
-    apply (clarsimp simp: if_live_then_nonz_cap_def obj_at_def state_defs live_def hyp_live_def)
-   apply (rule conjI)
-    apply (clarsimp simp: zombies_final_def cte_wp_at_cases state_defs
-                          tcb_cap_cases_def is_zombie_def)
+   apply (clarsimp simp: if_live_then_nonz_cap_def obj_at_def state_defs live_def hyp_live_def
+                         arch_live_def arch_tcb_live_def)
+   apply (clarsimp simp: zombies_final_def cte_wp_at_cases state_defs ex_nonz_cap_to_def
+                         tcb_cap_cases_def is_zombie_def)
    apply (clarsimp simp: sym_refs_def state_refs_of_def state_defs state_hyp_refs_of_def)
   apply (rule conjI)
    apply (clarsimp simp: valid_mdb_def init_cdt_def no_mloop_def
@@ -301,14 +303,21 @@ lemma invs_A:
                          caps_of_state_init_A_st_Null is_master_reply_cap_to_def
                          valid_reply_masters_def valid_global_refs_def
                          valid_refs_def[unfolded cte_wp_at_caps_of_state])
-  apply (clarsimp, (thin_tac "_")+) (* use new proven assumptions, then drop them *)
-  apply (rule conjI)
-   apply (clarsimp simp: valid_arch_state_def)
+   apply (clarsimp, (thin_tac "_")+) (* use new proven assumptions, then drop them *)
    apply (rule conjI)
-    apply (clarsimp simp: valid_asid_table_def state_defs)
-   apply (simp add: valid_global_pts_def valid_global_pds_def valid_global_pdpts_def
-                    valid_arch_state_def state_defs obj_at_def a_type_def
-                    valid_cr3_def valid_x64_irq_state_def asid_wf_0)
+    apply (clarsimp simp: valid_arch_state_def)
+    apply (rule conjI)
+     apply (clarsimp simp: valid_asid_table_def state_defs)
+    apply (prop_tac "ioport_control_unique init_A_st")
+     apply (simp add: caps_of_state_init_A_st_Null ioport_control_unique_def)
+    apply (subgoal_tac "valid_ioports init_A_st")
+     apply (simp add: valid_global_pts_def valid_global_pds_def valid_global_pdpts_def
+                      valid_arch_state_def state_defs obj_at_def a_type_def
+                      valid_cr3_def valid_x64_irq_state_def asid_wf_0)
+    apply (clarsimp simp: valid_ioports_def caps_of_state_init_A_st_Null all_ioports_issued_def ran_def
+                          issued_ioports_def ioports_no_overlap_def
+                    cong: rev_conj_cong)
+  apply (rule conjI, clarsimp simp: valid_cur_fpu_def is_tcb_cur_fpu_def obj_at_def state_defs)
   apply (rule conjI)
    apply (clarsimp simp: valid_irq_node_def obj_at_def state_defs
                          is_cap_table_def wf_empty_bits
@@ -323,10 +332,6 @@ lemma invs_A:
   apply (rule conjI)
    apply (clarsimp simp: valid_irq_states_def state_defs init_machine_state_def
                          valid_irq_masks_def init_irq_masks_def)
-  apply (rule conjI)
-   apply (clarsimp simp: valid_ioports_def caps_of_state_init_A_st_Null all_ioports_issued_def ran_def
-                         issued_ioports_def ioports_no_overlap_def
-                   cong: rev_conj_cong)
   apply (rule conjI)
    apply (clarsimp simp: valid_machine_state_def state_defs
                          init_machine_state_def init_underlying_memory_def)

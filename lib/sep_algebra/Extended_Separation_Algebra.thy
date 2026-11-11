@@ -296,11 +296,7 @@ lemma septract_cancel:
 
 lemma sep_coimpl_mp_zero:
   "(P \<leadsto>* Q) s \<Longrightarrow> P s   \<Longrightarrow> Q (0)"
-  apply (clarsimp simp: sep_coimpl_def sep_conj_def)
-  apply (erule_tac x=s in allE)
-  apply (clarsimp, erule_tac x="0" in allE)
-  apply (clarsimp simp: pred_neg_def)
-  done
+  by (clarsimp simp: sep_coimpl_def sep_conj_def)
 
 lemma sep_neg_not:
   "(P \<leadsto>* sep_false) s \<Longrightarrow> \<not>P s"
@@ -486,7 +482,7 @@ lemma septract_cancel_eq_precise:
    apply (clarsimp)
    apply (fastforce simp: sep_disj_commute sep_add_commute)
   apply (clarsimp simp: septraction_def pred_neg_def sep_impl_def)
-  by (metis pred_neg_def sep_coimpl_def sep_conjI sep_conj_commuteI)
+  by (metis pred_neg_def(1) sep_coimpl_def sep_conjI sep_conj_commuteI)
 
 lemma sep_coimpl_cancel:
   "(P \<leadsto>* Q) s \<Longrightarrow> ((P \<and>* Q) s \<Longrightarrow> (P \<leadsto>* Q') s) \<Longrightarrow> (P \<leadsto>* Q') s"
@@ -533,7 +529,7 @@ lemma sep_coimpl_contra:
 lemma sep_comb':
   "((not Q) \<leadsto>* P) s \<Longrightarrow> (Q \<leadsto>* R) s \<Longrightarrow> ((R or P) \<and>* sep_true) s"
   apply (clarsimp simp: sep_coimpl_def sep_conj_def pred_neg_def)
-  by (metis (full_types) disjoint_zero_sym pred_disj_def sep_add_zero sep_add_zero_sym sep_disj_zero)
+  by (metis (full_types) disjoint_zero_sym sep_add_zero sep_add_zero_sym sep_disj_zero)
 
 lemma sep_coimpl_dne:
   "((R \<leadsto>* sep_false) \<leadsto>* sep_false) s \<Longrightarrow> (R \<and>* sep_true) s"
@@ -541,11 +537,11 @@ lemma sep_coimpl_dne:
 
 lemma sep_antimp_contrapos:
   " (R) s \<Longrightarrow> ((P \<longrightarrow>* not R) \<leadsto>* (not P)) s "
-  by (metis pred_neg_def sep_coimpl_def' sep_mp_gen)
+  by (metis pred_neg_def(1) sep_coimpl_def' sep_mp_gen)
 
 lemma sep_snake_trivial:
   "(sep_true \<leadsto>* Q) s \<Longrightarrow> Q s"
-  by (metis pred_neg_def sep_coimpl_def sep_conj_sep_true')
+  by (metis pred_neg_def(1) sep_coimpl_def sep_conj_sep_true')
 
 lemma min_predD:
   "(R \<leadsto>* \<box>) s \<Longrightarrow> (R \<and>* sep_true) s  \<Longrightarrow> R s"
@@ -571,7 +567,7 @@ lemma sep_conj_coimplI:
 
 lemma sep_conj_septract_curry:
   "((P \<and>* Q) -* R) s \<Longrightarrow>  (P -* (Q -* R)) s"
-  by (smt sep_antimp' sep_conj_coimplI sep_septraction_snake)
+  by (smt (verit) sep_antimp' sep_conj_coimplI sep_septraction_snake)
 
 lemma sep_snake_boxI:
   "Q s \<Longrightarrow> (\<box> \<leadsto>* Q) s"
@@ -586,7 +582,7 @@ lemma sep_snake_boxD:
 lemma septract_wandD:
   "(( R \<longrightarrow>* (not Q)) -* Q) s \<Longrightarrow> (not R) s"
   apply (erule sep_septraction_snake)
-  by (simp add: sep_antimp_contrapos)
+  using sep_antimp_contrapos by blast
 
 lemma sep_impl_septractD:
   "(P \<longrightarrow>* Q) s \<Longrightarrow> (R -* (not Q)) s \<Longrightarrow> ((R and not P) -* (not Q)) s"

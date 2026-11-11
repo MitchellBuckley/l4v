@@ -15,7 +15,7 @@ imports
   PSpaceFuns_H
   ArchObjInsts_H
 begin
-context Arch begin global_naming ARM_H
+context Arch begin arch_global_naming (H)
 
 #INCLUDE_HASKELL SEL4/API/Invocation/ARM.lhs CONTEXT ARM_H decls_only NOT isPageFlushLabel isPDFlushLabel Invocation IRQControlInvocation CopyRegisterSets
 
@@ -26,9 +26,6 @@ context Arch begin global_naming ARM_H
 end
 
 (* Defined differently and/or delayed on different architectures *)
-definition
-  canonicalAddressAssert :: "machine_word => bool" where
-  canonicalAddressAssert_def[simp]:
-  "canonicalAddressAssert p = True"
+consts canonicalAddressAssert :: "machine_word => bool"
 
 end

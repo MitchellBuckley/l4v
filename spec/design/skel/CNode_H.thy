@@ -10,12 +10,15 @@ theory CNode_H
 imports
   FaultMonad_H
   ThreadDecls_H
+  ArchRetypeDecls_H
   RetypeDecls_H
   TCBDecls_H
   CSpaceDecls_H
   EndpointDecls_H
   PSpaceFuns_H
 begin
+
+arch_requalify_consts (H) isArchMDBParentOf
 
 #INCLUDE_HASKELL_PREPARSE SEL4/Object/Structures.lhs
 
@@ -31,6 +34,7 @@ where
   p s"
 by auto
 
-#INCLUDE_HASKELL SEL4/Object/CNode.lhs bodies_only NOT finaliseSlot cteRevoke cteDeleteOne noReplyCapsFor
+#INCLUDE_HASKELL SEL4/Object/CNode.lhs bodies_only NOT finaliseSlot cteRevoke \
+  cteDeleteOne noReplyCapsFor archMDBAssertions
 
 end

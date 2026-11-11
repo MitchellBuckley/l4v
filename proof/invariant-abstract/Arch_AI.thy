@@ -37,10 +37,9 @@ lemma assocs_dom_comp:
 
 
 lemma assocs_empty_dom_comp:
-  "(- dom f \<inter> Collect P = {}) = null (filter (\<lambda>(x, y). P x \<and> y = None) (assocs f))"
+  "(- dom f \<inter> Collect P = {}) = (filter (\<lambda>(x, y). P x \<and> y = None) (assocs f) = [])"
    apply (subst assocs_dom_comp [symmetric])
-   apply (subst empty_set_is_null)
-   apply (simp add: null_def)
+   apply (subst empty_set_is_null, simp)
    done
 
 
@@ -54,7 +53,7 @@ proof -
     unfolding filter_assocs_def
     by (simp add: assocs_empty_dom_comp)
   hence "hd (filter_assocs f) \<in> set (filter_assocs f)"
-    by (clarsimp simp: null_def neq_Nil_conv)
+    by (clarsimp simp: neq_Nil_conv)
   thus ?thesis
     unfolding filter_assocs_def
     by (clarsimp simp: in_assocs_is_fun)
@@ -62,11 +61,10 @@ qed
 
 
 lemma ucast_assocs:
-  "len_of TYPE('a) < len_of TYPE('b) \<Longrightarrow>
-   assocs (fn o (ucast :: ('a :: len) word \<Rightarrow> ('b :: len) word))
-     = map (\<lambda>(x, y). (ucast x, y)) (filter (\<lambda>(x, y). x < 2 ^ len_of TYPE('a)) (assocs fn))"
-  apply (simp add: assocs_def enum_word_def
-                   split_def filter_map)
+  "LENGTH('a) < LENGTH('b) \<Longrightarrow>
+   assocs (fn o (ucast :: 'a :: len word \<Rightarrow> 'b :: len word))
+     = map (\<lambda>(x, y). (ucast x, y)) (filter (\<lambda>(x, y). x < 2 ^ LENGTH('a)) (assocs fn))"
+  apply (simp add: assocs_def enum_word_def split_def filter_map)
   apply (rule map_cong)
    apply (simp add: o_def)
    apply (rule trans [OF _ filter_cong [OF refl]],
@@ -84,19 +82,15 @@ lemma ucast_assocs:
 
 
 lemma ucast_le_migrate:
-  fixes x :: "('a :: len) word"
-  fixes y :: "('b :: len) word"
-  shows
-  "\<lbrakk> y < 2 ^ (size x); size x < size y \<rbrakk> \<Longrightarrow>
-    (ucast x \<le> y) = (x \<le> ucast y)"
-  apply (simp add: word_le_def ucast_def)
+  "\<lbrakk> y < 2 ^ size x; size x < size y \<rbrakk> \<Longrightarrow> (ucast x \<le> y) = (x \<le> ucast y)"
+  for x :: "'a :: len word" and y :: "'b :: len word"
+  apply (simp add: word_le_def ucast_def del: Word.of_int_uint)
   apply (subst word_uint.Abs_inverse)
    apply (simp add: uints_num word_size)
    apply (rule order_less_le_trans, rule uint_lt2p)
    apply simp
   apply (subst word_uint.Abs_inverse)
-   apply (simp add: uints_num word_size word_less_alt
-                    uint_2p_alt)
+   apply (simp add: uints_num word_size word_less_alt uint_2p_alt)
   apply simp
   done
 
@@ -113,7 +107,8 @@ lemma obj_at_delete_objects:
 
 
 (* FIXME: move *)
-crunch arch [wp]: retype_region "\<lambda>s. P (arch_state s)"
+crunch retype_region
+  for arch[wp]: "\<lambda>s. P (arch_state s)"
   (simp: crunch_simps)
 
 lemma set_free_index_final_cap:

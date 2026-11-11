@@ -7,19 +7,19 @@
 chapter "RISCV 64bit Machine Types"
 
 theory MachineTypes
-imports
-  "Word_Lib.WordSetup"
-  "Lib.OptionMonadND"
-  "Lib.HaskellLib_H"
-  Platform
+  imports
+    Word_Lib.WordSetup
+    Monads.Nondet_Empty_Fail
+    Monads.Nondet_Reader_Option
+    Lib.HaskellLib_H
+    Platform
 begin
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 text \<open>
   An implementation of the machine's types, defining register set
-  and some observable machine state.
-\<close>
+  and some observable machine state.\<close>
 
 section "Types"
 
@@ -28,11 +28,9 @@ section "Types"
 
 end
 
-context begin interpretation Arch .
-requalify_types register
-end
+arch_requalify_types register
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 #INCLUDE_HASKELL SEL4/Machine/RegisterSet/RISCV64.hs CONTEXT RISCV64 instanceproofs
 (*>*)
@@ -44,31 +42,30 @@ text \<open>
   Most of the machine state is left underspecified at this level.
   We know it exists, we will declare some interface functions, but
   at this level we do not have access to how this state is transformed
-  or what effect it has on the machine.
-\<close>
+  or what effect it has on the machine.\<close>
 typedecl machine_state_rest
 
 end
 
 qualify RISCV64 (in Arch)
 
-record
-  machine_state =
+record machine_state =
   irq_masks :: "RISCV64.irq \<Rightarrow> bool"
   irq_state :: nat
-  underlying_memory :: "word64 \<Rightarrow> word8"
-  device_state :: "word64 \<Rightarrow> word8 option"
+  underlying_memory :: "machine_word \<Rightarrow> word8"
+  device_state :: "machine_word \<Rightarrow> word8 option"
   machine_state_rest :: RISCV64.machine_state_rest
 
-consts irq_oracle :: "nat \<Rightarrow> RISCV64.irq"
+axiomatization
+  irq_oracle :: "nat \<Rightarrow> RISCV64.irq"
+where
+  irq_oracle_max_irq: "\<forall>n. irq_oracle n <= maxIRQ"
 
 end_qualify
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
-text \<open>
-  The machine monad is used for operations on the state defined above.
-\<close>
+text \<open>The machine monad is used for operations on the state defined above.\<close>
 type_synonym 'a machine_monad = "(machine_state, 'a) nondet_monad"
 
 end
@@ -76,43 +73,31 @@ end
 translations
   (type) "'c RISCV64.machine_monad" <= (type) "(RISCV64.machine_state, 'c) nondet_monad"
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
-text \<open>
-  After kernel initialisation all IRQs are masked.
-\<close>
-definition
+text \<open>After kernel initialisation all IRQs are masked.\<close>
+definition init_irq_masks :: "irq \<Rightarrow> bool" where
   "init_irq_masks \<equiv> \<lambda>_. True"
 
-text \<open>
-  The initial contents of the user-visible memory is 0.
-\<close>
-definition
-  init_underlying_memory :: "word64 \<Rightarrow> word8"
-  where
+text \<open>The initial contents of the user-visible memory is 0.\<close>
+definition init_underlying_memory :: "machine_word \<Rightarrow> word8" where
   "init_underlying_memory \<equiv> \<lambda>_. 0"
 
-text \<open>
-  We leave open the underspecified rest of the machine state in
-  the initial state.
-\<close>
-definition
-  init_machine_state :: machine_state where
- "init_machine_state \<equiv> \<lparr> irq_masks = init_irq_masks,
-                         irq_state = 0,
-                         underlying_memory = init_underlying_memory,
-                         device_state = Map.empty,
-                         machine_state_rest = undefined \<rparr>"
+text \<open>We leave open the underspecified rest of the machine state in the initial state.\<close>
+definition init_machine_state :: machine_state where
+  "init_machine_state \<equiv> \<lparr> irq_masks = init_irq_masks,
+                          irq_state = 0,
+                          underlying_memory = init_underlying_memory,
+                          device_state = Map.empty,
+                          machine_state_rest = undefined \<rparr>"
 
 #INCLUDE_HASKELL SEL4/Machine/Hardware/RISCV64.hs CONTEXT RISCV64 ONLY VMFaultType HypFaultType vmFaultTypeFSR VMPageSize pageBits ptTranslationBits pageBitsForSize
 
 end
 
-context begin interpretation Arch .
-requalify_types vmpage_size
-end
+arch_requalify_types vmpage_size
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 #INCLUDE_HASKELL SEL4/Machine/Hardware/RISCV64.hs CONTEXT RISCV64 instanceproofs ONLY VMFaultType HypFaultType VMPageSize
 

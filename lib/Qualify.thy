@@ -25,7 +25,6 @@ structure Data = Theory_Data
   (
     type T = (theory * qualify_args) option;
     val empty = NONE;
-    val extend = I;
     fun merge ((_, _) : T * T) = NONE;
   );
 
@@ -65,8 +64,8 @@ fun get_new_consts old_thy consts =
     val space = #const_space (Consts.dest consts);
 
     val consts =
-      filter (fn nm => not (can (Consts.the_const (Sign.consts_of old_thy)) nm) andalso
-                       can (Consts.the_const consts) nm) new_consts
+      filter (fn nm => not (can (Consts.the_const_type (Sign.consts_of old_thy)) nm) andalso
+                       can (Consts.the_const_type consts) nm) new_consts
       |> map (fn nm => `(make_bind space old_thy) nm);
 
   in consts end;
@@ -97,7 +96,7 @@ fun make_bind_local nm =
 
 fun set_global_qualify (args : qualify_args) thy =
   let
-    val _ = Locale.check thy (#target_name args, Position.none)
+    val _ = Locale.check_global thy (#target_name args, Position.none)
     val _ = case get_qualify thy of SOME _ => error "Already in a qualify block!" | NONE => ();
 
     val thy' = Data.map (K (SOME (thy,args))) thy;
@@ -111,7 +110,7 @@ val _ =
           Toplevel.theory (set_global_qualify {name = str, target_name = case target of SOME (nm, _) => nm | _ => str})));
 
 fun syntax_alias global_alias local_alias b name =
-  Local_Theory.declaration {syntax = true, pervasive = true} (fn phi =>
+  Local_Theory.declaration {syntax = true, pos = Position.none, pervasive = true} (fn phi =>
     let val b' = Morphism.binding phi b
     in Context.mapping (global_alias b' name) (local_alias b' name) end);
 
@@ -141,7 +140,7 @@ fun end_global_qualify thy =
      |> (fn thy => fold (Sign.hide_const false o snd) consts thy)
      |> (fn thy => fold (Sign.hide_type false o snd) types thy);
 
-    val lthy = Named_Target.begin (#target_name args, Position.none) thy''
+    val lthy = Target_Context.context_begin_named_cmd [] (#target_name args, Position.none) thy''
       |> Local_Theory.map_background_naming (Name_Space.parent_path #> Name_Space.mandatory_path nm);
 
     val lthy' = lthy

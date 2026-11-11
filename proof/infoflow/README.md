@@ -19,14 +19,14 @@ before transferring the noninterference result to the kernel's
 C implementation via the [Design Spec Refinement Proof](../refine/) and
 the [C Refinement Proof](../crefine/).
 
-  [1]: https://ts.data61.csiro.au/publications/nictaabstracts/Murray_MBGBSLGK_13.abstract "seL4: from General Purpose to a Proof of Information Flow Enforcement"
+  [1]: https://trustworthy.systems/publications/nictaabstracts/Murray_MBGBSLGK_13.abstract "seL4: from General Purpose to a Proof of Information Flow Enforcement"
 
 Building
 --------
 
-To build from the `l4v/` directory, run:
+To build for the ARM architecture from the `l4v/` directory, run:
 
-    ./isabelle/bin/isabelle build -d . -v -b InfoFlow
+    L4V_ARCH=ARM ./run_tests InfoFlow
 
 Important Theories
 ------------------
@@ -42,4 +42,3 @@ specification is [`InfoFlow`](InfoFlow.thy). Confidentiality is
 a relational property and the theory [`EquivValid`](../../lib/EquivValid.thy)
 defines these generically for the nondeterministic state monad of the
 abstract specification.
-

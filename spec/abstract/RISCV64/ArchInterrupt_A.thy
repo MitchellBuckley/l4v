@@ -10,7 +10,7 @@ theory ArchInterrupt_A
 imports Ipc_A
 begin
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 definition handle_reserved_irq :: "irq \<Rightarrow> (unit,'z::state_ext) s_monad"
   where
@@ -24,6 +24,10 @@ fun arch_invoke_irq_handler :: "irq_handler_invocation \<Rightarrow> (unit,'z::s
 definition arch_mask_irq_signal :: "irq \<Rightarrow> (unit,'z::state_ext) s_monad"
   where
   "arch_mask_irq_signal irq \<equiv> return ()"
+
+definition handle_spurious_irq :: "(unit,'z::state_ext) s_monad"
+  where
+  "handle_spurious_irq \<equiv> return ()"
 
 end
 

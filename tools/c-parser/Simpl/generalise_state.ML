@@ -1,41 +1,30 @@
 (*  Title:      generalise_state.ML
-
     Author:     Norbert Schirmer, TU Muenchen
 
-Copyright (C) 2005-2007 Norbert Schirmer
-
-This library is free software; you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as
-published by the Free Software Foundation; either version 2.1 of the
-License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
-USA
+Copyright (C) 2006-2008 Norbert Schirmer
+Copyright (c) 2022 Apple Inc. All rights reserved.
 *)
 
 
 signature SPLIT_STATE =
-sig
-  val isState: term -> bool
-  val abs_state: term -> term option
+sig val isState: Proof.context -> term -> bool
+  val abs_state: Proof.context -> term -> term option
   val abs_var: Proof.context -> term -> (string * typ)
   val split_state: Proof.context -> string -> typ -> term -> (term * term list)
-  val ex_tac: Proof.context -> term list -> tactic
+  val ex_tac: Proof.context -> term list -> int -> tactic
     (* the term-list is the list of selectors as
        returned by split_state. They may be used to
-       construct the instatiation of the existentially
+       construct the instantiation of the existentially
        quantified state.
     *)
 end;
 
-functor GeneraliseFun (structure SplitState: SPLIT_STATE) =
+signature GENERALISE =
+sig
+  val GENERALISE: Proof.context -> int -> tactic
+end
+
+functor Generalise (structure SplitState: SPLIT_STATE) : GENERALISE =
 struct
 
 val genConj = @{thm generaliseConj};
@@ -99,8 +88,8 @@ fun spec' cv thm =
              val cvT = Thm.ctyp_of_cterm cv;
              val vT = Thm.typ_of cvT;
            in Thm.instantiate
-                ([(dest_TVar sVT, cvT)],
-                 [((sP, vT --> HOLogic.boolT), #2 (Thm.dest_comb ct2)),
+                (TVars.make [(dest_TVar sVT, cvT)],
+                 Vars.make [((sP, vT --> HOLogic.boolT), #2 (Thm.dest_comb ct2)),
                  ((sV, vT), cv)])
                 spec
            end
@@ -110,8 +99,8 @@ fun spec' cv thm =
              val cvT = Thm.ctyp_of_cterm cv;
              val vT = Thm.typ_of cvT;
            in Thm.instantiate
-                ([(dest_TVar sVT, cvT)],
-                 [((sP, vT --> propT), ct2),
+                (TVars.make [(dest_TVar sVT, cvT)],
+                 Vars.make [((sP, vT --> propT), ct2),
                  ((sV, vT),cv)])
                 meta_spec
            end
@@ -131,10 +120,10 @@ fun split_thm qnt ctxt s T t =
                                 (HOLogic.mk_Trueprop (list_exists (vs, t')),
                                  HOLogic.mk_Trueprop (HOLogic.mk_exists (s,T,t))))
   in (case qnt of
-        Hol_ex => Goal.prove ctxt [] [] prop (fn _ => SplitState.ex_tac ctxt vars)
+        Hol_ex => Goal.prove ctxt [] [] prop (fn _ => SplitState.ex_tac ctxt vars 1)
       | _ => let
                val rP = conc_of genRefl';
-               val thm0 = Thm.instantiate ([], [(dest_Var rP, Thm.cterm_of ctxt prop)]) genRefl';
+               val thm0 = Thm.instantiate (TVars.empty, Vars.make [(dest_Var rP, Thm.cterm_of ctxt prop)]) genRefl';
                fun elim_all v thm =
                  let
                    val cv = Thm.cterm_of ctxt v;
@@ -156,7 +145,7 @@ fun eta_expand ctxt ct =
 
 fun split_abs ctxt ct =
   (case Thm.term_of ct of
-     Abs x => (x, Thm.dest_abs NONE ct)
+     Abs x => (x, Thm.dest_abs_global ct)
    | _ => split_abs ctxt (eta_expand ctxt ct))
 
 fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
@@ -170,7 +159,7 @@ fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
          val genAll' = Drule.rename_bvars [(s,x)] genAll;
          val (Const (@{const_name Pure.all},_)$Abs (s',_,_)) = genAllShift |> Thm.prems_of |> hd |> dest_prop;
          val genAllShift' = Drule.rename_bvars [(s',x)] genAllShift;
-       in if SplitState.isState (allc$Abs abst)
+       in if SplitState.isState ctxt (allc$Abs abst)
           then ([Thm.term_of cb],[cb], fn [thm] =>
                        let val P = HOLogic.dest_Trueprop (dest_prop (prem_of thm));
                            val thm' = split_thm Hol_all ctxt x' T P;
@@ -190,7 +179,7 @@ fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
          val Free (x',_) = Thm.term_of cx';
          val (Const (@{const_name Pure.all},_)$Abs (s,_,_)) = genEx |> Thm.prems_of |> hd |> dest_prop;
          val genEx' = Drule.rename_bvars [(s,x)] genEx;
-       in if SplitState.isState (exc$Abs abst)
+       in if SplitState.isState ctxt (exc$Abs abst)
           then ([Thm.term_of cb],[cb], fn [thm] =>
                        let val P = HOLogic.dest_Trueprop (dest_prop (prem_of thm));
                            val thm' = split_thm Hol_ex ctxt x' T P;
@@ -206,7 +195,7 @@ fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
                val X = genImp |> Thm.concl_of |> dest_prop |> Logic.dest_implies |> #1
                        |> dest_prop |> HOLogic.dest_Trueprop |> HOLogic.dest_imp |> #1
                        |> dest_Var;
-               val genImp' = Thm.instantiate ([],[(X,cP)]) genImp;
+               val genImp' = Thm.instantiate (TVars.empty, Vars.make [(X,cP)]) genImp;
              in SIMPLE_OF ctxt genImp' [thm] end)
        end
   | decomp ctxt (Const (@{const_name Pure.imp},_)$P$Q, ct) =
@@ -217,7 +206,7 @@ fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
                val X = genImpl |> Thm.concl_of |> dest_prop |> Logic.dest_implies |> #1
                        |> dest_prop  |> Logic.dest_implies |> #1
                        |> dest_Var;
-               val genImpl' = Thm.instantiate ([],[(X,cP)]) genImpl;
+               val genImpl' = Thm.instantiate (TVars.empty, Vars.make [(X,cP)]) genImpl;
              in SIMPLE_OF ctxt genImpl' [thm] end)
        end
   | decomp ctxt ((allc as Const (@{const_name Pure.all},_)) $ f, ct) =
@@ -229,7 +218,7 @@ fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
          val gen_all' = Drule.rename_bvars [(s,x)] gen_all;
          val (Const (@{const_name Pure.all},_)$Abs (s',_,_)) = gen_allShift |> Thm.prems_of |> hd |> dest_prop;
          val gen_allShift' = Drule.rename_bvars [(s',x)] gen_allShift;
-       in if SplitState.isState (allc$Abs abst)
+       in if SplitState.isState ctxt (allc$Abs abst)
           then ([Thm.term_of cb],[cb], fn [thm] =>
                        let val P = dest_prop (prem_of thm);
                            val thm' = split_thm Meta_all ctxt x' T P;
@@ -245,7 +234,7 @@ fun decomp ctxt (Const (@{const_name HOL.conj}, _) $ t $ t', ct) =
   | decomp ctxt (Const (@{const_name "Trueprop"},_)$P, ct) = ([P],snd (Drule.strip_comb ct),fn [thm] => thm)
   | decomp ctxt (t, ct) = ([],[], fn [] =>
                          let val rP = HOLogic.dest_Trueprop (dest_prop (conc_of genRefl));
-                         in  Thm.instantiate ([],[(dest_Var rP, ct)]) genRefl end)
+                         in  Thm.instantiate (TVars.empty, Vars.make [(dest_Var rP, ct)]) genRefl end)
 
 fun generalise ctxt ct = gen_thm (decomp ctxt) (Thm.term_of ct,ct);
 
@@ -255,38 +244,34 @@ fun generalise ctxt ct = gen_thm (decomp ctxt) (Thm.term_of ct,ct);
 *)
 fun init ct = Thm.instantiate' [] [SOME ct] protectRefl;
 
-fun generalise_over_tac ctxt P i st =
-  let
-    val t = List.nth (Thm.prems_of st, i - 1);  (* FIXME !? *)
-  in (case P t of
-       SOME t' =>
-        let
-          val ct = Thm.cterm_of ctxt t';
-          val meta_spec_protect' = infer_instantiate ctxt [(("x", 0), ct)] @{thm meta_spec_protect};
-        in
-          (init (Thm.adjust_maxidx_cterm 0 (List.nth (Drule.cprems_of st, i - 1)))
-           |> resolve_tac ctxt [meta_spec_protect'] 1
-           |> Seq.maps (fn st' =>
-                Thm.bicompose NONE {flatten = true, match = false, incremented = false}
-                        (false, Goal.conclude st', Thm.nprems_of st') i st))
-        end
-      | NONE => no_tac st)
-  end;
+fun generalise_over_tac ctxt P = SUBGOAL (fn (t, i) => fn st =>
+  (case P t of
+     SOME t' =>
+      let
+        val ct = Thm.cterm_of ctxt t';
+        val meta_spec_protect' = infer_instantiate ctxt [(("x", 0), ct)] @{thm meta_spec_protect};
+      in
+        (init (Thm.adjust_maxidx_cterm 0 (List.nth (Thm.cprems_of st, i - 1)))
+         |> resolve_tac ctxt [meta_spec_protect'] 1
+         |> Seq.maps (fn st' =>
+              Thm.bicompose NONE {flatten = true, match = false, incremented = false}
+                      (false, Goal.conclude st', Thm.nprems_of st') i st))
+      end
+    | NONE => no_tac st))
 
 fun generalise_over_all_states_tac ctxt i =
-  REPEAT (generalise_over_tac ctxt SplitState.abs_state i);
+  REPEAT (generalise_over_tac ctxt (SplitState.abs_state ctxt) i);
 
-fun generalise_tac ctxt i st =
+fun generalise_tac ctxt = CSUBGOAL (fn (ct, i) => fn st =>
   let
-    val ct = List.nth (Drule.cprems_of st, i - 1);
     val ct' = Thm.dest_equals_rhs (Thm.cprop_of (Thm.eta_conversion ct));
     val r = Goal.conclude (generalise ctxt ct');
-  in (init (Thm.adjust_maxidx_cterm 0 (List.nth (Drule.cprems_of st, i - 1)))
+  in (init (Thm.adjust_maxidx_cterm 0 (List.nth (Thm.cprems_of st, i - 1)))
       |> (resolve_tac ctxt [r] 1 THEN resolve_tac ctxt [Drule.protectI] 1)
       |> Seq.maps (fn st' =>
             Thm.bicompose NONE {flatten = true, match = false, incremented = false}
                     (false, Goal.conclude st', Thm.nprems_of st') i st))
-  end
+  end)
 
 fun GENERALISE ctxt i =
   generalise_over_all_states_tac ctxt i THEN

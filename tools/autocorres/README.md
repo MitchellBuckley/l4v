@@ -4,7 +4,9 @@
      SPDX-License-Identifier: CC-BY-SA-4.0
 -->
 
+<!--
 Note to maintainer: sync with tools/release_files/README
+-->
 
 AutoCorres
 ==========
@@ -15,9 +17,13 @@ in [Isabelle/HOL][1]. In particular, it uses Norrish's
 abstracts the result to produce a result that is (hopefully)
 more pleasant to reason about.
 
-  [1]: https://www.cl.cam.ac.uk/research/hvg/Isabelle/
-  [2]: https://ts.data61.csiro.au/software/TS/c-parser/
+Before using this version of AutoCorres, consider using [AutoCorres2]
+available from the [Archive of Formal Proofs][AFP].
 
+  [1]: https://isabelle.in.tum.de
+  [2]: https://github.com/seL4/l4v/blob/master/tools/c-parser/README.md
+  [AutoCorres2]: https://www.isa-afp.org/entries/AutoCorres2.html
+  [AFP]: https://www.isa-afp.org
 
 
 Contents of this README
@@ -35,7 +41,7 @@ Contents of this README
 Installation
 ------------
 
-AutoCorres is packaged as a theory for Isabelle2020:
+AutoCorres is packaged as a theory for Isabelle2025:
 
     https://isabelle.in.tum.de
 
@@ -89,14 +95,15 @@ the tutorial.
 Development and reporting bugs
 ------------------------------
 
-AutoCorres is currently maintained by
-Matthew Brecknell <Matthew.Brecknell@data61.csiro.au>.
+AutoCorres is currently maintained by the seL4 Foundation.
 
 Additionally, the latest development version is available on GitHub
 as part of the L4.verified project:
 
-    https://github.com/seL4/l4v (in tools/autocorres)
+  <https://github.com/seL4/l4v> (in tools/autocorres)
 
+Please use the tracker on the GitHub address above for reporting issues
+with the tool.
 
 
 Options
@@ -299,7 +306,7 @@ L1 (SimplConv), L2 (LocalVarExtract) and TS (TypeStrengthen) were described in
     David Greenaway, June Andronick, Gerwin Klein
     Proceedings of the Third International
             Conference on Interactive Theorem Proving (ITP), August 2012.
-    https://ts.data61.csiro.au/publications/nicta_full_text/5662.pdf
+    https://trustworthy.systems/publications/nicta_full_text/5662.pdf
 
 HL (heap abstraction) and WA (word abstraction) were described in
 
@@ -308,11 +315,11 @@ HL (heap abstraction) and WA (word abstraction) were described in
     David Greenaway, Japheth Lim, June Andronick, Gerwin Klein
     Proceedings of the 35th ACM SIGPLAN Conference on
             Programming Language Design and Implementation. ACM, June 2014.
-    https://ts.data61.csiro.au/publications/nicta_full_text/7629.pdf
+    https://trustworthy.systems/publications/nicta_full_text/7629.pdf
 
 A more comprehensive source is
 
     "Automated proof-producing abstraction of C code"
     David Greenaway
     PhD thesis, March 2015.
-    https://ts.data61.csiro.au/publications/nicta_full_text/8758.pdf
+    https://trustworthy.systems/publications/nicta_full_text/8758.pdf

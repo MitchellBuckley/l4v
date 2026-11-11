@@ -10,6 +10,8 @@ implementations of the operations that user-level threads can request
 by invoking a capability table node. It is also responsible for
 creating the "Capability" objects used at higher levels of the kernel.
 
+> {-# LANGUAGE CPP #-}
+
 > module SEL4.Object.CNode (
 >         cteRevoke, cteDelete, cteInsert, cteDeleteOne,
 >         ensureNoChildren, ensureEmptySlot, slotCapLongRunningDelete,
@@ -36,6 +38,7 @@ creating the "Capability" objects used at higher levels of the kernel.
 > import SEL4.Object.Interrupt
 > import SEL4.Object.Instances()
 > import SEL4.Object.ObjectType
+> import SEL4.Object.ObjectType.TARGET(isArchMDBParentOf)
 > import SEL4.Object.Endpoint(cancelBadgedSends)
 > import {-# SOURCE #-} SEL4.Object.TCB
 > import {-# SOURCE #-} SEL4.Kernel.CSpace
@@ -95,13 +98,13 @@ Rights may be masked for the "Copy" and "Mint" operations. The capability data i
 >             (rights, capData) <-
 >               case (inv, args) of
 >                 (CNodeCopy, rights:_) ->
->                     return $! (rightsFromWord rights, Nothing)
+>                     return $ (rightsFromWord rights, Nothing)
 >                 (CNodeMint, rights:newData:_) ->
->                     return $! (rightsFromWord rights, Just newData)
+>                     return $ (rightsFromWord rights, Just newData)
 >                 (CNodeMove, _) ->
->                     return $! (allRights, Nothing)
+>                     return $ (allRights, Nothing)
 >                 (CNodeMutate, newData:_) ->
->                     return $! (allRights, Just newData)
+>                     return $ (allRights, Just newData)
 >                 _ -> throw TruncatedMessage
 
 The moving system calls, "Move" and "Mutate", are differentiated from the copying system calls, "Copy" and "Mint".
@@ -117,7 +120,7 @@ The rights and capability data word are applied to the source capability to crea
 >                 Nothing -> srcCap
 >             when (isNullCap newCap) $ throw IllegalOperation
 >
->             return $!
+>             return $
 >                 (if isMove then Move else Insert) newCap srcSlot destSlot
 
 The "Revoke", "Delete", "SaveCaller" and "CancelBadgedSends" operations have no additional arguments. The "SaveCaller" call requires the target slot to be empty.
@@ -178,7 +181,7 @@ The moved capabilities must not be null.
 >             when (isNullCap newSrcCap) $ throw IllegalOperation
 >             when (isNullCap newPivotCap) $ throw IllegalOperation
 
->             return $! Rotate newSrcCap newPivotCap srcSlot pivotSlot destSlot
+>             return $ Rotate newSrcCap newPivotCap srcSlot pivotSlot destSlot
 
 Otherwise, the message was too short.
 
@@ -231,6 +234,15 @@ The following functions define the operations that can be performed by a CNode i
 
 \subsubsection{Inserting New Capabilities}
 
+\begin{impdetails}
+
+Arch assertions for the refinement proof. Content is defined in Isabelle.
+
+> archMDBAssertions :: KernelState -> Bool
+> archMDBAssertions _ = isabelleOp
+
+\end{impdetails}
+
 > setUntypedCapAsFull :: Capability -> Capability -> PPtr CTE -> Kernel ()
 > setUntypedCapAsFull srcCap newCap srcSlot = do
 >         if (isUntypedCap srcCap && isUntypedCap newCap &&
@@ -241,6 +253,12 @@ Insertion of new capabilities copied from existing capabilities is performed by 
 
 > cteInsert :: Capability -> PPtr CTE -> PPtr CTE -> Kernel ()
 > cteInsert newCap srcSlot destSlot = do
+
+\begin{impdetails}
+
+>         stateAssert archMDBAssertions "architecture dependent MDB assertions must hold"
+
+\end{impdetails}
 
 First, fetch the capability table entry for the source.
 
@@ -628,10 +646,14 @@ To be the parent of "b", "a" must have the "mdbRevocable" bit set and must have 
 > isMDBParentOf (CTE a mdbA) (CTE b mdbB)
 >     | not $ mdbRevocable mdbA  = False
 >     | not $ a `sameRegionAs` b = False
->     | otherwise                = case a of
+
+Architecture caps may have their own constraints on parenthood.
+
+>     | not $ isArchMDBParentOf a b (mdbFirstBadged mdbB) = False
 
 If "a" is an endpoint capability with a badge set, then it is the parent of "b" if and only if "b" has the same badge as "a" and has the "mdbFirstBadged" bit clear.
 
+>     | otherwise                = case a of
 >         EndpointCap { capEPBadge = badge } | badge /= 0 ->
 >             (badge == capEPBadge b) && (not $ mdbFirstBadged mdbB)
 >         NotificationCap { capNtfnBadge = badge } | badge /= 0 ->
@@ -697,11 +719,11 @@ ghost state. This check is skipped for the CNode within TCBs.
 >         locateSlotBasic cnode offset
 
 > locateSlotCap :: Capability -> Word -> Kernel (PPtr CTE)
-> locateSlotCap (cap @ (CNodeCap {})) offset
+> locateSlotCap cap@(CNodeCap {}) offset
 >     = locateSlotCNode (capCNodePtr cap) (capCNodeBits cap) offset
-> locateSlotCap (cap @ (ThreadCap {})) offset
+> locateSlotCap cap@(ThreadCap {}) offset
 >     = locateSlotTCB (capTCBPtr cap) offset
-> locateSlotCap (cap @ (Zombie {})) offset = case capZombieType cap of
+> locateSlotCap cap@(Zombie {}) offset = case capZombieType cap of
 >     ZombieTCB -> locateSlotTCB (PPtr $ fromPPtr $ capZombiePtr cap) offset
 >     ZombieCNode bits -> locateSlotCNode (capZombiePtr cap) bits offset
 > locateSlotCap _ _ = fail "locateSlotCap: not a cap with slots"
@@ -748,7 +770,7 @@ When deleting a capability, it is necessary to determine whether it is the only 
 >         then return False
 >         else do
 >             prev <- getCTE (mdbPrev mdb)
->             return $! sameObjectAs (cteCap prev) (cteCap cte)
+>             return $ sameObjectAs (cteCap prev) (cteCap cte)
 >     if prevIsSameObject
 >         then return False
 >         else if mdbNext mdb == nullPointer

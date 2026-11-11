@@ -123,9 +123,17 @@ lemma stateAssert_wp:
   "\<lbrace>\<lambda>s. P s \<longrightarrow> Q () s\<rbrace> stateAssert P e \<lbrace>Q\<rbrace>"
   by (clarsimp simp: stateAssert_def) wp
 
-lemma haskell_assert_wp:
+lemma empty_fail_stateAssert[intro!, simp]:
+  "empty_fail (stateAssert P l)"
+  unfolding stateAssert_def by simp
+
+lemma haskell_assert_wp[wp]:
   "\<lbrace>\<lambda>s. Q \<longrightarrow> P s\<rbrace> haskell_assert Q xs \<lbrace>\<lambda>_. P\<rbrace>"
   by simp wp
+
+lemma haskell_assert_inv:
+  "\<lbrace>P\<rbrace> haskell_assert Q l \<lbrace>\<lambda>_. P\<rbrace>"
+  by wpsimp
 
 lemma init_append_last:
   "xs \<noteq> [] \<Longrightarrow> init xs @ [last xs] = xs"
@@ -149,10 +157,6 @@ lemma no_fail_stateAssert:
   apply simp
   done
 
-lemma empty_fail_stateAssert:
-  "empty_fail (stateAssert P s)"
-  by (simp add: stateAssert_def assert_def empty_fail_get)
-
 lemma haskell_fail_wp:
   "\<lbrace>\<top>\<rbrace> haskell_fail x \<lbrace>P\<rbrace>"
   by simp
@@ -171,7 +175,7 @@ lemma fun_is_in_assocs:
 
 lemma empty_set_is_null:
   "(set xs = {}) = null xs"
-  by (clarsimp simp: null_def)
+  by clarsimp
 
 lemma assert_into_when:
   "(assert P) = (when (\<not> P) (haskell_fail []))"
@@ -221,7 +225,7 @@ lemma findM_on_outcome':
 lemma findM_on_outcome:
   assumes x: "\<And>x ys. x \<in> set xs \<Longrightarrow> \<lbrace>Q None and I\<rbrace> f x \<lbrace>\<lambda>rv s. (rv \<longrightarrow> Q (Some x) s) \<and> (\<not> rv \<longrightarrow> Q None s \<and> I s)\<rbrace>"
   shows      "\<lbrace>Q None and I\<rbrace> findM f xs \<lbrace>Q\<rbrace>"
-  apply (rule hoare_vcg_precond_imp)
+  apply (rule hoare_weaken_pre)
    apply (rule findM_on_outcome' [where fn="\<lambda>s. if I s then set xs else {}"])
    apply (case_tac "x \<notin> set xs")
     apply simp
@@ -229,7 +233,7 @@ lemma findM_on_outcome:
    apply (case_tac "\<not> set xsa \<subseteq> set xs")
     apply simp
    apply simp
-   apply (rule hoare_vcg_precond_imp)
+   apply (rule hoare_weaken_pre)
     apply (rule hoare_post_imp [OF _ x])
      apply clarsimp
     apply assumption
@@ -267,6 +271,8 @@ lemma filter_assocs_Cons:
   apply simp
   done
 
+lemmas stateAssert_def = stateAssert_def[unfolded state_assert_def]
+
 lemma snd_stateAssert_after:
   "\<not> snd ((do _ \<leftarrow> f; stateAssert R vs od) s) \<Longrightarrow>
   \<not>snd (f s) \<and> (\<forall>(rv, s') \<in> fst (f s). R s')"
@@ -302,9 +308,5 @@ lemma findM_is_mapME:
   apply (simp add: bindE_assoc split: if_split)
   apply (simp add: liftE_bindE bind_assoc throwError_bind)
   done
-
-
-(* FIXME word_eqI: move up *)
-add_try_method word_eqI_solve
 
 end

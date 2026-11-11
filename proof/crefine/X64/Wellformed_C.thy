@@ -14,7 +14,7 @@ imports
   "CSpec.Substitute"
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 abbreviation
   cte_Ptr :: "word64 \<Rightarrow> cte_C ptr" where "cte_Ptr == Ptr"
@@ -165,10 +165,6 @@ where
 abbreviation
   "ep_queue_relation \<equiv> tcb_queue_relation tcbEPNext_C tcbEPPrev_C"
 
-abbreviation
-  "sched_queue_relation \<equiv> tcb_queue_relation tcbSchedNext_C tcbSchedPrev_C"
-
-
 definition
 wordSizeCase :: "'a \<Rightarrow> 'a \<Rightarrow> 'a" where
 "wordSizeCase a b \<equiv> (if bitSize (undefined::machine_word) = 32
@@ -274,7 +270,7 @@ record cte_CL =
   cap_CL :: cap_CL
   cteMDBNode_CL :: mdb_node_CL
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 definition
   cte_lift :: "cte_C \<rightharpoonup> cte_CL"
@@ -283,65 +279,6 @@ definition
                      None \<Rightarrow> None
                    | Some cap \<Rightarrow> Some \<lparr> cap_CL = cap,
                                        cteMDBNode_CL = mdb_node_lift (cteMDBNode_C c) \<rparr>"
-
-lemma to_bool_false [simp]: "\<not> to_bool false"
-  by (simp add: to_bool_def false_def)
-
-(* this is slightly weird, but the bitfield generator
-   masks everything with the expected bit length.
-   So we do that here too. *)
-definition
-  to_bool_bf :: "'a::len word \<Rightarrow> bool" where
-  "to_bool_bf w \<equiv> (w && mask 1) = 1"
-
-lemma to_bool_bf_mask1 [simp]:
-  "to_bool_bf (mask (Suc 0))"
-  by (simp add: mask_def to_bool_bf_def)
-
-lemma to_bool_bf_0 [simp]: "\<not>to_bool_bf 0"
-  by (simp add: to_bool_bf_def)
-
-lemma to_bool_bf_1 [simp]: "to_bool_bf 1"
-  by (simp add: to_bool_bf_def mask_def)
-
-lemma to_bool_bf_false [simp]:
-  "\<not>to_bool_bf false"
-  by (simp add: false_def)
-
-lemma to_bool_bf_true [simp]:
-  "to_bool_bf true"
-  by (simp add: true_def)
-
-lemma to_bool_to_bool_bf:
-  "w = false \<or> w = true \<Longrightarrow> to_bool_bf w = to_bool w"
-  by (auto simp: false_def true_def to_bool_def to_bool_bf_def mask_def)
-
-lemma to_bool_bf_mask_1 [simp]:
-  "to_bool_bf (w && mask (Suc 0)) = to_bool_bf w"
-  by (simp add: to_bool_bf_def)
-
-lemma to_bool_bf_and [simp]:
-  "to_bool_bf (a && b) = (to_bool_bf a \<and> to_bool_bf (b::word64))"
-  apply (clarsimp simp: to_bool_bf_def)
-  apply (rule iffI)
-   apply (subst (asm) bang_eq)
-   apply (simp add: word_size)
-   apply (rule conjI)
-    apply (rule word_eqI)
-    apply (auto simp add: word_size)[1]
-   apply (rule word_eqI)
-   apply (auto simp add: word_size)[1]
-  apply clarsimp
-  apply (rule word_eqI)
-  apply (subst (asm) bang_eq)+
-  apply (auto simp add: word_size)[1]
-  done
-
-lemma to_bool_bf_to_bool_mask:
-  "w && mask (Suc 0) = w \<Longrightarrow> to_bool_bf w = to_bool (w::word64)"
-  apply (auto simp add: to_bool_bf_def to_bool_def mask_eq_iff_w2p word_size)
-  apply (auto simp add: mask_def dest: word_less_cases)
-  done
 
 definition
   mdb_node_to_H :: "mdb_node_CL \<Rightarrow> mdbnode"
@@ -475,13 +412,153 @@ lemma ptr_val_tcb_ptr_mask2:
   apply (simp add: is_aligned_add_helper ctcb_offset_defs objBits_simps')
   done
 
+
+section \<open>Domains\<close>
+
+text \<open>
+  seL4's build system allows configuration of the number of domains. This means the proofs have to
+  work for any number of domains provided it fits into the hard limit of a 8-bit word.
+
+  In the C code, we have the enumerated constant numDomains, one greater than maxDom. In the
+  abstract specs, we have the corresponding Platform_Config.numDomains and maxDomain.
+
+  To keep the proofs as general as possible, we avoid unfolding definitions of:
+  maxDom, maxDomain, numDomains except in this theory where we need to establish basic properties.
+
+  Unfortunately, array bounds checks coming from the C code use numerical values, meaning we might
+  get 0x10 instead of the number of domains, or 0x1000 for numDomains * numPriorities. To solve
+  these, the "explicit" lemmas expose direct numbers. They are more risky to deploy, as one could
+  prove that 0x5 is less than the number of domains when that's the case, and then the proof will
+  break upon reconfiguration.
+\<close>
+
+text \<open>The @{text num_domains} enumerated type and constant represent the number of domains.\<close>
+
+value_type num_domains = "numDomains"
+
+context includes no_less_1_simps begin
+
+(* The proofs expect the minimum priority and minimum domain to be zero.
+   Note that minDom is unused in the C code. *)
+lemma min_prio_dom_sanity:
+  "seL4_MinPrio = 0"
+  "Kernel_C.minDom = 0"
+  by (auto simp: seL4_MinPrio_def minDom_def)
+
+lemma less_numDomains_is_domain[simplified word_size, simplified]:
+  "x < numDomains \<Longrightarrow> x < 2 ^ size (y::domain)"
+  unfolding Kernel_Config.numDomains_def
+  by (simp add: word_size)
+
+lemma sint_numDomains_to_H:
+  "sint Kernel_C.numDomains = int Kernel_Config.numDomains"
+  by (clarsimp simp: Kernel_C.numDomains_def Kernel_Config.numDomains_def)
+
+lemma unat_numDomains_to_H:
+  "unat Kernel_C.numDomains = Kernel_Config.numDomains"
+  by (clarsimp simp: Kernel_C.numDomains_def Kernel_Config.numDomains_def)
+
 lemma maxDom_to_H:
   "ucast maxDom = maxDomain"
-  by (simp add: maxDomain_def maxDom_def numDomains_def)
+  by (simp add: maxDomain_def Kernel_C.maxDom_def Kernel_Config.numDomains_def)
+
+lemma maxDom_sgt_0_maxDomain:
+  "0 <s maxDom \<longleftrightarrow> 0 < maxDomain"
+  unfolding Kernel_C.maxDom_def maxDomain_def Kernel_Config.numDomains_def
+  by clarsimp
+
+lemma num_domains_calculation:
+  "num_domains = numDomains"
+  unfolding num_domains_val by eval
+
+private lemma num_domains_card_explicit:
+  "num_domains = CARD(num_domains)"
+  by (simp add: num_domains_val)
+
+lemmas num_domains_index_updates =
+  index_update[where 'b=num_domains, folded num_domains_card_explicit num_domains_val,
+               simplified num_domains_calculation]
+  index_update2[where 'b=num_domains, folded num_domains_card_explicit num_domains_val,
+                simplified num_domains_calculation]
+
+(* C ArrayGuards will throw these at us and there is no way to avoid a proof of being less than a
+   specific number expressed as a word, so we must introduce these. However, being explicit means
+   lack of discipline can lead to a violation. *)
+lemma numDomains_less_numeric_explicit[simplified num_domains_val One_nat_def]:
+  "x < Kernel_Config.numDomains \<Longrightarrow> x < num_domains"
+  by (simp add: num_domains_calculation)
+
+lemma numDomains_less_unat_ucast_explicit[simplified num_domains_val]:
+  "unat x < Kernel_Config.numDomains \<Longrightarrow> (ucast (x::domain) :: machine_word) < of_nat num_domains"
+  apply (rule word_less_nat_alt[THEN iffD2])
+  apply transfer
+  apply simp
+  apply (drule numDomains_less_numeric_explicit, simp add: num_domains_val)
+  done
+
+lemmas maxDomain_le_unat_ucast_explicit =
+  numDomains_less_unat_ucast_explicit[simplified le_maxDomain_eq_less_numDomains(2)[symmetric],
+                                      simplified]
+
+lemma unat_scast_domScheduleLength:
+  "unat (scast domScheduleLength :: machine_word) = unat domScheduleLength"
+  by (simp add: domScheduleLength_def)
+
+lemma unat_scast_domScheduleLength_m1:
+  "unat (scast (domScheduleLength - 1) :: machine_word) = unat domScheduleLength - Suc 0"
+  by (simp add: domScheduleLength_def)
+
+lemma domScheduleLength_le_unat:
+  "(scast domScheduleLength \<le> n) = (unat domScheduleLength \<le> unat n)" for n::machine_word
+  by (simp add: word_le_nat_alt unat_scast_domScheduleLength)
+
+lemma less_domScheduleLength_plus_1:
+  "unat n < unat domScheduleLength \<Longrightarrow> unat (n + 1) = Suc (unat n)" for n::machine_word
+  by (simp add: domScheduleLength_def unat_add_lem')
+
+end (* numDomain abstraction definitions and lemmas *)
+
+
+text \<open>Priorities - not expected to be configurable\<close>
 
 lemma maxPrio_to_H:
   "ucast seL4_MaxPrio = maxPriority"
   by (simp add: maxPriority_def seL4_MaxPrio_def numPriorities_def)
+
+
+text \<open>TCB scheduling queues\<close>
+
+(* establish and sanity-check relationship between the calculation of the number of TCB queues and
+   the size of the array in C *)
+value_type num_tcb_queues = "numDomains * numPriorities"
+
+lemma num_tcb_queues_calculation:
+  "num_tcb_queues = numDomains * numPriorities"
+  unfolding num_tcb_queues_val by eval
+
+
+text \<open>maxIRQ interface\<close>
+
+declare Kernel_C.maxIRQ_def[code]
+
+(* FIXME: would be more uniform to have a maxIRQ in Kernel_Config for X64 as well *)
+value_type irq_array_size = "Suc (unat Kernel_C.maxIRQ)"
+
+
+text \<open>TCBFlags interface\<close>
+
+lemma scast_seL4_TCBFlag_simps[simp]:
+  "scast seL4_TCBFlag_NoFlag = 0"
+  "scast seL4_TCBFlag_fpuDisabled = tcbFlagToWord FpuDisabled"
+  by (clarsimp simp: seL4_TCBFlag_fpuDisabled_def seL4_TCBFlag_NoFlag_def tcbFlagToWord_def)+
+
+(* config_HAVE_FPU has to be unfolded here to match the implicit enum value from the preprocessor. *)
+lemma scast_seL4_TCBFlag_MASK_tcbFlagMask[simp]:
+  "scast seL4_TCBFlag_MASK = tcbFlagMask"
+  by (clarsimp simp: seL4_TCBFlag_MASK_def tcbFlagMask_def Kernel_Config.config_HAVE_FPU_def tcbFlagToWord_def)
+
+(* end of Kernel_Config interface section *)
+
 
 (* Input abbreviations for API object types *)
 (* disambiguates names *)
@@ -570,6 +647,28 @@ abbreviation(input)
   prioInvalid :: sword32
 where
   "prioInvalid == seL4_InvalidPrio"
+
+(* The magic 4 comes out of the bitfield generator -- this applies to all versions of the kernel. *)
+lemma
+  shows ThreadState_Restart_mask[simp]:
+  "(scast ThreadState_Restart :: machine_word) && mask 4 = scast ThreadState_Restart"
+  and ThreadState_Inactive_mask[simp]:
+  "(scast ThreadState_Inactive :: machine_word) && mask 4 = scast ThreadState_Inactive"
+  and ThreadState_Running_mask[simp]:
+  "(scast ThreadState_Running :: machine_word) && mask 4 = scast ThreadState_Running"
+  and ThreadState_BlockedOnReceive_mask[simp]:
+  "(scast ThreadState_BlockedOnReceive :: machine_word) && mask 4
+   = scast ThreadState_BlockedOnReceive"
+  and ThreadState_BlockedOnSend_mask[simp]:
+  "(scast ThreadState_BlockedOnSend :: machine_word) && mask 4 = scast ThreadState_BlockedOnSend"
+  and ThreadState_BlockedOnReply_mask[simp]:
+  "(scast ThreadState_BlockedOnReply :: machine_word) && mask 4 = scast ThreadState_BlockedOnReply"
+  and ThreadState_BlockedOnNotification_mask[simp]:
+  "(scast ThreadState_BlockedOnNotification :: machine_word) && mask 4
+   = scast ThreadState_BlockedOnNotification"
+  and ThreadState_IdleThreadState_mask[simp]:
+  "(scast ThreadState_IdleThreadState :: machine_word) && mask 4 = scast ThreadState_IdleThreadState"
+  by (simp add: ThreadState_defs mask_def)+
 
 end
 

@@ -17,13 +17,46 @@
 
 theory WellFormed_SI
 imports
-  "DSpecProofs.Kernel_DP"
-  "SepDSpec.Separation_SD"
-  "Lib.SimpStrategy"
-  "AInvs.Rights_AI"
+  DSpecProofs.Kernel_DP
+  SepDSpec.Separation_SD
+  Lib.SimpStrategy
+  Lib.Guess_ExI
+  AInvs.Rights_AI
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+(* FIXME: make a separate library theory for the initialiser for things like these. *)
+lemma keep_if_eq[simp]:
+  "keep_if P R R = R"
+  by (simp add: keep_if_def)
+
+lemma keep_if_cond_l:
+  "P R \<Longrightarrow> keep_if P R S = R"
+  by (simp add: keep_if_def)
+
+lemma keep_if_cond_r:
+  "\<not>P R \<Longrightarrow> keep_if P R S = S"
+  by (simp add: keep_if_def)
+
+lemmas keep_if_cond = keep_if_cond_l keep_if_cond_r
+
+(* FIXME move: all capDL defs should have this setup; rename cap_type_simps *)
+lemmas cap_type_simps'[simp] = cap_type_def[split_simps cdl_cap.split]
+
+(* FIXME move to word setup *)
+lemma unat_of_nat_word_bits_machine[simp]:
+  "unat (of_nat word_bits :: machine_word) = word_bits"
+  by (simp add: word_bits_def)
+
+(* FIXME duplicate of CSpace1_R.word_bits_gt_0; move to word setup *)
+lemma word_bits_gt_0[simp]:
+  "0 < word_bits"
+  by (simp add: word_bits_def)
+
+(* FIXME move; potentially to machine. *)
+(* Useful for folding word_bits_def *)
+lemmas word_bits_num = word_bits_def[simplified]
+
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 lemma cap_has_object_NullCap [simp]:
   "\<not>cap_has_object NullCap"
@@ -45,12 +78,6 @@ lemma cap_has_object_not_irqhandler_cap:
 lemmas cap_has_object_not_irqhandler_cap_simp[simp] = cap_has_object_not_irqhandler_cap[OF ByAssum]
 lemmas cap_has_object_not_NullCap_simp[simp] = cap_has_object_not_NullCap[OF ByAssum]
 lemmas is_irqhandler_cap_not_NullCap_simp[simp] = is_irqhandler_cap_not_NullCap[OF ByAssum]
-
-
-
-
-
-
 
 definition
   cap_ref_object :: "cdl_cap_ref \<Rightarrow> cdl_state \<Rightarrow> cdl_object_id"
@@ -105,33 +132,40 @@ lemma guard_size_shiftl_non_zero:
 
 (* End of MOVE ME
  *)
+
 definition well_formed_cap :: "cdl_cap \<Rightarrow> bool"
 where
-  "well_formed_cap cap \<equiv> (case cap of
+  "well_formed_cap cap \<equiv> case cap of
       EndpointCap _ b _       \<Rightarrow> b < 2 ^ badge_bits
-    | NotificationCap _ b r  \<Rightarrow> (b < 2 ^ badge_bits) \<and> (r \<subseteq> {AllowRead, AllowWrite})
-    | CNodeCap _ g gs sz      \<Rightarrow> (gs < guard_bits) \<and> (g < 2 ^ gs) \<and> (sz + gs \<le> 32)
+    | NotificationCap _ b r   \<Rightarrow> b < 2 ^ badge_bits \<and> r \<subseteq> {AllowRead, AllowWrite}
+    | CNodeCap _ g gs sz      \<Rightarrow> gs < guard_bits \<and> g < 2 ^ gs \<and> sz + gs \<le> 32
     | TcbCap _                \<Rightarrow> True
-    | FrameCap _ _ r _ _ ad     \<Rightarrow> r \<in> {vm_read_write, vm_read_only} \<and> ad = None
-    | PageTableCap  _ _ ad    \<Rightarrow> ad = None
-    | PageDirectoryCap _ _ ad \<Rightarrow> ad = None
+    | FrameCap _ _ r sz R ad  \<Rightarrow> r \<in> {vm_read_write, vm_read_only} \<and> ad = None \<and>
+                                 ((\<exists>attr. R = Fake attr \<and>
+                                          attr = validate_vm_attributes attr (pageForPageBits sz))
+                                  \<or> R = Real)
+    | PageTableCap PT _ R ad  \<Rightarrow> ad = None  \<and>
+                                 ((\<exists>attr. R = Fake attr \<and> attr = validate_pt_vm_attributes attr)
+                                  \<or> R = Real)
+    | PageTableCap PD _ _ ad  \<Rightarrow> ad = None
     | IrqHandlerCap _         \<Rightarrow> True
+    | VCPUCap _               \<Rightarrow> True
 \<comment> \<open>LIMITATION: The following should probably eventually be true.\<close>
     | IrqControlCap           \<Rightarrow> False
-    | UntypedCap _ _ _          \<Rightarrow> False
+    | UntypedCap _ _ _        \<Rightarrow> False
     | AsidControlCap          \<Rightarrow> False
     | AsidPoolCap _ _         \<Rightarrow> False
-    | _                       \<Rightarrow> False)"
+    | SMCCap _                \<Rightarrow> False
+    | SGISignalCap _ _        \<Rightarrow> False \<comment> \<open>FIXME SGI: eventually allow this\<close>
+    | _                       \<Rightarrow> False"
 
 (* LIMITATION: The specification cannot contain ASID numbers. *)
-definition vm_cap_has_asid :: "cdl_cap \<Rightarrow> bool"
-where
+definition vm_cap_has_asid :: "cdl_cap \<Rightarrow> bool" where
   "vm_cap_has_asid cap \<equiv>
-       (case cap of
-           FrameCap _ _ _ _ _ ad     \<Rightarrow> ad \<noteq> None
-         | PageTableCap _ _ ad     \<Rightarrow> ad \<noteq> None
-         | PageDirectoryCap _ _ ad \<Rightarrow> ad \<noteq> None
-         | _                       \<Rightarrow> False)"
+     case cap of
+       FrameCap _ _ _ _ _ ad \<Rightarrow> ad \<noteq> None
+     | PageTableCap _ _ _ ad \<Rightarrow> ad \<noteq> None
+     | _                     \<Rightarrow> False"
 
 (* Original caps must have default rights,
  * and original endpoint + notification caps must not be badged.
@@ -257,6 +291,8 @@ where
      is_tcb obj \<longrightarrow>
      \<not> tcb_has_fault obj \<and>
      tcb_domain obj = minBound \<and>
+     \<comment> \<open>FIXME: make capDL kernel model record the extra data, then this can be dropped:\<close>
+     cdl_tcb_extra (obj_tcb obj) = default_tcb_extra_data \<and>
      (\<forall>slot cap. object_slots obj slot = Some cap \<longrightarrow>
      ((slot = tcb_cspace_slot \<longrightarrow> is_cnode_cap cap \<and>
                                   cap_guard_size cap \<noteq> 0 \<and>
@@ -266,9 +302,18 @@ where
       (slot = tcb_replycap_slot \<longrightarrow> cap = NullCap \<or> cap = MasterReplyCap obj_id) \<and>
       (slot = tcb_caller_slot \<longrightarrow> cap = NullCap) \<and>
       (slot = tcb_pending_op_slot \<longrightarrow> cap = NullCap \<or> cap = RestartCap) \<and>
-      (slot = tcb_boundntfn_slot \<longrightarrow> cap = NullCap) )) \<and>
+      (slot = tcb_boundntfn_slot \<longrightarrow> cap = NullCap) \<and>
+      (slot = tcb_boundvcpu_slot \<longrightarrow> cap = NullCap) )) \<and>
      ((object_slots obj tcb_replycap_slot = Some (MasterReplyCap obj_id)) =
       (object_slots obj tcb_pending_op_slot = Some RestartCap))"
+
+(* The executable loader supports arbitrary frame data, but capDL does not model memory content *)
+definition well_formed_frame_extra :: "cdl_state \<Rightarrow> cdl_object_id \<Rightarrow> cdl_object \<Rightarrow> bool" where
+  "well_formed_frame_extra spec obj_id obj \<equiv>
+     case obj of
+       Frame frame \<Rightarrow>
+         cdl_frame_fills frame = default_frame_fill_data
+     | _ \<Rightarrow> True"
 
 definition
   well_formed_fake_pt_caps_unique :: "cdl_state \<Rightarrow> bool"
@@ -301,13 +346,16 @@ where
    (\<forall>slot cap.
      (is_pt obj \<longrightarrow>
       object_slots obj slot = Some cap \<longrightarrow>
-      cap \<noteq> NullCap \<longrightarrow> (\<exists>sz. cap_type cap = Some (FrameType sz) \<and> (sz = 12 \<or> sz = 16) \<and> is_fake_vm_cap cap)
+      cap \<noteq> NullCap \<longrightarrow> (\<exists>sz. cap_type cap = Some (FrameType sz) \<and> (sz = 12 \<or> sz = 16) \<and>
+                              is_fake_vm_cap cap)
       ) \<and>
      (is_pd obj \<longrightarrow>
       object_slots obj slot = Some cap \<longrightarrow>
       cap \<noteq> NullCap \<longrightarrow>
       (is_fake_pt_cap cap \<or>
-         (\<exists>sz. cap_type cap = Some (FrameType sz) \<and> (sz = 20 \<or> sz = 24) \<and> is_fake_vm_cap cap) )))"
+         (\<exists>sz. cap_type cap = Some (FrameType sz) \<and> (sz = sectionBits \<or> sz = superSectionBits) \<and>
+               is_fake_vm_cap cap)))) \<and>
+   (\<forall>pt_t. is_type_pt pt_t obj \<longrightarrow> pt_t = PT \<or> pt_t = PD)"
 
 (* LIMITATION: The caps in a IRQ Node must have full permissions and be unbadged. *)
 definition well_formed_irq_node :: "cdl_state \<Rightarrow> cdl_object_id \<Rightarrow> cdl_object \<Rightarrow> bool"
@@ -337,6 +385,7 @@ where
         Some obj \<Rightarrow> well_formed_caps spec obj_id obj \<and>
                     well_formed_cap_to_object spec obj_id obj \<and>
                     well_formed_tcb spec obj_id obj \<and>
+                    well_formed_frame_extra spec obj_id obj \<and>
                     well_formed_vspace spec obj_id obj \<and>
                     well_formed_irq_node spec obj_id obj \<and>
                     object_size_bits obj < word_bits \<and>
@@ -403,7 +452,7 @@ lemma well_formed_finite [elim!]:
   apply (clarsimp simp: slots_of_def split: option.splits)
   apply (rename_tac obj)
   apply (drule_tac t="dom (object_slots obj)" in sym) (* Makes rewriting work. *)
-  apply (clarsimp simp: object_default_state_def2 object_slots_def
+  apply (clarsimp simp: object_default_state_def2 object_slots_def dom_expand
                         default_tcb_def tcb_pending_op_slot_def
                         empty_cnode_def empty_irq_node_def empty_cap_map_def
                  split: cdl_object.splits)
@@ -417,7 +466,7 @@ lemma well_formed_finite_object_slots:
 
 lemma well_formed_distinct_slots_of_list [elim!]:
   "well_formed spec \<Longrightarrow> distinct (slots_of_list spec obj_id)"
-  by (clarsimp simp: slots_of_list_def object_slots_list_def
+  by (clarsimp simp: slots_of_list_def object_slots_list_def tcb_slot_defs
                split: option.splits cdl_object.splits)
 
 lemma well_formed_object_size_bits:
@@ -555,6 +604,7 @@ lemma well_formed_slot_object_size_bits_pt:
    apply (clarsimp simp: object_default_state_def2 object_type_def has_slots_def
                          default_tcb_def object_size_bits_def object_slots_def
                          empty_cnode_def empty_cap_map_def pt_size_def pd_size_def
+                         asid_low_bits_def pt_type_index_bits_def
                    split: cdl_object.splits if_split_asm)
   by (fastforce intro: object_slots_opt_capI)
 
@@ -578,8 +628,9 @@ lemma well_formed_cnode_object_size_bits_eq:
   apply (clarsimp simp: is_cnode_def  well_formed_cap_to_object_def)
   done
 
-lemma slots_of_set_helper: "\<lbrakk>{0..n :: nat} = dom f; f x \<noteq> None; m = n + 1\<rbrakk> \<Longrightarrow> x < m"
-  by (subgoal_tac "x \<le> n"; fastforce)
+lemma dom_cdl_tcb_caps_default_tcb:
+ "dom (cdl_tcb_caps (default_tcb domain)) = tcb_slots"
+  by (auto simp: object_slots_def default_tcb_def dom_expand tcb_slots_def)
 
 lemma slots_of_set [simp]:
   "well_formed spec \<Longrightarrow> set (slots_of_list spec obj_id) = dom (slots_of obj_id spec)"
@@ -590,9 +641,8 @@ lemma slots_of_set [simp]:
   apply (erule_tac x=obj in allE)
   apply (intro set_eqI iffI)
   by (fastforce simp: object_default_state_def2 object_slots_def object_slots_list_def
-                      default_tcb_def empty_cnode_def empty_irq_node_def empty_cap_map_def
-                      pt_size_def pd_size_def tcb_boundntfn_slot_def
-                elim: slots_of_set_helper
+                      dom_cdl_tcb_caps_default_tcb empty_cnode_def empty_irq_node_def empty_cap_map_def
+                      pt_size_def pd_size_def
                 split: cdl_object.splits)+
 
 lemma well_formed_well_formed_tcb:
@@ -602,6 +652,19 @@ lemma well_formed_well_formed_tcb:
   apply (erule_tac x=obj_id in allE)
   apply clarsimp
   done
+
+lemma well_formed_tcb_extra_data:
+  "\<lbrakk>well_formed spec; cdl_objects spec obj_id = Some (Tcb tcb)\<rbrakk>
+  \<Longrightarrow> cdl_tcb_extra tcb = default_tcb_extra_data"
+  by (fastforce dest: well_formed_well_formed_tcb
+                simp: well_formed_tcb_def obj_tcb_def)
+
+lemma well_formed_frame_extra_data:
+  "\<lbrakk>well_formed spec; cdl_objects spec obj_id = Some object\<rbrakk>
+  \<Longrightarrow> well_formed_frame_extra spec obj_id object"
+  apply (clarsimp simp: well_formed_def)
+  apply (erule_tac x=obj_id in allE)
+  by fastforce
 
 lemma well_formed_well_formed_vspace:
   "\<lbrakk>well_formed spec; cdl_objects spec obj_id = Some obj\<rbrakk>
@@ -639,13 +702,12 @@ lemma well_formed_vm_cap_has_asid:
    apply (clarsimp simp: vm_cap_has_asid_def)
   apply (drule (3) well_formed_well_formed_cap)
   apply (clarsimp simp: well_formed_cap_def vm_cap_has_asid_def
-                 split: cdl_cap.splits)
+                 split: cdl_cap.splits cdl_pt_type.splits)
   done
 
 lemma is_fake_vm_cap_cap_type:
   "is_fake_vm_cap cap \<Longrightarrow> (\<exists>sz. cap_type cap = Some (FrameType sz)) \<or>
-                         (cap_type cap = Some PageTableType) \<or>
-                         (cap_type cap = Some PageDirectoryType)"
+                          (\<exists>l. cap_type cap = Some (PageTableType l))"
   by (clarsimp simp: is_fake_vm_cap_def cap_type_def
               split: cdl_cap.splits)
 
@@ -710,9 +772,8 @@ lemma well_formed_cap_has_object:
   apply (clarsimp simp: well_formed_caps_def)
   apply (erule_tac x=slot in allE)
   apply (clarsimp simp: domI)
-  apply (clarsimp simp: cap_has_object_def well_formed_cap_def
-                 split: cdl_cap.splits)
-  done
+  by (clarsimp simp: cap_has_object_def well_formed_cap_def
+               split: cdl_cap.splits)
 
 lemma well_formed_cap_object:
   "\<lbrakk>well_formed spec; opt_cap (obj_id, slot) spec = Some spec_cap;
@@ -771,20 +832,20 @@ lemma default_ntfn_cap[simp]:
 lemma default_cap_well_formed_cap:
   "\<lbrakk>well_formed_cap cap; cap_type cap = Some type; cnode_cap_size cap = sz\<rbrakk>
    \<Longrightarrow> well_formed_cap (default_cap type obj_ids sz dev)"
-  by (auto simp: well_formed_cap_def default_cap_def cap_type_def
-                 word_gt_a_gt_0 vm_read_write_def cnode_cap_size_def
-          split: cdl_cap.splits)
+  by (clarsimp simp: well_formed_cap_def default_cap_def cap_type_def
+                     vm_read_write_def cnode_cap_size_def badge_bits_def
+               split: cdl_cap.splits cdl_pt_type.splits)
 
 lemma default_cap_well_formed_cap2:
   "\<lbrakk>is_default_cap cap; cap_type cap = Some type; sz \<le> 32;
-    \<not> is_untyped_cap cap; \<not> is_asidpool_cap cap\<rbrakk>
-   \<Longrightarrow> well_formed_cap (default_cap type obj_ids sz dev )"
-  apply (clarsimp simp: is_default_cap_def)
-  apply (clarsimp simp: default_cap_def well_formed_cap_def
-                        word_gt_a_gt_0 badge_bits_def guard_bits_def
-                        vm_read_write_def cnode_cap_size_def
-                 split: cdl_object_type.splits cdl_cap.splits)
-  done
+    \<not> is_untyped_cap cap; \<not> is_asidpool_cap cap;
+    \<forall>pt_t. is_pt_type_cap pt_t cap \<longrightarrow> pt_t = PT \<or> pt_t = PD\<rbrakk>
+   \<Longrightarrow> well_formed_cap (default_cap type obj_ids sz dev)"
+  unfolding is_default_cap_def
+  by (auto simp: default_cap_def well_formed_cap_def
+                 word_gt_a_gt_0 badge_bits_def guard_bits_def
+                 vm_read_write_def cnode_cap_size_def
+           split: cdl_object_type.splits cdl_cap.splits cdl_pt_type.splits)
 
 lemma well_formed_well_formed_orig_cap:
   "\<lbrakk>well_formed spec;
@@ -811,6 +872,9 @@ lemma well_formed_orig_ep_cap_is_default:
     ep_related_cap cap; cap \<noteq> NullCap\<rbrakk>
    \<Longrightarrow> is_default_cap cap"
   apply (case_tac "\<exists>obj_id R. cap = ReplyCap obj_id R")
+   apply (frule (1) well_formed_well_formed_cap', simp)
+   apply (clarsimp simp: well_formed_cap_def)
+  apply (case_tac "\<exists>irq target. cap = SGISignalCap irq target")
    apply (frule (1) well_formed_well_formed_cap', simp)
    apply (clarsimp simp: well_formed_cap_def)
   apply (frule (3) well_formed_well_formed_orig_cap)
@@ -891,8 +955,8 @@ lemma well_formed_cap_to_non_empty_pt:
   done
 
 lemma dom_object_slots_default_tcb:
- "dom (object_slots (Tcb (default_tcb domain))) = {0..tcb_boundntfn_slot}"
-  by (clarsimp simp: object_slots_def default_tcb_def)
+  "dom (object_slots (Tcb (default_tcb domain))) = tcb_slots"
+  by (clarsimp simp: object_slots_def dom_cdl_tcb_caps_default_tcb)
 
 lemma well_formed_tcb_has_fault:
   "\<lbrakk>well_formed spec; cdl_objects spec obj_id = Some (Tcb tcb)\<rbrakk>
@@ -921,7 +985,7 @@ lemma well_formed_object_domain:
 
 lemma well_formed_tcb_object_slots:
   "\<lbrakk>well_formed spec; cdl_objects spec obj_id = Some tcb; is_tcb tcb\<rbrakk>
-   \<Longrightarrow> dom (object_slots tcb) = {0..tcb_boundntfn_slot}"
+   \<Longrightarrow> dom (object_slots tcb) = tcb_slots"
   apply (frule (1) well_formed_object_slots)
   apply (clarsimp simp: object_default_state_def2 is_tcb_def split: cdl_object.splits)
   apply (rule dom_object_slots_default_tcb)
@@ -949,7 +1013,7 @@ lemma well_formed_tcb_cspace_cap:
    apply (erule well_formed_cap_object [where obj_id=obj_id and slot=tcb_cspace_slot])
     apply (simp add: opt_cap_def slots_of_def)
    apply (clarsimp simp: cap_has_object_def cap_type_def split: cdl_cap.splits)
-  apply (auto simp: dom_def tcb_pending_op_slot_def tcb_cspace_slot_def)
+  apply (auto simp: dom_def tcb_slot_defs)
   done
 
 lemma cap_data_cap_guard_size_0:
@@ -981,13 +1045,13 @@ lemma well_formed_tcb_cspace_cap_cap_data:
   done
 
 lemma well_formed_tcb_opt_cap:
-  "\<lbrakk>well_formed spec; tcb_at obj_id spec; slot \<in> {0..tcb_boundntfn_slot}\<rbrakk>
+  "\<lbrakk>well_formed spec; tcb_at obj_id spec; slot \<in> tcb_slots\<rbrakk>
    \<Longrightarrow> \<exists>cap. opt_cap (obj_id, slot) spec = Some cap"
   apply (clarsimp simp: object_at_def)
   apply (drule (1) well_formed_object_slots)
   apply (fastforce simp: object_default_state_def2 is_tcb_def
                          opt_cap_def slots_of_def object_slots_def
-                         default_tcb_def dom_def tcb_pending_op_slot_def
+                         default_tcb_def dom_def
                   split: cdl_object.splits if_split_asm)
   done
 
@@ -1014,6 +1078,12 @@ lemma well_formed_tcb_ipcbuffer_cap:
   apply (frule (1) well_formed_well_formed_tcb)
   apply (auto simp: well_formed_tcb_def opt_cap_def slots_of_def)
   done
+
+lemma tcb_ipc_buffer_address_non_zero:
+  "\<lbrakk>well_formed spec; cdl_objects spec tcb_id = Some (Tcb tcb)\<rbrakk>
+   \<Longrightarrow> cdl_tcb_ipc_buf (cdl_tcb_extra tcb) \<noteq> 0"
+  by (fastforce dest: well_formed_well_formed_tcb
+                simp: well_formed_tcb_def obj_tcb_def default_tcb_extra_data_def)
 
 lemma well_formed_tcb_caller_cap:
   "\<lbrakk>well_formed spec; tcb_at obj_id spec\<rbrakk>
@@ -1058,6 +1128,15 @@ lemma well_formed_tcb_boundntfn_cap:
   "\<lbrakk>well_formed spec; tcb_at obj_id spec\<rbrakk>
    \<Longrightarrow> opt_cap (obj_id, tcb_boundntfn_slot) spec = Some NullCap"
   apply (frule (1) well_formed_tcb_opt_cap [where slot=tcb_boundntfn_slot], simp add: tcb_slot_defs)
+  apply (elim exE)
+  apply (clarsimp simp: object_at_def)
+  apply (drule (1) well_formed_well_formed_tcb)
+  by (auto simp: well_formed_tcb_def opt_cap_def slots_of_def)
+
+lemma well_formed_tcb_boundvcpu_cap:
+  "\<lbrakk>well_formed spec; tcb_at obj_id spec\<rbrakk>
+   \<Longrightarrow> opt_cap (obj_id, tcb_boundvcpu_slot) spec = Some NullCap"
+  apply (frule (1) well_formed_tcb_opt_cap [where slot=tcb_boundvcpu_slot], simp add: tcb_slot_defs)
   apply (elim exE)
   apply (clarsimp simp: object_at_def)
   apply (drule (1) well_formed_well_formed_tcb)
@@ -1126,16 +1205,20 @@ lemma well_formed_child_cap_not_copyable':
    \<Longrightarrow> \<not>original_cap_at (obj_id, slot) spec \<longrightarrow> is_copyable_cap cap"
   by (rule impI, erule (3) well_formed_child_cap_not_copyable)
 
+lemma well_formed_level_pt_cases:
+  "\<lbrakk>well_formed spec; cdl_objects spec obj_id = Some (PageTable level pt) \<rbrakk>
+   \<Longrightarrow> pt_at obj_id spec \<or> pd_at obj_id spec"
+  apply (frule (1) well_formed_well_formed_vspace)
+  apply (clarsimp simp: well_formed_vspace_def is_type_pt_def object_at_def)
+  done
+
 lemma well_formed_pd:
   "\<lbrakk>well_formed spec; opt_cap (obj_id, slot) spec = Some cap;
     pd_at obj_id spec; cap \<noteq> NullCap\<rbrakk>
    \<Longrightarrow> is_frame_cap cap \<or> is_fake_pt_cap cap"
   apply (clarsimp simp: object_at_def)
   apply (frule (1) well_formed_well_formed_vspace)
-  apply (clarsimp simp: well_formed_vspace_def)
-  apply (erule allE [where x=slot])
-  apply (erule allE [where x=cap])
-  apply (clarsimp simp: opt_cap_def slots_of_def split: option.splits)
+  apply (fastforce simp: well_formed_vspace_def opt_cap_def slots_of_def split: option.splits)
   done
 
 lemma well_formed_pt:
@@ -1144,10 +1227,7 @@ lemma well_formed_pt:
    \<Longrightarrow> is_frame_cap cap"
   apply (clarsimp simp: object_at_def)
   apply (frule (1) well_formed_well_formed_vspace)
-  apply (clarsimp simp: well_formed_vspace_def)
-  apply (erule allE [where x=slot])
-  apply (erule allE [where x=cap])
-  apply (clarsimp simp: opt_cap_def slots_of_def split: option.splits)
+  apply (fastforce simp: well_formed_vspace_def opt_cap_def slots_of_def split: option.splits)
   done
 
 lemma well_formed_pt_cap_is_fake_pt_cap:
@@ -1156,17 +1236,19 @@ lemma well_formed_pt_cap_is_fake_pt_cap:
    \<Longrightarrow> is_fake_pt_cap cap"
   by (frule (2) well_formed_pd, clarsimp+)
 
-lemma wf_cap_pt_cap[simp]: "well_formed_cap (PageTableCap pt_id ty addr) \<longleftrightarrow> addr = None"
+lemma wf_cap_pt_cap[simp]:
+  "well_formed_cap (PageTableCap PT pt_id ty addr) \<longleftrightarrow>
+   addr = None \<and> ((\<exists>attr. ty = Fake attr  \<and> attr = validate_pt_vm_attributes attr) \<or> ty = Real)"
   by (clarsimp simp: well_formed_cap_def)
 
 lemma wf_frame_cap_frame_size_bits:
   "\<lbrakk>well_formed spec;
-    opt_cap (pt_ptr, slot) spec = Some (FrameCap dev frame_ptr rights n Fake None);
+    opt_cap (pt_ptr, slot) spec = Some (FrameCap dev frame_ptr rights n (Fake attr) None);
     cdl_objects spec frame_ptr = Some (Frame frame)\<rbrakk>
    \<Longrightarrow> cdl_frame_size_bits frame = n"
   apply (clarsimp simp: opt_cap_def slots_of_def split: option.splits)
   apply (frule (2) well_formed_well_formed_cap_types_match, fastforce)
-  apply (fastforce simp: well_formed_cap_types_match_def cap_object_def object_type_def)
+  apply (auto simp: well_formed_cap_types_match_def cap_object_def object_type_def)
   done
 
 lemma wf_pd_cap_has_object:
@@ -1273,8 +1355,9 @@ lemma well_formed_irq_ntfn_cap:
   apply (erule allE [where x=ntfn_cap])
   apply (fastforce simp: bound_irqs_def opt_cap_def slots_of_def
                          is_default_cap_def default_cap_def cap_object_def
-                         cap_has_object_def
-                  split: cdl_cap.splits)
+                         cap_has_object_def Least_def
+                   cong: conj_cong
+                   split: cdl_cap.splits)
   done
 
 lemma well_formed_bound_irqs_are_used_irqs:
@@ -1361,12 +1444,12 @@ lemma well_formed_cap_object_cdl_irq_node:
   apply (rename_tac cap)
   apply (frule (1) well_formed_irq_ntfn_cap, simp add: opt_cap_def)
   apply (frule well_formed_cap_object, simp add: opt_cap_def)
-   apply (metis cap_has_object_simps(12))
+   apply (metis cap_has_object_simps(11))
   apply clarsimp
   apply (frule well_formed_types_match [where obj_id = "cdl_irq_node spec irq" and slot = 0])
     apply (simp add: opt_cap_def)
    apply simp
-   apply (metis cap_has_object_simps(12))
+   apply (metis cap_has_object_simps(11))
   apply (clarsimp simp: object_type_is_object cap_type_def split: cdl_cap.splits)
   done
 
@@ -1419,14 +1502,15 @@ lemma well_formed_fake_pt_cap_in_pd:
   apply (frule (1) well_formed_well_formed_vspace)
   apply (case_tac "is_cnode obj \<or> is_tcb obj \<or> is_irq_node obj")
    apply (frule (3) well_formed_is_fake_vm_cap)
-   apply (clarsimp simp: is_fake_vm_cap_def is_fake_pt_cap_def split: cdl_cap.splits)
+   apply (clarsimp simp: is_fake_vm_cap_def is_fake_pt_cap_def split: cdl_cap.splits cdl_pt_type.splits)
   apply clarsimp
   apply (clarsimp simp: object_at_def object_type_is_object)
   apply (case_tac obj, simp_all add: object_slots_def object_at_def object_type_is_object object_type_def)
+  apply (rename_tac level pt)
   apply (clarsimp simp: well_formed_vspace_def)
-  apply (erule allE [where x=slot])
-  apply (erule allE [where x=cap])
-  apply (clarsimp simp: is_fake_pt_cap_is_pt_cap object_slots_def)
+  apply (erule allE)
+  apply (erule_tac x=level in allE)
+  apply (fastforce simp: is_fake_pt_cap_is_pt_cap object_slots_def)
   done
 
 lemma well_formed_pt_cap_pt_at:
@@ -1500,7 +1584,7 @@ lemma fake_cap_rewrite:
               (SIGMA obj_id:{obj_id. pd_at obj_id spec}.
                      dom (slots_of obj_id spec))
    = {cap_ref. fake_pt_cap_at cap_ref spec}"
-  apply (clarsimp simp: Set.filter_def cap_at_def opt_cap_def
+  apply (clarsimp simp: cap_at_def opt_cap_def
                  split: option.splits)
   apply (rule)
    apply clarsimp
@@ -1515,7 +1599,9 @@ lemma well_formed_fake_pt_caps_unique:
     is_fake_pt_cap cap; is_fake_pt_cap cap';
     cap_object cap = cap_object cap'\<rbrakk>
    \<Longrightarrow> obj_id = obj_id' \<and> slot = slot'"
-  by (fastforce simp: well_formed_def well_formed_fake_pt_caps_unique_def)
+  using is_cap_NullCap
+  unfolding well_formed_def well_formed_fake_pt_caps_unique_def
+  by blast
 
 lemma well_formed_fake_pt_caps_unique':
   "\<lbrakk>well_formed spec; pd_at obj_id spec; pd_at obj_id' spec;
@@ -1592,13 +1678,26 @@ lemma well_formed_objects_card:
   apply (frule well_formed_objects_only_real_or_irq)
   apply (subgoal_tac " card (used_irqs spec) =  card (used_irq_nodes spec)", simp)
    apply (subst card_Un_Int, simp+)
-   apply (metis Int_commute Nat.add_0_right Un_commute card_empty used_irq_nodes_def)
+   apply (simp add: Int_commute Un_commute used_irq_nodes_def)
   by (metis card_image inj_inj_on used_irq_nodes_def)
-
 
 (****************************************
  * Packing data into a well_formed cap. *
  ****************************************)
+
+lemma is_fake_vm_cap_PageTableCap[simp]:
+  "is_fake_vm_cap (PageTableCap l p ft ma) = (ft \<noteq> Real)"
+  unfolding is_fake_vm_cap_def
+  by (simp split: cdl_frame_cap_type.split)
+
+(* FIXME: move to definition sites *)
+lemmas update_cap_rights_simps[simp] = update_cap_rights_def[split_simps cdl_cap.split]
+lemmas cap_rights_simps[simp] = cap_rights_def[split_simps cdl_cap.split]
+lemmas vm_cap_has_asid_simps[simp] = vm_cap_has_asid_def[split_simps cdl_cap.split]
+lemmas default_cap_simps[simp] = default_cap_def[split_simps cdl_object_type.split]
+lemmas update_cap_object_simps[simp] = update_cap_object_def[split_simps cdl_cap.split]
+lemmas update_cap_data_det_simps[simp] = update_cap_data_det_def[split_simps cdl_cap.split]
+lemmas well_formed_cap_simps[simp] = well_formed_cap_def[split_simps cdl_cap.split]
 
 lemma update_cap_rights_and_data:
   "\<lbrakk>t (cap_object spec_cap) = Some client_object_id; \<not> is_untyped_cap spec_cap;
@@ -1610,14 +1709,12 @@ lemma update_cap_rights_and_data:
                         (default_cap type {client_object_id} (cnode_cap_size spec_cap) (is_device_cap spec_cap))) =
   update_cap_object client_object_id spec_cap"
   apply (case_tac "\<not>is_cnode_cap spec_cap")
-   apply (case_tac spec_cap, simp_all add: cap_type_def,
-          (fastforce simp: cap_data_def cap_rights_def default_cap_def
-                           update_cap_rights_def badge_update_def update_cap_badge_def
-                           update_cap_object_def update_cap_data_det_def
-                           well_formed_cap_def Word.less_mask_eq
-                           is_fake_vm_cap_def validate_vm_rights_def
+   apply ((case_tac spec_cap; clarsimp simp: cap_type_def),
+          (fastforce simp: cap_data_def badge_update_def update_cap_badge_def
+                           Word.less_mask_eq is_fake_vm_cap_def validate_vm_rights_def
                            vm_read_write_def vm_read_only_def
                    split:  cdl_frame_cap_type.splits)+)
+   apply (metis not_Some_eq_tuple surj_pair)
   apply (case_tac spec_cap, simp_all add: cap_type_def)
   apply (rename_tac word1 word2 nat1 nat2)
   apply (clarsimp simp: update_cap_data_det_def update_cap_rights_def
@@ -1644,7 +1741,7 @@ lemma update_cap_rights_and_data:
    apply (rule shiftl_less_t2n)
     apply (clarsimp simp: guard_bits_def word_of_nat_less)
    apply simp
-  apply (simp add: word_ao_dist shiftr_over_or_dist shiftl_shiftr1 word_size shiftl_mask_is_0
+  apply (simp add: word_ao_dist shiftr_over_or_dist shiftl_shiftr1 word_size
                    word_bw_assocs mask_and_mask guard_as_rawdata_def guard_update_def)
   apply (subst le_mask_iff[THEN iffD1])
    apply (rule plus_one_helper)
@@ -1705,7 +1802,7 @@ lemma well_formed_frame_in_pd:
     opt_cap (pd, pt_slot) spec = Some frame_cap;
     pd_at pd spec;
     is_frame_cap frame_cap\<rbrakk>
-   \<Longrightarrow> (\<exists>sz. cap_type frame_cap = Some (FrameType sz) \<and> (sz = 20 \<or> sz = 24)) \<and>
+   \<Longrightarrow> (\<exists>sz. cap_type frame_cap = Some (FrameType sz) \<and> (sz = sectionBits \<or> sz = superSectionBits)) \<and>
       is_fake_vm_cap frame_cap \<and>
       \<not> is_device_cap frame_cap"
   apply (clarsimp simp: well_formed_def object_at_def)
@@ -1728,26 +1825,25 @@ lemma well_formed_no_dev: "well_formed spec \<Longrightarrow> \<forall>slot. \<n
 
 lemma well_formed_frame_cap[simp]:
   "well_formed_cap (FrameCap x y rights a b R) \<longleftrightarrow>
-     R = None \<and> (rights = vm_read_write \<or> rights = vm_read_only)"
+     R = None \<and> (rights = vm_read_write \<or> rights = vm_read_only) \<and>
+     ((\<exists>attr. (b = Fake attr) \<and> attr = validate_vm_attributes attr (pageForPageBits a)) \<or> b = Real)"
   apply (clarsimp simp: well_formed_cap_def split: cdl_frame_cap_type.splits)
   apply (rule iffI; clarsimp?)
   done
 
 lemma wf_cap_in_pt_is_frame:
-  "well_formed spec \<Longrightarrow>
-   page_cap \<noteq> NullCap \<Longrightarrow>
-   pt_at pt_id spec \<Longrightarrow>
-   opt_cap (pt_id, slot) spec = Some page_cap \<Longrightarrow>
+  "\<lbrakk>well_formed spec; page_cap \<noteq> NullCap; pt_at pt_id spec;
+    opt_cap (pt_id, slot) spec = Some page_cap\<rbrakk> \<Longrightarrow>
    page_cap = fake_frame_cap False (cap_object page_cap)
                                    (validate_vm_rights (cap_rights page_cap))
-                                   (cap_size_bits page_cap) \<and>
-  (cap_size_bits page_cap = 12 \<or> cap_size_bits page_cap = 16)"
+                                   (cap_size_bits page_cap)
+                                   (validate_vm_attributes (cap_vmattrs page_cap) (pageForPageBits (cap_size_bits page_cap)))
+   \<and> (cap_size_bits page_cap = 12 \<or> cap_size_bits page_cap = 16)"
   apply (frule well_formed_frame_in_pt, fastforce+)
   apply (clarsimp simp: cap_type_def cap_rights_def cap_size_bits_def split: cdl_cap.splits)
   apply (frule well_formed_well_formed_cap[where obj_id=pt_id])
      apply (fastforce intro: object_slots_opt_capI)+
-  apply clarsimp
-  apply (drule well_formed_no_dev, clarsimp simp: cap_at_def)
+  apply (drule well_formed_no_dev, clarsimp simp: cap_at_def cap_vmattrs_def)
   apply (fastforce simp: fake_vm_cap_simp)
   done
 
@@ -1759,14 +1855,15 @@ lemma wf_frame_cap_in_pd:
    frame_at (cap_object page_cap) spec \<Longrightarrow>
    page_cap = fake_frame_cap False (cap_object page_cap)
                                    (validate_vm_rights (cap_rights page_cap))
-                                   (cap_size_bits page_cap) \<and>
-   (cap_size_bits page_cap = 20 \<or> cap_size_bits page_cap = 24)"
+                                   (cap_size_bits page_cap)
+                                   (validate_vm_attributes (cap_vmattrs page_cap) (pageForPageBits (cap_size_bits page_cap))) \<and>
+   (cap_size_bits page_cap = sectionBits \<or> cap_size_bits page_cap = superSectionBits)"
   apply (frule well_formed_frame_in_pd, fastforce+)
    apply (frule well_formed_types_match, fastforce+)
     using object_type_is_object(9) object_type_object_at(9) wf_pd_cap_has_object apply blast
    apply (frule object_at_object_type(10)[rotated], rule classical, fastforce)
    apply (fastforce simp: cap_type_def split: cdl_cap.splits)
-  apply (clarsimp simp: cap_type_def cap_rights_def cap_size_bits_def split: cdl_cap.splits)
+  apply (clarsimp simp: cap_type_def cap_rights_def cap_size_bits_def cap_vmattrs_def split: cdl_cap.splits)
   apply (frule well_formed_well_formed_cap[where obj_id=pd_id])
      apply fastforce
     apply (fastforce intro: object_slots_opt_capI)
@@ -1779,7 +1876,7 @@ lemma wf_pt_in_pd_fake_and_none:
    pd_at pd_id spec \<Longrightarrow>
    opt_cap (pd_id, slot) spec = Some page_cap \<Longrightarrow>
    pt_at (cap_object page_cap) spec \<Longrightarrow>
-   page_cap = PageTableCap (cap_object page_cap) Fake None"
+   page_cap = PageTableCap PT (cap_object page_cap) (Fake (cap_vmattrs page_cap)) None"
   apply (clarsimp simp: object_at_def)
   apply (frule well_formed_types_match[where obj_id=pd_id and slot=slot])
      apply fastforce+
@@ -1793,8 +1890,9 @@ lemma wf_pt_in_pd_fake_and_none:
    apply (frule (1) well_formed_well_formed_cap[where obj_id=pd_id and slot=slot])
      apply (clarsimp simp: opt_cap_def slots_of_def split: option.splits)
      apply fastforce+
-  apply (clarsimp simp: cap_type_def is_fake_pt_cap_pt_cap split: cdl_cap.splits)
-  using well_formed_well_formed_cap' wf_cap_pt_cap by blast
+     apply (clarsimp simp: cap_type_def is_fake_pt_cap_pt_cap split: cdl_cap.splits)
+     apply (simp add: cap_vmattrs_def)
+   using well_formed_well_formed_cap' wf_cap_pt_cap by blast
 
 lemma well_formed_pd_slots_have_objects:
   "\<lbrakk>well_formed spec; pd_at pd_id spec; slot \<in> dom (slots_of pd_id spec);
@@ -1806,11 +1904,12 @@ lemma well_formed_pd_slots_have_objects:
 
 lemma well_formed_pd_slot_limited:
   "\<lbrakk>well_formed spec; pd_at obj_id spec; slots_of obj_id spec slot = Some cap\<rbrakk>
-   \<Longrightarrow> slot < 4096"
+   \<Longrightarrow> slot < (2 ^ pd_size_index)"
   apply (clarsimp simp:well_formed_def object_at_def)
   apply (drule_tac x = obj_id in spec)
   apply (clarsimp simp: is_pd_def object_type_simps object_default_state_def slots_of_def,
               simp add: default_object_def object_type_simps object_slots_def empty_cap_map_def
+                        pt_type_index_bits_def
                  split: cdl_object.split_asm option.split_asm)
   apply fastforce
   done
@@ -1831,7 +1930,9 @@ lemma well_formed_pd_frame_or_pt:
    apply (frule well_formed_types_match[where obj_id=pd_ptr and slot=slot], fastforce+)
    apply (fastforce simp: object_type_is_object(10) intro: object_at_cdl_objects)
   apply (frule well_formed_types_match[where obj_id=pd_ptr and slot=slot], fastforce+)
-  using is_fake_pt_cap_is_pt_cap object_type_is_object(8) by (fastforce intro: object_at_cdl_objects)
+  using well_formed_pt_cap_pt_at
+  apply blast
+  done
 
 end
 

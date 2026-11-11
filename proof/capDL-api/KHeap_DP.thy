@@ -12,8 +12,7 @@ lemma has_slots_simps:
   "has_slots (Tcb tcb)"
   "has_slots (CNode cnode)"
   "has_slots (AsidPool ap)"
-  "has_slots (PageTable pt)"
-  "has_slots (PageDirectory pd)"
+  "has_slots (PageTable l pt)"
   "\<not> has_slots Endpoint"
   "\<not> has_slots Notification"
   "\<not> has_slots (Frame f)"
@@ -24,19 +23,16 @@ lemma reset_cap_asid_id:
   "reset_cap_asid cap = reset_cap_asid cap'
   \<Longrightarrow> cap = cap'
      \<or> (\<exists>a b c d e f. cap = FrameCap f a b c d e)
-     \<or> (\<exists>a b c. cap = PageTableCap a b c)
-     \<or> (\<exists>a b c. cap = PageDirectoryCap a b c)"
+     \<or> (\<exists>l a b c. cap = PageTableCap l a b c)"
   by (case_tac cap, (clarsimp simp: reset_cap_asid_def split: cdl_cap.splits)+)
 
 (* Move to Helpers_SD *)
-definition is_memory_cap :: "cdl_cap \<Rightarrow> bool"
-where
-    "is_memory_cap cap \<equiv>
-       (case cap of
-           FrameCap _ _ _ _ _ _     \<Rightarrow> True
-         | PageTableCap _ _ _     \<Rightarrow> True
-         | PageDirectoryCap _ _ _ \<Rightarrow> True
-         | _                      \<Rightarrow> False)"
+definition is_memory_cap :: "cdl_cap \<Rightarrow> bool" where
+  "is_memory_cap cap \<equiv>
+     case cap of
+       FrameCap _ _ _ _ _ _     \<Rightarrow> True
+     | PageTableCap _ _ _ _     \<Rightarrow> True
+     | _                        \<Rightarrow> False"
 
 lemma reset_cap_asid_memory_cap [simp]:
   "\<not>is_memory_cap cap \<Longrightarrow> reset_cap_asid cap = cap"
@@ -54,32 +50,34 @@ lemmas reset_cap_asid_simps[simp] = reset_cap_asid_def
 lemma reset_cap_asid_simps2:
   "reset_cap_asid cap = NullCap \<Longrightarrow> cap = NullCap"
   "reset_cap_asid cap = RunningCap \<Longrightarrow> cap = RunningCap"
-  "reset_cap_asid cap = (UntypedCap dev a ra) \<Longrightarrow> cap = UntypedCap dev a ra"
-  "reset_cap_asid cap = (EndpointCap b c d) \<Longrightarrow> cap = EndpointCap b c d"
-  "reset_cap_asid cap = (NotificationCap e f g) \<Longrightarrow> cap = NotificationCap e f g"
-  "reset_cap_asid cap = (ReplyCap h R) \<Longrightarrow> cap = ReplyCap h R"
-  "reset_cap_asid cap = (MasterReplyCap i) \<Longrightarrow> cap = MasterReplyCap i"
-  "reset_cap_asid cap = (CNodeCap j k l sz) \<Longrightarrow> cap = CNodeCap j k l sz"
-  "reset_cap_asid cap = (TcbCap m) \<Longrightarrow> cap = TcbCap m"
+  "reset_cap_asid cap = UntypedCap dev a ra \<Longrightarrow> cap = UntypedCap dev a ra"
+  "reset_cap_asid cap = EndpointCap b c d \<Longrightarrow> cap = EndpointCap b c d"
+  "reset_cap_asid cap = NotificationCap e f g \<Longrightarrow> cap = NotificationCap e f g"
+  "reset_cap_asid cap = ReplyCap h R \<Longrightarrow> cap = ReplyCap h R"
+  "reset_cap_asid cap = MasterReplyCap i \<Longrightarrow> cap = MasterReplyCap i"
+  "reset_cap_asid cap = CNodeCap j k l sz \<Longrightarrow> cap = CNodeCap j k l sz"
+  "reset_cap_asid cap = TcbCap m \<Longrightarrow> cap = TcbCap m"
   "reset_cap_asid cap = DomainCap \<Longrightarrow> cap = DomainCap"
   "reset_cap_asid cap = RestartCap \<Longrightarrow> cap = RestartCap"
-  "reset_cap_asid cap = (PendingSyncSendCap n p q r s rp) \<Longrightarrow> cap = (PendingSyncSendCap n p q r s rp)"
-  "reset_cap_asid cap = (PendingSyncRecvCap t isf rp) \<Longrightarrow> cap = (PendingSyncRecvCap t isf rp)"
-  "reset_cap_asid cap = (PendingNtfnRecvCap u) \<Longrightarrow> cap = (PendingNtfnRecvCap u)"
+  "reset_cap_asid cap = PendingSyncSendCap n p q r s rp \<Longrightarrow> cap = PendingSyncSendCap n p q r s rp"
+  "reset_cap_asid cap = PendingSyncRecvCap t isf rp \<Longrightarrow> cap = PendingSyncRecvCap t isf rp"
+  "reset_cap_asid cap = PendingNtfnRecvCap u \<Longrightarrow> cap = PendingNtfnRecvCap u"
   "reset_cap_asid cap = IrqControlCap \<Longrightarrow> cap = IrqControlCap"
-  "reset_cap_asid cap = (IrqHandlerCap v) \<Longrightarrow> cap = (IrqHandlerCap v)"
+  "reset_cap_asid cap = IrqHandlerCap v \<Longrightarrow> cap = IrqHandlerCap v"
   "reset_cap_asid cap = AsidControlCap \<Longrightarrow> cap = AsidControlCap"
-  "reset_cap_asid cap = (AsidPoolCap w x) \<Longrightarrow> cap = (AsidPoolCap w x)"
-  "reset_cap_asid cap = (IOPortsCap y z) \<Longrightarrow> cap = (IOPortsCap y z)"
+  "reset_cap_asid cap = AsidPoolCap w x \<Longrightarrow> cap = AsidPoolCap w x"
+  "reset_cap_asid cap = IOPortsCap y z \<Longrightarrow> cap = IOPortsCap y z"
   "reset_cap_asid cap = IOSpaceMasterCap \<Longrightarrow> cap = IOSpaceMasterCap"
-  "reset_cap_asid cap = (IOSpaceCap a1) \<Longrightarrow> cap = (IOSpaceCap a1)"
-  "reset_cap_asid cap = (IOPageTableCap a2) \<Longrightarrow> cap = (IOPageTableCap a2)"
-  "reset_cap_asid cap = (ZombieCap a3) \<Longrightarrow> cap = (ZombieCap a3)"
-  "reset_cap_asid cap = (BoundNotificationCap a4) \<Longrightarrow> cap = (BoundNotificationCap a4)"
-  "reset_cap_asid cap = (FrameCap dev aa rghts sz rset ma) \<Longrightarrow> \<exists>asid. cap = FrameCap dev aa rghts sz rset asid"
-  "reset_cap_asid cap = (PageTableCap aa rights ma) \<Longrightarrow> \<exists>asid. cap = PageTableCap aa rights asid"
-  "reset_cap_asid cap = (PageDirectoryCap aa rights as) \<Longrightarrow> \<exists>asid. cap = PageDirectoryCap aa rights asid"
-by (clarsimp simp: reset_cap_asid_def split: cdl_cap.splits)+
+  "reset_cap_asid cap = IOSpaceCap a1 \<Longrightarrow> cap = IOSpaceCap a1"
+  "reset_cap_asid cap = IOPageTableCap a2 \<Longrightarrow> cap = IOPageTableCap a2"
+  "reset_cap_asid cap = ZombieCap a3 \<Longrightarrow> cap = ZombieCap a3"
+  "reset_cap_asid cap = BoundNotificationCap a4 \<Longrightarrow> cap = BoundNotificationCap a4"
+  "reset_cap_asid cap = SMCCap b \<Longrightarrow> cap = SMCCap b"
+  "reset_cap_asid cap = FrameCap dev aa rghts sz rset ma \<Longrightarrow> \<exists>asid. cap = FrameCap dev aa rghts sz rset asid"
+  "reset_cap_asid cap = PageTableCap pt_t aa rights ma \<Longrightarrow> \<exists>asid. cap = PageTableCap pt_t aa rights asid"
+  "\<And>irq target. reset_cap_asid cap = SGISignalCap irq target \<Longrightarrow> cap = SGISignalCap irq target"
+  "\<And>p. reset_cap_asid cap = VCPUCap p \<Longrightarrow> cap = VCPUCap p"
+  by (clarsimp simp: reset_cap_asid_def split: cdl_cap.splits)+
 
 lemma sep_map_c_any:
   "(p \<mapsto>c cap \<and>* R) s \<Longrightarrow> (p \<mapsto>c - \<and>* R) s"
@@ -94,6 +92,12 @@ lemma throw_on_none_rv:
   apply (clarsimp simp: throw_on_none_def split: option.splits)
    apply (wp)+
   done
+
+lemma throw_on_none_wp:
+  "\<lbrace>\<lambda>s. case x of None \<Rightarrow> Q s | Some y \<Rightarrow> P y s\<rbrace> throw_on_none x \<lbrace>P\<rbrace>, \<lbrace>\<lambda>_. Q\<rbrace>"
+  unfolding throw_on_none_def
+  by wpsimp
+     auto
 
 lemma oseq:
   "\<lbrakk> \<lbrace>P\<rbrace> gets_the f \<lbrace>Q\<rbrace>; \<forall>x. \<lbrace>Q x\<rbrace> gets_the $ g x \<lbrace>R\<rbrace> \<rbrakk> \<Longrightarrow> \<lbrace>P\<rbrace> gets_the (f |>> g) \<lbrace>R\<rbrace>"
@@ -129,7 +133,8 @@ lemma gets_the_invE : "\<lbrace>P\<rbrace> gets_the f \<lbrace>\<lambda>_. P\<rb
 lemma return_rv :"\<lbrace>P r\<rbrace> return (Inr r) \<lbrace>\<lambda>rv s. P rv s\<rbrace>, \<lbrace>\<lambda>_ _. True\<rbrace>"
   by (clarsimp simp: validE_def, wp, simp split: option.splits)
 
-crunch inv[wp]: throw_on_none P
+crunch throw_on_none
+  for inv[wp]: P
 
 lemma hoare_if_simp:
   "\<lbrace>P\<rbrace> f \<lbrace>Q\<rbrace> \<Longrightarrow> \<lbrace>P\<rbrace> f \<lbrace>\<lambda>rv s. (if x then (\<lambda>rv s. Q rv s) else (\<lambda>rv s. Q rv s)) rv s\<rbrace>"
@@ -343,7 +348,7 @@ lemma decode_tcb_invocation:
   "\<lbrace>P\<rbrace>decode_tcb_invocation cap cap_ref caps (TcbWriteRegistersIntent resume flags count regs)
   \<lbrace>\<lambda>_. P\<rbrace>"
 apply (clarsimp simp: decode_tcb_invocation_def)
-apply (wp alternative_wp)
+apply wp
 apply (clarsimp)
 done
 
@@ -373,7 +378,7 @@ lemma invoke_cnode_insert_wp:
    \<lbrace>\<lambda>_. <dest \<mapsto>c cap \<and>* R>\<rbrace>"
   apply (rule hoare_gen_asm)
   apply (clarsimp simp: invoke_cnode_def)
-  apply (wp insert_cap_sibling_wp insert_cap_child_wp alternative_wp)
+  apply (wp insert_cap_sibling_wp insert_cap_child_wp)
   apply (clarsimp)
   done
 
@@ -441,7 +446,7 @@ lemma lookup_slot_for_cnode_op_wp [wp]:
    apply (clarsimp simp: fault_to_except_def)
    apply (wp)
    apply (clarsimp simp: gets_the_resolve_cap[symmetric])
-   apply (wp gets_the_wpE hoare_whenE_wp)+
+   apply (wp gets_the_wpE whenE_wp)+
   apply (clarsimp split: option.splits sum.splits)
 done
 
@@ -453,7 +458,7 @@ lemma lookup_slot_for_cnode_op_wpE:
   apply (wp)
    apply (clarsimp simp: gets_the_resolve_cap[symmetric])
    apply (clarsimp simp: fault_to_except_def)
-   apply (wp gets_the_wpE hoare_whenE_wp)+
+   apply (wp gets_the_wpE whenE_wp)+
   apply (clarsimp split: option.splits split: sum.splits)
 done
 
@@ -526,7 +531,7 @@ lemma lookup_slot_for_cnode_op_rv':
       lookup_slot_for_cnode_op cnode_cap cap_ptr remaining_size
      \<lbrace>\<lambda>rv s. Q rv s\<rbrace>,-"
   apply (clarsimp simp: lookup_slot_for_cnode_op_def gets_the_resolve_cap[symmetric] split_def fault_to_except_def)
-  apply (wp resolve_cap_rv1 hoare_whenE_wp)
+  apply (wp resolve_cap_rv1 whenE_wp)
   apply (fastforce)
 done
 
@@ -559,7 +564,7 @@ lemma lookup_slot_for_cnode_op_rvu':
       lookup_slot_for_cnode_op cnode_cap cap_ptr remaining_size
      \<lbrace>Q\<rbrace>,\<lbrace>Q'\<rbrace>"
   apply (clarsimp simp: lookup_slot_for_cnode_op_def gets_the_resolve_cap[symmetric] split_def fault_to_except_def)
-  apply (wp resolve_cap_u_nf[where r=r and R=R and cap=cap] hoare_whenE_wp)
+  apply (wp resolve_cap_u_nf[where r=r and R=R and cap=cap] whenE_wp)
   apply (clarsimp simp add:user_pointer_at_def Let_def guard_equal_def
     cap_guard_reset_cap_asid one_lvl_lookup_def)
 done
@@ -580,26 +585,26 @@ lemma derive_cap_rv:
      derive_cap slot cap
  \<lbrace>\<lambda>rv s. P s \<and> ( rv = cap \<or> rv = NullCap )\<rbrace>, \<lbrace>\<lambda>_ _. True\<rbrace>"
   apply (clarsimp simp: derive_cap_def returnOk_def split: cdl_cap.splits,safe)
-                        apply (wp return_rv hoare_whenE_wp alternativeE_wp | clarsimp simp: ensure_no_children_def)+
+                        apply (wp return_rv whenE_wp | clarsimp simp: ensure_no_children_def)+
 done
 
 lemma derive_cap_wp [wp]:
 "\<lbrace>P\<rbrace> derive_cap slot cap  \<lbrace>\<lambda>_. P\<rbrace>"
   apply (clarsimp simp: derive_cap_def returnOk_def split: cdl_cap.splits)
   apply (safe)
-    apply ((wp alternative_wp hoare_whenE_wp)|(clarsimp simp: ensure_no_children_def))+
+    apply ((wp whenE_wp)|(clarsimp simp: ensure_no_children_def))+
       done
 
 
 lemma derive_cap_wpE:
 "\<lbrace>P\<rbrace> derive_cap slot cap \<lbrace>\<lambda>_.P\<rbrace>,\<lbrace>\<lambda>_.P\<rbrace>"
   apply (clarsimp simp: derive_cap_def)
-  apply (case_tac cap, (wp hoare_whenE_wp alternative_wp |
+  apply (case_tac cap, (wp whenE_wp |
                         simp add: ensure_no_children_def)+)
   done
 
 lemma derive_cap_wp2: "\<lbrace>P\<rbrace> derive_cap slot cap \<lbrace>\<lambda>rv s. if rv = NullCap then True else P s\<rbrace>, -"
-  apply (rule hoare_post_imp_R)
+  apply (rule hoare_strengthen_postE_R)
    apply (wp (once) derive_cap_wpE)
   apply (clarsimp)
   done
@@ -616,7 +621,7 @@ lemma decode_cnode_copy_wp: "\<lbrace>P\<rbrace>
      decode_cnode_invocation target target_ref caps (CNodeCopyIntent dest_index dest_depth src_index src_depth rights)
      \<lbrace> \<lambda>_. P \<rbrace>,\<lbrace>\<lambda>_. P\<rbrace>"
   apply (clarsimp simp: decode_cnode_invocation_def split_def)
-  apply (wp hoare_whenE_wp hoare_drop_imps | simp cong: if_cong)+
+  apply (wp whenE_wp hoare_drop_imps | simp cong: if_cong)+
   done
 
 lemma ensure_empty_wp [wp]: "\<lbrace>P\<rbrace> ensure_empty slot \<lbrace>\<lambda>_. P\<rbrace>"
@@ -624,7 +629,7 @@ lemma ensure_empty_wp [wp]: "\<lbrace>P\<rbrace> ensure_empty slot \<lbrace>\<la
 
 lemma ensure_no_children_wp [wp]: "\<lbrace>P\<rbrace> ensure_no_children slot \<lbrace>\<lambda>_. P\<rbrace>"
   apply (clarsimp simp: ensure_no_children_def)
-  apply (wp hoare_whenE_wp)
+  apply (wp whenE_wp)
   apply (clarsimp)
 done
 
@@ -645,14 +650,14 @@ lemma ensure_empty_no_exception:
   done
 
 lemma reset_cap_asid_cap_type:
-  "reset_cap_asid cap = reset_cap_asid cap'
-  \<Longrightarrow> cap_type cap = cap_type cap'"
+  "reset_cap_asid cap = reset_cap_asid cap' \<Longrightarrow> cap_type cap = cap_type cap'"
   by (clarsimp simp: reset_cap_asid_def split: cdl_cap.splits)
 
-lemma ep_related_cap_update_cap_rights[simp]:
+lemma badged_cap_update_cap_rights[simp]:
   "ep_related_cap (update_cap_rights rights cap) = ep_related_cap cap"
-  "\<lbrakk> is_ep_cap cap \<rbrakk> \<Longrightarrow> cap_badge (update_cap_rights rights cap) = cap_badge cap"
-  "\<lbrakk> is_ntfn_cap cap \<rbrakk> \<Longrightarrow> cap_badge (update_cap_rights rights cap) = cap_badge cap"
+  "is_ep_cap cap \<Longrightarrow> cap_badge (update_cap_rights rights cap) = cap_badge cap"
+  "is_ntfn_cap cap \<Longrightarrow> cap_badge (update_cap_rights rights cap) = cap_badge cap"
+  "is_smc_cap cap \<Longrightarrow> cap_badge (update_cap_rights rights cap) = cap_badge cap"
   by (auto simp:ep_related_cap_def cap_badge_def cap_type_def update_cap_rights_def
           split:cdl_cap.splits)
 
@@ -679,15 +684,17 @@ lemma reset_cap_asid_ep_cap:
 lemma reset_cap_asid_ntfn_cap:
   "reset_cap_asid cap = reset_cap_asid cap'
   \<Longrightarrow> is_ntfn_cap cap = is_ntfn_cap cap'"
-  apply (case_tac cap; case_tac cap'; simp add: reset_cap_asid_def)
-  done
+  by (case_tac cap; case_tac cap'; simp add: reset_cap_asid_def)
+
+lemma reset_cap_asid_smc_cap:
+  "reset_cap_asid cap = reset_cap_asid cap' \<Longrightarrow> is_smc_cap cap = is_smc_cap cap'"
+  by (cases cap; cases cap'; simp)
 
 lemma cap_rights_reset_cap_asid:
   "reset_cap_asid cap = reset_cap_asid cap'
  \<Longrightarrow> cap_rights cap = cap_rights cap'"
   apply (clarsimp simp: cap_rights_def reset_cap_asid_def)
-  apply (case_tac cap; (case_tac cap'; simp))
-  done
+  by (case_tac cap; (case_tac cap'; simp))
 
 (* Lemmas about valid_src_cap *)
 lemma reset_cap_asid_cnode_cap:
@@ -712,7 +719,7 @@ lemma derive_cap_invE:
   "\<lbrace>P (derived_cap cap) and Q\<rbrace> derive_cap slot cap \<lbrace>P\<rbrace>, \<lbrace>\<lambda>r. Q\<rbrace>"
   apply (simp add:derive_cap_def)
   apply (rule hoare_pre)
-   apply (wp alternative_wp alternativeE_wp|wpc|simp)+
+   apply (wp|wpc|simp)+
   apply (auto simp:derived_cap_def)
   done
 
@@ -760,8 +767,9 @@ lemma decode_cnode_move_rvu:
   done
 
 
-crunch preserve [wp]:  decode_cnode_invocation "P"
-(wp: derive_cap_wpE unlessE_wp hoare_whenE_wp select_wp hoare_drop_imps simp: if_apply_def2 throw_on_none_def)
+crunch  decode_cnode_invocation
+  for preserve[wp]: "P"
+  (wp: derive_cap_wpE unlessE_wp whenE_wp hoare_drop_imps simp: if_apply_def2 throw_on_none_def)
 
 lemma decode_invocation_wp:
   "\<lbrace>P\<rbrace> decode_invocation (CNodeCap x y z sz) ref caps (CNodeIntent intent) \<lbrace>\<lambda>_. P\<rbrace>, -"
@@ -789,15 +797,12 @@ lemma fast_finalise_cap_non_ep_wp:
   "\<lbrace><P> and K (\<not> ep_related_cap cap') \<rbrace> fast_finalise cap' final \<lbrace>\<lambda>y. <P>\<rbrace>"
   by (case_tac cap',simp_all add:ep_related_cap_def)
 
-crunch inv [wp]:  is_final_cap "\<lambda>s. P"
-(wp:crunch_wps select_wp  simp:split_def unless_def)
-
 lemma delete_cap_simple_wp:
  "\<lbrace>\<lambda>s. <ptr  \<mapsto>c cap  \<and>* R> s \<and> \<not> ep_related_cap cap\<rbrace>
     delete_cap_simple ptr
   \<lbrace>\<lambda>_. < ptr  \<mapsto>c NullCap \<and>* R>\<rbrace>"
   apply (clarsimp simp: delete_cap_simple_def is_final_cap_def)
-  apply (wp hoare_unless_wp always_empty_wp fast_finalise_cap_non_ep_wp)
+  apply (wp unless_wp always_empty_wp fast_finalise_cap_non_ep_wp)
   apply clarsimp
   apply (frule opt_cap_sep_imp)
   apply (clarsimp, rule conjI)
@@ -837,7 +842,7 @@ lemma lookup_slot_rvu:
      lookup_slot thread cap_ptr
    \<lbrace>Q\<rbrace>, \<lbrace>Q'\<rbrace> "
   apply (clarsimp simp: lookup_slot_def gets_the_resolve_cap[symmetric] split_def)
-  apply (rule hoare_vcg_seqE)+
+  apply (rule bindE_wp)+
     apply (rule returnOk_wp)
    apply (rule resolve_cap_u_nf [where r=r])
   apply (rule hoare_pre, wp)
@@ -867,14 +872,9 @@ lemma lookup_cap_rvu :
   done
 
 lemma lookup_cap_wp:
-  "\<lbrace>P\<rbrace>
-     lookup_cap thread cap_ptr
-   \<lbrace>\<lambda>_. P\<rbrace>, \<lbrace>\<lambda>_ .P \<rbrace> "
-   apply (clarsimp simp: lookup_cap_def)
-   apply (wp lookup_slot_wp get_cap_wp)
-   apply (clarsimp)
-   apply (wp lookup_slot_wp)
-  apply assumption
+  "\<lbrace>P\<rbrace> lookup_cap thread cap_ptr \<lbrace>\<lambda>_. P\<rbrace>, \<lbrace>\<lambda>_ .P \<rbrace> "
+  apply (clarsimp simp: lookup_cap_def)
+  apply (wp lookup_slot_wp get_cap_wp)
   done
 
 
@@ -886,7 +886,7 @@ lemma lookup_cap_and_slot_rvu:
      lookup_cap_and_slot thread cap_ptr
    \<lbrace>Q\<rbrace>, \<lbrace>Q'\<rbrace> "
   apply (clarsimp simp: lookup_cap_and_slot_def)
-  apply (rule hoare_vcg_seqE)+
+  apply (rule bindE_wp)+
     apply (rule returnOk_wp)
    apply (wp get_cap_rv)
   apply (rule hoare_pre, wp lookup_slot_rvu)
@@ -897,18 +897,16 @@ lemma lookup_cap_and_slot_rvu:
   apply fastforce
   done
 
-
 lemma update_cap_data:
-  "\<lbrace>\<lambda>s. valid_src_cap cap badge \<and> cap_has_type cap
-   \<and> ((is_ep_cap cap \<or> is_ntfn_cap cap) \<longrightarrow> \<not> preserve \<and> cap_badge cap = 0)
-   \<and> Q (update_cap_data_det badge cap) s \<rbrace>
-  update_cap_data preserve badge cap
-  \<lbrace>\<lambda>rv s. Q rv s\<rbrace>"
-  apply (rule hoare_name_pre_state)
-  apply (clarsimp simp: Let_def update_cap_data_def update_cap_data_det_def
-                        valid_src_cap_def
-                        cnode_cap_size_def ep_related_cap_def guard_update_def
-                 split: cdl_cap.splits | wp)+
+  "\<lbrace>\<lambda>s. valid_src_cap cap badge \<and> (cap_has_type cap \<or> is_smc_cap cap)
+        \<and> (is_ep_cap cap \<or> is_ntfn_cap cap \<or> is_smc_cap cap \<longrightarrow> \<not> preserve \<and> cap_badge cap = 0)
+        \<and> Q (update_cap_data_det badge cap) s\<rbrace>
+   update_cap_data preserve badge cap
+   \<lbrace>Q\<rbrace>"
+  apply (wpsimp simp: update_cap_data_def)
+  apply (cases cap; simp add: update_cap_data_det_def)
+  (* CNode case *)
+  apply (clarsimp simp: Let_def valid_src_cap_def cnode_cap_size_def guard_update_def)
   done
 
 lemma is_exclusive_cap_update_cap_data:
@@ -993,13 +991,15 @@ lemma ep_related_capI:
   "is_reply_cap cap \<Longrightarrow> ep_related_cap cap"
   by (cases cap; simp add: ep_related_cap_def cap_type_def)+
 
+lemma is_smc_cap_update_cap_rights[simp]:
+  "is_smc_cap (update_cap_rights R cap) = is_smc_cap cap"
+  by (auto simp: is_smc_cap_def update_cap_rights_def split: cdl_cap.splits)
+
 lemma decode_cnode_mint_rvu:
   "\<lbrace>\<lambda>s. caps \<noteq> [] \<and>
-    cap_has_type src_cap \<and> valid_src_cap src_cap badge
-    \<and> ((is_ep_cap src_cap \<or> is_ntfn_cap src_cap) \<longrightarrow>
-           cap_badge src_cap = 0)
-    \<and> (\<forall>src_cap'. (reset_cap_asid src_cap'
-       = reset_cap_asid src_cap) \<longrightarrow>
+    (cap_has_type src_cap \<or> is_smc_cap src_cap) \<and> valid_src_cap src_cap badge
+    \<and> (is_ep_cap src_cap \<or> is_ntfn_cap src_cap \<or> is_smc_cap src_cap \<longrightarrow> cap_badge src_cap = 0)
+    \<and> (\<forall>src_cap'. reset_cap_asid src_cap' = reset_cap_asid src_cap \<longrightarrow>
          (let x = update_cap_data_det badge (update_cap_rights (cap_rights src_cap \<inter> rights) src_cap') in
          Q (InsertCall (derived_cap x)
            (cap_object (fst $ the $ get_index caps 0), offset src_index src_sz)
@@ -1017,36 +1017,39 @@ lemma decode_cnode_mint_rvu:
   apply (unfold validE_def[symmetric])
   apply (clarsimp simp: neq_Nil_conv decode_cnode_invocation_def split_def
                  split: sum.splits)
-  apply (wp derive_cap_invE)
-       apply (wp update_cap_data)+
+  apply (wp derive_cap_invE update_cap_data)
      apply (rule validE_validE_R)
      apply (simp add: if_apply_def2)
-     apply (rule lookup_slot_for_cnode_op_rvu' [where r=src_sz and cap=src_cap and
-       R="\<box> (dest_sz, (unat dest_depth)): target dest_index \<mapsto>u NullCap \<and>* R"])
+     apply (rule lookup_slot_for_cnode_op_rvu'[where
+                   r = src_sz and
+                   cap = src_cap and
+                   R="(\<box> (dest_sz, (unat dest_depth)): target dest_index \<mapsto>u NullCap) \<and>* R"])
     apply simp
     apply (rule ensure_empty_no_exception)
-   apply (rule_tac R="\<box> (src_sz, (unat src_depth)): a src_index \<mapsto>u src_cap \<and>* R"
-     in lookup_slot_for_cnode_op_rvu'[where r=dest_sz and cap=NullCap])
+   apply (rule_tac R = "(\<box> (src_sz, (unat src_depth)): a src_index \<mapsto>u src_cap) \<and>* R"
+                   in lookup_slot_for_cnode_op_rvu'[where r=dest_sz and cap=NullCap])
   apply (simp, wp throw_on_none_rv validE_R_validE)
-  apply (clarsimp simp:Let_def get_index_def split: option.splits
-    cong:cap_rights_reset_cap_asid
-         cap_object_reset_cap_asid)
+  apply (clarsimp simp: Let_def get_index_def
+                  split: option.splits
+                  cong: cap_rights_reset_cap_asid cap_object_reset_cap_asid)
   apply (intro conjI)
-    apply (clarsimp simp:user_pointer_at_def Let_def)
-    apply (clarsimp simp:sep_conj_assoc)
+    apply (clarsimp simp: user_pointer_at_def Let_def)
+    apply (clarsimp simp: sep_conj_assoc)
     apply (sep_erule sep_cancel, assumption)
    apply (clarsimp dest!: mapu_dest_opt_cap
-     simp:conj_comms is_exclusive_cap_update_cap_data
-     safe_for_derive_not_non valid_src_cap_def)
+                   simp: conj_comms is_exclusive_cap_update_cap_data safe_for_derive_not_non
+                         valid_src_cap_def)
    apply (intro conjI impI allI)
-       apply (metis reset_cap_asid_cap_type)
+        apply (clarsimp simp add: is_smc_cap_def)
+        apply (metis reset_cap_asid_simps2(25))
+       apply (metis cap_type_reset_cap_asid reset_cap_asid_smc_cap)
       apply (frule (1) reset_cap_asid_ep_cap[THEN iffD1])
       apply simp
-      apply (metis reset_cap_asid_cap_badge ep_related_capI)
+      apply (metis reset_cap_asid_cap_badge ep_related_capI(1))
      apply (frule (1) reset_cap_asid_ntfn_cap[THEN iffD1])
      apply simp
-     apply (metis reset_cap_asid_cap_badge ep_related_capI)
-    apply (metis option.inject reset_cap_asid_cnode_cap)
+     apply (metis reset_cap_asid_cap_badge ep_related_capI(2))
+    apply (metis reset_cap_asid_cnode_cap)
    apply (metis cap_rights_reset_cap_asid)
   apply sep_solve
   done
@@ -1063,6 +1066,10 @@ lemma update_cap_data_non:
       simp_all add: update_cap_data_det_def badge_update_def
                     guard_update_def update_cap_badge_def
              split: cdl_cap.splits if_split_asm)
+
+lemma cap_has_type_not_smc:
+  "cap_type cap = Some type \<Longrightarrow> \<not>is_smc_cap cap"
+  by (cases cap; simp add: cap_type_def)
 
 lemma decode_cnode_mutate_rvu:
   "\<lbrace>\<lambda>s. caps \<noteq> []
@@ -1084,33 +1091,32 @@ lemma decode_cnode_mutate_rvu:
   apply clarsimp
   apply (frule cap_type_null)
   apply (clarsimp simp: decode_cnode_invocation_def split_def neq_Nil_conv
-    split:sum.splits)
-  apply wp
-        apply (wp update_cap_data)+
-     apply (simp add: if_apply_def2)
-     apply (rule lookup_slot_for_cnode_op_rvu' [where r=src_sz and cap=src_cap and
-       R="\<box> (dest_sz, (unat dest_depth)): target dest_index \<mapsto>u NullCap \<and>* R"])
-    apply simp
-    apply (rule ensure_empty_no_exception)
-   apply (rule_tac R="\<box> (src_sz, (unat src_depth)): a src_index \<mapsto>u src_cap \<and>* R" in
-     lookup_slot_for_cnode_op_rvu'[where r=dest_sz and cap=NullCap])
-  apply (simp, wp throw_on_none_rv validE_R_validE)
+                 split: sum.splits)
+  apply (wp update_cap_data)+
+      apply (simp add: if_apply_def2)
+      apply (rule lookup_slot_for_cnode_op_rvu'[where
+                    r = src_sz and
+                    cap = src_cap and
+                    R = "(\<box> (dest_sz, (unat dest_depth)): target dest_index \<mapsto>u NullCap) \<and>* R"])
+     apply simp
+     apply (rule ensure_empty_no_exception)
+    apply (rule_tac R = "(\<box> (src_sz, (unat src_depth)): a src_index \<mapsto>u src_cap) \<and>* R"
+                    in lookup_slot_for_cnode_op_rvu'[where r=dest_sz and cap=NullCap])
+   apply (simp, wp throw_on_none_rv validE_R_validE)
   apply (clarsimp simp:Let_def get_index_def split: option.splits)
   apply (intro conjI)
     apply (clarsimp simp:user_pointer_at_def Let_def)
     apply (clarsimp simp:sep_conj_assoc)
     apply (sep_solve)
    apply (clarsimp dest!: mapu_dest_opt_cap
-     simp: conj_comms update_cap_data_non cong:non_cap_cong)
+                    simp: conj_comms update_cap_data_non
+                    cong: non_cap_cong)
    apply (subst (asm) reset_cap_asid_ep_related_cap[OF sym], assumption)
-   apply (metis reset_cap_asid_cap_type reset_cap_asid_ep_related_cap valid_src_cap_asid_cong
-                ep_related_capI)
+   apply (frule reset_cap_asid_cap_type, clarsimp)
+   apply (frule cap_has_type_not_smc, simp)
+   apply (metis valid_src_cap_asid_cong ep_related_capI(1-2))
   apply sep_solve
   done
-
-crunch preserve [wp]:  decode_cnode_invocation "P"
-(wp: derive_cap_wpE unlessE_wp hoare_whenE_wp select_wp hoare_drop_imps
-  simp: hoare_if_simpE if_apply_def2 throw_on_none_def)
 
 lemma do_kernel_op_pull_back:
   "\<lbrace>\<lambda>s. P s\<rbrace> oper \<lbrace>\<lambda>r. Q r\<rbrace> \<Longrightarrow>
@@ -1129,9 +1135,9 @@ lemma get_thread_sep_wp:
   done
 
 lemma get_thread_inv:
-"\<lbrace> Q \<rbrace>
-  get_thread thread \<lbrace>\<lambda>t s. Q s\<rbrace>"
-  by (simp add:get_thread_def | wp | wpc)+
+  "\<lbrace> Q \<rbrace> get_thread thread \<lbrace>\<lambda>t s. Q s\<rbrace>"
+  unfolding get_thread_def
+  by wpsimp
 
 lemma get_thread_sep_wp_precise:
   "\<lbrace>\<lambda>s. tcb_at' (\<lambda>tcb. Q tcb s) thread s \<rbrace>
@@ -1155,8 +1161,7 @@ lemma has_restart_cap_sep_wp:
    \<lbrace>\<lambda>rv. Q rv\<rbrace>"
   apply (rule hoare_name_pre_state)
   apply (clarsimp simp: object_at_def)
-  apply (simp add: object_at_def get_thread_def has_restart_cap_def
-       | wp+ | wpc | intro conjI)+
+  apply (wpsimp simp: object_at_def get_thread_def has_restart_cap_def | intro conjI)+
   apply (clarsimp dest!: opt_cap_sep_imp
                    simp: opt_cap_def slots_of_def)
   apply (clarsimp simp: object_slots_def)
@@ -1167,14 +1172,14 @@ lemma has_restart_cap_sep_wp:
 lemma lift_do_kernel_op':
   "\<lbrace>\<lambda>s'. P s'\<rbrace> f \<lbrace>\<lambda>_ s'. Q s'\<rbrace> \<Longrightarrow> \<lbrace>\<lambda>s. P (kernel_state s)\<rbrace> do_kernel_op f \<lbrace>\<lambda>_ s. Q (kernel_state s)\<rbrace>"
   apply (simp add: do_kernel_op_def split_def)
-  apply (wp select_wp)
+  apply wp
   apply (simp add: valid_def split_def)
   done
 
 lemma lift_do_kernel_op:
   "\<lbrace>\<lambda>s. s = s'\<rbrace> f \<lbrace>\<lambda>_ s. s = s'\<rbrace> \<Longrightarrow> \<lbrace>\<lambda>s. (kernel_state s) = s'\<rbrace> do_kernel_op f \<lbrace>\<lambda>_ s. (kernel_state s) = s'\<rbrace>"
   apply (simp add: do_kernel_op_def split_def)
-  apply (wp select_wp)
+  apply wp
   apply (simp add: valid_def split_def)
   done
 
@@ -1195,7 +1200,7 @@ lemma schedule_no_choice_wp:
     schedule
   \<lbrace>\<lambda>r s. cdl_current_thread s = Some current_thread \<and> cdl_current_domain s = current_domain \<longrightarrow>  P s\<rbrace>"
   apply (simp add:schedule_def  switch_to_thread_def change_current_domain_def)
-  apply (wp alternative_wp select_wp)
+  apply wp
   apply (case_tac s,clarsimp)
   done
 

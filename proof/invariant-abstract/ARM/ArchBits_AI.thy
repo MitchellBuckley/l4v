@@ -8,7 +8,7 @@ theory ArchBits_AI
 imports Invariants_AI
 begin
 
-context Arch begin global_naming ARM
+context Arch begin arch_global_naming
 
 lemma invs_unique_table_caps[elim!]:
   "invs s \<Longrightarrow> unique_table_caps (caps_of_state s)"
@@ -31,11 +31,14 @@ lemma pbfs_atleast_pageBits:
   "pageBits \<le> pageBitsForSize sz"
   by (cases sz) (auto simp: pageBits_def)
 
-lemmas is_cap_simps = is_cap_simps is_arch_cap_simps
+lemmas is_cap_simps = is_cap_simps is_ArchObjectCap_def is_arch_cap_simps
 lemmas valid_cap_def = valid_cap_def[simplified valid_arch_cap_def]
 
 lemmas valid_cap_simps =
   valid_cap_def[split_simps cap.split arch_cap.split]
+
+lemmas invs_valid_asid_table [elim!] = invs_arch_state[THEN vas_valid_asid_table]
+lemmas invs_ran_asid_table = invs_valid_asid_table[THEN valid_asid_table_ran]
 
 end
 

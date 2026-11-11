@@ -17,25 +17,29 @@ a [separation logic defined for capDL](../proof/sep-capDL/).
 The system initialiser and the proof are described in the
 [ICFEM '13 paper][Boyton_13] and Andrew Boyton's PhD thesis.
 
-  [Boyton_13]: https://ts.data61.csiro.au/publications/nictaabstracts/Boyton_ABFGGKLS_13.abstract "Formally Verified System Initialisation"
+  [Boyton_13]: https://trustworthy.systems/publications/nictaabstracts/Boyton_ABFGGKLS_13.abstract "Formally Verified System Initialisation"
 
 Building
 --------
 
-To build from the `l4v/` directory, run:
+To build from the `l4v/` directory for the ARM architecture, run:
 
-    make SysInit
+    L4V_ARCH=ARM ./run_tests SysInit
+
+To build only the specification of the initialiser, from the `l4v/` directory, run:
+
+    L4V_ARCH=ARM ./run_tests SysInitSpec
 
 To build the example capDL specifications, from the `l4v/` directory, run:
 
-    make SysInitExamples
+    L4V_ARCH=ARM ./run_tests SysInitExamples
 
 
 Important Theories
 ------------------
 
 * The specification for the algorithm of the system initialiser is in
-  [`SysInit_SI`](SysInit_SI.thy).
+  [`spec/SysInit_SI`](spec/SysInit_SI.thy).
 
 * The top-level statement of the correctness of the system-initialiser
   is found in [`Proof_SI`](Proof_SI.thy).

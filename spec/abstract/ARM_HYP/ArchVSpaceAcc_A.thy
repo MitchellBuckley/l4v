@@ -14,7 +14,7 @@ theory ArchVSpaceAcc_A
 imports KHeap_A
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   This part of the specification is fairly concrete as the machine architecture
@@ -76,11 +76,6 @@ definition
 definition
   set_pd :: "obj_ref \<Rightarrow> (11 word \<Rightarrow> pde) \<Rightarrow> (unit,'z::state_ext) s_monad" where
   "set_pd ptr pd \<equiv> set_object ptr (ArchObj (PageDirectory pd))"
-
-definition
-  set_current_pd :: "paddr \<Rightarrow> unit machine_monad"
-where
-  "set_current_pd pd \<equiv> setCurrentPDPL2 pd"
 
 text \<open>The following function takes a pointer to a PDE in kernel memory
   and returns the actual PDE.\<close>

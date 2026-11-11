@@ -11,7 +11,7 @@ imports
   "StaticFun"
   "IndirectCalls"
   "ModifiesProofs"
-  "Lib.MLUtils"
+  "ML_Utils.ML_Utils"
   "HOL-Eisbach.Eisbach"
 keywords
   "cond_sorry_modifies_proofs"
@@ -22,6 +22,7 @@ and
   "memsafe"
   "c_types"
   "c_defs"
+  "no_modifies"
 begin
 
 lemma TWO: "Suc (Suc 0) = 2" by arith
@@ -49,7 +50,6 @@ lemma guarded_spec_body_wp [vcg_hoare]:
   apply (erule order_trans)
   apply (auto simp: image_def Bex_def)
   done
-
 
 ML_file "tools/mlyacc/mlyacclib/MLY_base-sig.ML"
 ML_file "tools/mlyacc/mlyacclib/MLY_join.ML"
@@ -180,5 +180,11 @@ lemma proc_deps_lvar_nondet_init [simp]:
   by (simp add: lvar_nondet_init_def)
 
 declare word_neq_0_conv[simp] (* FIXME: for backward compatibility; remove *)
+
+(* Remove separation logic notation visible here from Separation.thy, because it leads to too
+   many syntax ambiguities in general.
+
+   It can be re-enabled locally using "unbundle C_seplog_syntax" *)
+unbundle no C_seplog_syntax
 
 end

@@ -10,11 +10,10 @@ theory ArchDecode_A
 imports
   Interrupt_A
   InvocationLabels_A
-  "Word_Lib.Word_Lib"
   "ExecSpec.InvocationLabels_H"
 begin
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 section "Helper definitions"
 
@@ -33,8 +32,8 @@ section "Architecture-specific Decode Functions"
 definition
   arch_check_irq :: "data \<Rightarrow> (unit,'z::state_ext) se_monad"
 where
-  "arch_check_irq irq \<equiv> whenE (irq > ucast maxIRQ \<or> irq = ucast irqInvalid) $
-                          throwError (RangeError 1 (ucast maxIRQ))"
+  "arch_check_irq irq \<equiv> whenE (irq > maxIRQ \<or> irq = ucast irqInvalid) $
+                          throwError (RangeError 1 maxIRQ)"
 
 definition arch_decode_irq_control_invocation ::
   "data \<Rightarrow> data list \<Rightarrow> cslot_ptr \<Rightarrow> cap list \<Rightarrow> (arch_irq_control_invocation,'z::state_ext) se_monad"
@@ -58,10 +57,6 @@ definition arch_decode_irq_control_invocation ::
         odE
       else throwError TruncatedMessage
     else throwError IllegalOperation)"
-
-definition attribs_from_word :: "machine_word \<Rightarrow> vm_attributes"
-  where
-  "attribs_from_word w \<equiv> if \<not> w!!0 then {Execute} else {}"
 
 definition make_user_pte :: "vspace_ref \<Rightarrow> vm_attributes \<Rightarrow> vm_rights \<Rightarrow> pte"
   where

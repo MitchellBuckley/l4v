@@ -378,15 +378,34 @@ end
 fun print_ast cse ast = let
   open Absyn_Serial
 
+  fun decl_header decl
+    = case decl of
+        VarDecl (_, s, _, _, _) => "VarDecl: " ^ node s
+      | StructDecl (s, _) => "StructDecl: " ^ node s
+      | ExtFnDecl exfn => "ExtFnDecl: " ^ node (#name exfn)
+      | EnumDecl (soptw, _) =>
+          case node soptw of
+            SOME s => "EnumDecl: "  ^ s
+          | NONE => "EnumDecl: Anonymous";
+      (* TypeDecl is not present in final AST *)
+
   fun serial_defn (FnDefn ((retty,fnm),params,specs,body))
     = Nm ("Function", [varspec_serial (retty,fnm),
         list_serial varspec_serial params,
         list_serial fnspec_serial specs,
         list_serial bi_serial (node body)])
     | serial_defn (Decl dw) = decl_serial (node dw)
+
+  fun defn_lines defn
+    = case defn of
+        FnDefn ((_, fnm), _, _, _) => ["##Function: " ^ node fnm] @
+          lines_serial (serial_defn defn)
+      | Decl decl => ["##" ^ decl_header (node decl)] @
+          lines_serial (serial_defn defn)
+
   fun print_lines ss = app print (map (fn s => s ^ "\n") ss)
 in
-  app (print_lines o lines_serial o serial_defn) ast
+  app (print_lines o defn_lines) ast
 end
 
 fun adjusted_complex_fncalls cse ast = let
@@ -410,10 +429,12 @@ in app note_defn ast end
 
 fun unhandled_asm cse ast = let
   open Absyn
-  fun warn_asm asm = K () (ProgramAnalysis.split_asm_stmt asm)
-    handle Fail s => print s
+  fun warn_asm s = K () (ProgramAnalysis.split_asm_stmt (snode s))
+    handle Fail msg =>
+      print (Region.toString (Region.make {left = sleft s, right = sright s}) ^
+             ": " ^ msg ^ "\n")
   fun warn_stmt s = case snode s of
-      (AsmStmt asm) => warn_asm (AsmStmt asm)
+      AsmStmt _ => warn_asm s
     | _ => app warn_stmt (sub_stmts s)
   fun warn_bi (BI_Stmt s) = warn_stmt s
     | warn_bi _ = ()

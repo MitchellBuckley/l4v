@@ -25,18 +25,14 @@ its abstract specification.
 The approach used for the proof is described in the TPHOLS '09
 [paper][5].
 
-  [paper]: https://ts.data61.csiro.au/publications/nictaabstracts/Winwood_KSACN_09.abstract  "Mind the gap: A verification framework for low-level C"
+  [paper]: https://trustworthy.systems/publications/nictaabstracts/Winwood_KSACN_09.abstract  "Mind the gap: A verification framework for low-level C"
 
 Building
 --------
 
-To build from the `l4v/proof` directory, run:
+To build for the ARM architecture from the `l4v/` directory, run:
 
-    make CRefine
-
-If you wish to build for a specific architecture other than the default, set
-your `L4V_ARCH` environment variable accordingly, as documented for the [C code
-translation](../../spec/cspec/README.md).
+    L4V_ARCH=ARM ./run_tests CRefine
 
 Important Theories
 ------------------

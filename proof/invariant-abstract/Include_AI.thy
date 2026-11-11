@@ -6,19 +6,26 @@
 
 theory Include_AI
 imports
+  Lib.Lib
   ArchCrunchSetup_AI
-  "Lib.Eisbach_WP"
-  "ASpec.Syscall_A"
-  "Lib.LemmaBucket"
-  "Lib.ListLibLemmas"
-  "Rights_AI"
+  Monads.Eisbach_WP
+  Monads.Nondet_Strengthen_Setup
+  ASpec.Syscall_A
+  Lib.LemmaBucket
+  Lib.ListLibLemmas
+  Lib.LemmaBucket
+  Lib.SplitRule
+  Rights_AI
+  Lib.MonadicRewrite
 begin
 
 no_notation bind_drop (infixl ">>" 60)
 
+unbundle l4v_word_context
+
 (* Clagged from Bits_R *)
 
-crunch_ignore (add: NonDetMonad.bind return "when" get gets fail assert put modify
+crunch_ignore (add: Nondet_Monad.bind return "when" get gets fail assert put modify
   unless select alternative assert_opt gets_the returnOk throwError lift
   bindE liftE whenE unlessE throw_opt assertE liftM liftME sequence_x
   zipWithM_x mapM_x sequence mapM sequenceE_x sequenceE mapME mapME_x
@@ -31,11 +38,9 @@ crunch_ignore (add: cap_fault_on_failure lookup_error_on_failure
 
 crunch_ignore (add:
   storeWord storeWordVM loadWord setRegister getRegister getRestartPC
-  setNextPC maskInterrupt)
+  setNextPC)
 
 crunch_ignore (add:
-  cap_swap_ext cap_move_ext cap_insert_ext empty_slot_ext create_cap_ext
-  reschedule_required set_thread_state_ext tcb_sched_action
-  possible_switch_to timer_tick set_priority retype_region_ext)
+  cap_swap_ext cap_move_ext cap_insert_ext empty_slot_ext create_cap_ext)
 
 end

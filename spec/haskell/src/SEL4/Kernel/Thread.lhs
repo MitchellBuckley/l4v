@@ -19,7 +19,7 @@ We use the C preprocessor to select a target architecture.
 \begin{impdetails}
 
 % {-# BOOT-IMPORTS: SEL4.Model SEL4.Machine SEL4.Object.Structures SEL4.Object.Instances() SEL4.API.Types #-}
-% {-# BOOT-EXPORTS: setDomain setMCPriority setPriority getThreadState setThreadState setBoundNotification getBoundNotification doIPCTransfer isRunnable restart suspend  doReplyTransfer tcbSchedEnqueue tcbSchedDequeue rescheduleRequired timerTick possibleSwitchTo #-}
+% {-# BOOT-EXPORTS: setDomain setMCPriority setPriority setFlags getThreadState setThreadState setBoundNotification getBoundNotification doIPCTransfer isRunnable restart suspend  doReplyTransfer tcbSchedEnqueue tcbSchedDequeue rescheduleRequired timerTick possibleSwitchTo tcbQueueEmpty tcbQueuePrepend tcbQueueAppend tcbQueueInsert tcbQueueRemove #-}
 
 > import Prelude hiding (Word)
 > import SEL4.Config
@@ -35,6 +35,7 @@ We use the C preprocessor to select a target architecture.
 > import Data.Bits hiding (countLeadingZeros)
 > import Data.Array
 > import Data.WordLib
+> import Data.Maybe(fromJust, isJust)
 
 \end{impdetails}
 
@@ -126,8 +127,8 @@ When a thread is suspended, either explicitly by a TCB invocation or implicitly 
 >     cancelIPC target
 >     state <- getThreadState target
 >     if state == Running then updateRestartPC target else return ()
->     setThreadState Inactive target
 >     tcbSchedDequeue target
+>     setThreadState Inactive target
 
 \subsubsection{Restarting a Blocked Thread}
 
@@ -307,7 +308,9 @@ has the highest runnable priority in the system on kernel entry (unless idle).
 > scheduleChooseNewThread :: Kernel ()
 > scheduleChooseNewThread = do
 >     domainTime <- getDomainTime
->     when (domainTime == 0) $ nextDomain
+>     when (domainTime == 0) $ do
+>         Arch.prepareNextDomain
+>         nextDomain
 >     chooseThread
 >     setSchedulerAction ResumeCurrentThread
 
@@ -405,13 +408,15 @@ Note also that the level 2 bitmap array is stored in reverse in order to get bet
 
 > chooseThread :: Kernel ()
 > chooseThread = do
+>     stateAssert ksReadyQueues_asrt ""
+>     stateAssert ready_qs_runnable "threads in the ready queues are runnable'"
 >     curdom <- if numDomains > 1 then curDomain else return 0
 >     l1 <- getReadyQueuesL1Bitmap curdom
 >     if l1 /= 0
 >         then do
 >             prio <- getHighestPrio curdom
 >             queue <- getQueue curdom prio
->             let thread = head queue
+>             let thread = fromJust $ tcbQueueHead queue
 >             runnable <- isRunnable thread
 >             assert runnable "Scheduled a non-runnable thread"
 >             switchToThread thread
@@ -424,6 +429,10 @@ To switch to a new thread, we call the architecture-specific thread switch funct
 
 > switchToThread :: PPtr TCB -> Kernel ()
 > switchToThread thread = do
+>         runnable <- isRunnable thread
+>         assert runnable "thread must be runnable"
+>         stateAssert ksReadyQueues_asrt ""
+>         stateAssert ready_qs_runnable "threads in the ready queues are runnable'"
 >         Arch.switchToThread thread
 >         tcbSchedDequeue thread
 >         setCurThread thread
@@ -432,6 +441,7 @@ Switching to the idle thread is similar, except that we call a different archite
 
 > switchToIdleThread :: Kernel ()
 > switchToIdleThread = do
+>         stateAssert ready_qs_runnable "threads in the ready queues are runnable'"
 >         thread <- getIdleThread
 >         Arch.switchToIdleThread
 >         setCurThread thread
@@ -448,6 +458,12 @@ The following function is used to alter a thread's domain.
 >         runnable <- isRunnable tptr
 >         when runnable $ tcbSchedEnqueue tptr
 >         when (tptr == curThread) $ rescheduleRequired
+
+\subsubsection{Changing a thread's flags}
+
+> setFlags :: PPtr TCB -> TcbFlags -> Kernel ()
+> setFlags tptr flags = do
+>         threadSet (\t -> t { tcbFlags = flags }) tptr
 
 \subsubsection{Changing a thread's MCP}
 
@@ -536,7 +552,7 @@ When setting the scheduler state, we check for blocking of the current thread; i
 >         curThread <- getCurThread
 >         action <- getSchedulerAction
 >         when (not runnable && curThread == tptr && action == ResumeCurrentThread) $
->             rescheduleRequired
+>             setSchedulerAction ChooseNewThread
 
 \subsubsection{Bound Notificaion objects}
 
@@ -597,41 +613,135 @@ The following two functions place a thread at the beginning or end of its priori
 >         modifyReadyQueuesL1Bitmap tdom $
 >             (\w -> w .&. (complement $ bit l1index))
 
+> tcbQueueEmpty :: TcbQueue -> Bool
+> tcbQueueEmpty queue = tcbQueueHead queue == Nothing
+
+> tcbQueuePrepend :: TcbQueue -> PPtr TCB -> Kernel TcbQueue
+> tcbQueuePrepend queue tcbPtr = do
+>     q <- if tcbQueueEmpty queue
+>              then return $ queue { tcbQueueEnd = Just tcbPtr }
+>              else do
+>                  threadSet (\t -> t { tcbSchedNext = tcbQueueHead queue }) tcbPtr
+>                  threadSet (\t -> t { tcbSchedPrev = Just tcbPtr }) (fromJust $ tcbQueueHead queue)
+>                  return $ queue
+
+>     return $ q { tcbQueueHead = Just tcbPtr}
+
+> tcbQueueAppend :: TcbQueue -> PPtr TCB -> Kernel TcbQueue
+> tcbQueueAppend queue tcbPtr = do
+>     q <- if tcbQueueEmpty queue
+>              then return $ queue { tcbQueueHead = Just tcbPtr }
+>              else do
+>                  threadSet (\t -> t { tcbSchedPrev = tcbQueueEnd queue }) tcbPtr
+>                  threadSet (\t -> t { tcbSchedNext = Just tcbPtr }) (fromJust $ tcbQueueEnd queue)
+>                  return $ queue
+
+>     return $ q { tcbQueueEnd = Just tcbPtr}
+
+Insert a thread into the middle of a queue, immediately before afterPtr, where afterPtr is not the head of the queue
+
+> tcbQueueInsert :: PPtr TCB -> PPtr TCB -> Kernel ()
+> tcbQueueInsert tcbPtr afterPtr = do
+>    tcb <- getObject afterPtr
+>    beforePtrOpt <- return $ tcbSchedPrev tcb
+>    assert (beforePtrOpt /= Nothing) "afterPtr must not be the head of the list"
+>    beforePtr <- return $ fromJust beforePtrOpt
+>    assert (beforePtr /= afterPtr) "the tcbSchedPrev pointer of a TCB must never point to itself"
+
+>    threadSet (\t -> t { tcbSchedPrev = Just beforePtr }) tcbPtr
+>    threadSet (\t -> t { tcbSchedNext = Just afterPtr}) tcbPtr
+>    threadSet (\t -> t { tcbSchedPrev = Just tcbPtr }) afterPtr
+>    threadSet (\t -> t { tcbSchedNext = Just tcbPtr }) beforePtr
+
+Remove a thread from a queue, which must originally contain the thread
+
+> tcbQueueRemove :: TcbQueue -> PPtr TCB -> Kernel TcbQueue
+> tcbQueueRemove queue tcbPtr = do
+>     tcb <- getObject tcbPtr
+>     beforePtrOpt <- return $ tcbSchedPrev tcb
+>     afterPtrOpt <- return $ tcbSchedNext tcb
+
+>     if tcbQueueHead queue == Just tcbPtr && tcbQueueEnd queue == Just tcbPtr
+
+The queue is the singleton containing tcbPtr
+
+>         then return emptyQueue
+>         else
+>             if tcbQueueHead queue == Just tcbPtr
+
+tcbPtr is the head of the queue
+
+>                 then do
+>                     assert (afterPtrOpt /= Nothing) "the queue is not a singleton"
+>                     threadSet (\t -> t { tcbSchedPrev = Nothing }) (fromJust $ afterPtrOpt)
+>                     threadSet (\t -> t { tcbSchedNext = Nothing }) tcbPtr
+>                     return $ queue { tcbQueueHead = afterPtrOpt }
+>                 else
+>                     if tcbQueueEnd queue == Just tcbPtr
+
+tcbPtr is the end of the queue
+
+>                         then do
+>                             assert (beforePtrOpt /= Nothing) "the queue is not a singleton"
+>                             threadSet (\t -> t { tcbSchedNext = Nothing }) (fromJust $ beforePtrOpt)
+>                             threadSet (\t -> t { tcbSchedPrev = Nothing }) tcbPtr
+>                             return $ queue { tcbQueueEnd = beforePtrOpt }
+>                         else do
+
+tcbPtr is in the middle of the queue
+
+>                             assert (afterPtrOpt /= Nothing) "the queue is not a singleton"
+>                             assert (beforePtrOpt /= Nothing) "the queue is not a singleton"
+>                             threadSet (\t -> t { tcbSchedNext = afterPtrOpt }) (fromJust $ beforePtrOpt)
+>                             threadSet (\t -> t { tcbSchedPrev = beforePtrOpt }) (fromJust $ afterPtrOpt)
+>                             threadSet (\t -> t { tcbSchedPrev = Nothing }) tcbPtr
+>                             threadSet (\t -> t { tcbSchedNext = Nothing }) tcbPtr
+>                             return queue
+
 > tcbSchedEnqueue :: PPtr TCB -> Kernel ()
 > tcbSchedEnqueue thread = do
+>     stateAssert ksReadyQueues_asrt ""
+>     runnable <- isRunnable thread
+>     assert runnable "thread must be runnable"
 >     queued <- threadGet tcbQueued thread
 >     unless queued $ do
 >         tdom <- threadGet tcbDomain thread
 >         prio <- threadGet tcbPriority thread
 >         queue <- getQueue tdom prio
->         setQueue tdom prio $ thread : queue
->         when (null queue) $ addToBitmap tdom prio
+>         when (tcbQueueEmpty queue) $ addToBitmap tdom prio
+>         queue' <- tcbQueuePrepend queue thread
+>         setQueue tdom prio queue'
 >         threadSet (\t -> t { tcbQueued = True }) thread
 
 > tcbSchedAppend :: PPtr TCB -> Kernel ()
 > tcbSchedAppend thread = do
+>     stateAssert ksReadyQueues_asrt ""
+>     runnable <- isRunnable thread
+>     assert runnable "thread must be runnable"
 >     queued <- threadGet tcbQueued thread
 >     unless queued $ do
 >         tdom <- threadGet tcbDomain thread
 >         prio <- threadGet tcbPriority thread
 >         queue <- getQueue tdom prio
->         setQueue tdom prio $ queue ++ [thread]
->         when (null queue) $ addToBitmap tdom prio
+>         when (tcbQueueEmpty queue) $ addToBitmap tdom prio
+>         queue' <- tcbQueueAppend queue thread
+>         setQueue tdom prio queue'
 >         threadSet (\t -> t { tcbQueued = True }) thread
 
 The following function dequeues a thread, if it is queued.
 
 > tcbSchedDequeue :: PPtr TCB -> Kernel ()
 > tcbSchedDequeue thread = do
+>     stateAssert ksReadyQueues_asrt ""
 >     queued <- threadGet tcbQueued thread
 >     when queued $ do
 >         tdom <- threadGet tcbDomain thread
 >         prio <- threadGet tcbPriority thread
 >         queue <- getQueue tdom prio
->         let queue' = filter (/=thread) queue
+>         queue' <- tcbQueueRemove queue thread
 >         setQueue tdom prio queue'
->         when (null queue') $ removeFromBitmap tdom prio
 >         threadSet (\t -> t { tcbQueued = False }) thread
+>         when (tcbQueueEmpty queue') $ removeFromBitmap tdom prio
 
 \subsubsection{Timer Ticks}
 

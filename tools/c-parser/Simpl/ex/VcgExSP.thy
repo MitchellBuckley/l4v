@@ -1,34 +1,13 @@
 (*
     Author:      Norbert Schirmer
     Maintainer:  Norbert Schirmer, norbert.schirmer at web de
-    License:     LGPL
-*)
 
-(*  Title:      VcgEx.thy
-    Author:     Norbert Schirmer, TU Muenchen
-
-Copyright (C) 2004-2008 Norbert Schirmer
-Some rights reserved, TU Muenchen
-
-This library is free software; you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as
-published by the Free Software Foundation; either version 2.1 of the
-License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
-USA
+Copyright (C) 2006-2008 Norbert Schirmer
 *)
 
 section \<open>Examples using Statespaces\<close>
 
-theory VcgExSP imports HeapList Vcg begin
+theory VcgExSP imports "../HeapList" "../Vcg" begin
 
 
 subsection \<open>State Spaces\<close>
@@ -327,7 +306,9 @@ where
 
 syntax
   "_sum" :: "idt => nat => nat => nat"
-    ("SUMM _<_. _" [0, 0, 10] 10)
+    (\<open>SUMM _<_. _\<close> [0, 0, 10] 10)
+syntax_consts
+  "_sum" == sum
 translations
   "SUMM j<k. b" == "CONST sum (\<lambda>j. b) k"
 

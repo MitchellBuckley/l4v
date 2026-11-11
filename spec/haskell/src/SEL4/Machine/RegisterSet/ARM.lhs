@@ -50,7 +50,6 @@ This module defines the ARM register set.
 
 > data VCPUReg =
 >       VCPURegSCTLR
->     | VCPURegACTLR
 >     | VCPURegTTBCR
 >     | VCPURegTTBR0
 >     | VCPURegTTBR1
@@ -65,7 +64,6 @@ This module defines the ARM register set.
 >     | VCPURegNMRR
 >     | VCPURegCIDR
 >     | VCPURegTPIDRPRW
->     | VCPURegFPEXC
 >     | VCPURegLRsvc
 >     | VCPURegSPsvc
 >     | VCPURegLRabt
@@ -81,23 +79,47 @@ This module defines the ARM register set.
 >     | VCPURegR10fiq
 >     | VCPURegR11fiq
 >     | VCPURegR12fiq
+>     | VCPURegVMPIDR
 >     | VCPURegSPSRsvc
 >     | VCPURegSPSRabt
 >     | VCPURegSPSRund
 >     | VCPURegSPSRirq
 >     | VCPURegSPSRfiq
+>     | VCPURegPARhigh
+>     | VCPURegPARlow
+>     | VCPURegTTBR0high
+>     | VCPURegTTBR1high
+>     | VCPURegCSSELR
+>     | VCPURegVDISR
 >     | VCPURegCNTV_CTL
 >     | VCPURegCNTV_CVALhigh
 >     | VCPURegCNTV_CVALlow
 >     | VCPURegCNTVOFFhigh
 >     | VCPURegCNTVOFFlow
+>     | VCPURegCNTKCTL
+>     | VCPURegCPACR
+>     | VCPURegFPEXC
 >     deriving (Eq, Enum, Bounded, Ord, Ix, Show)
+
+> vcpuRegSaveRangeStart :: VCPUReg
+> vcpuRegSaveRangeStart = VCPURegTTBCR
+
+> vcpuRegSaveRangeEnd :: VCPUReg
+> vcpuRegSaveRangeEnd = VCPURegVDISR
 
 > vcpuRegNum :: Int
 > vcpuRegNum = fromEnum (maxBound :: VCPUReg)
 
 > vcpuRegSavedWhenDisabled :: VCPUReg -> Bool
 > vcpuRegSavedWhenDisabled VCPURegSCTLR = True
+> vcpuRegSavedWhenDisabled VCPURegCNTV_CTL  = True
+> vcpuRegSavedWhenDisabled VCPURegCNTV_CVALhigh = True
+> vcpuRegSavedWhenDisabled VCPURegCNTV_CVALlow = True
+> vcpuRegSavedWhenDisabled VCPURegCNTVOFFhigh = True
+> vcpuRegSavedWhenDisabled VCPURegCNTVOFFlow = True
+> vcpuRegSavedWhenDisabled VCPURegCNTKCTL = True
+> vcpuRegSavedWhenDisabled VCPURegCPACR = True
+> vcpuRegSavedWhenDisabled VCPURegFPEXC = True
 > vcpuRegSavedWhenDisabled _ = False
 
 #endif
@@ -119,7 +141,7 @@ A new user-level context is a list of values for the machine's registers. Regist
 
 Functions are provided to get and set a single register.
 
-> getRegister r = gets $ (!r) . fromUC
+> getRegister r = gets $ (! r) . fromUC
 
 > setRegister r v = modify $ UC . (//[(r, v)]) . fromUC
 

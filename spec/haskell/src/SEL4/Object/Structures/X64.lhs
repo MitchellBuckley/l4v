@@ -99,8 +99,8 @@ size.
 >                 KOPDPTE _ -> 3
 >                 KOPML4E _ -> 3
 >--                KOIOPTE _ -> 3
->--                KOIOCTE _ -> 3
->--                KOIORTE _ -> 3 -- FIXME: Not correct ?
+>--                KOIOCTE _ -> 4 -- FIXME x64-vtd: check IOCTE size
+>--                KOIORTE _ -> 4 -- FIXME x64-vtd: check IORTE size
 
 \subsection{Threads}
 
@@ -120,6 +120,7 @@ present on all platforms is stored here.
 >
 > atcbContextGet :: ArchTCB -> UserContext
 > atcbContextGet = atcbContext
+
 
 \subsection{ASID Pools}
 
@@ -163,6 +164,16 @@ ASIDs are mapped to address space roots by a global two-level table. The actual 
 >     where
 >         vspace' = vspace .&. (mask pml4ShiftBits `shiftL` asidBits)
 
+
+\subsection{Time}
+
+> parseTimeArg :: Int -> [Word] -> Ticks
+> parseTimeArg i args = fromIntegral (args !! i)
+
+> timeArgLen :: Int
+> timeArgLen = 1
+
+
 \subsection{IRQ State}
 
 > data X64IRQState =
@@ -179,4 +190,3 @@ ASIDs are mapped to address space roots by a global two-level table. The actual 
 >     irqLevel :: Word,
 >     irqPolarity :: Word,
 >     irqMasked :: Bool }
-

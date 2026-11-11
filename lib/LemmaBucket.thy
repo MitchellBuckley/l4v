@@ -11,10 +11,6 @@ imports
   SubMonadLib
 begin
 
-lemma corres_underlying_trivial:
-  "\<lbrakk> nf' \<Longrightarrow> no_fail P' f \<rbrakk> \<Longrightarrow> corres_underlying Id nf nf' (=) \<top> P' f f"
-  by (auto simp add: corres_underlying_def Id_def no_fail_def)
-
 lemma hoare_spec_gen_asm:
   "\<lbrakk> F \<Longrightarrow> s \<turnstile> \<lbrace>P\<rbrace> f \<lbrace>Q\<rbrace> \<rbrakk> \<Longrightarrow> s \<turnstile> \<lbrace>P and K F\<rbrace> f \<lbrace>Q\<rbrace>"
   "\<lbrakk> F \<Longrightarrow> s \<turnstile> \<lbrace>P\<rbrace> f' \<lbrace>Q\<rbrace>,\<lbrace>E\<rbrace> \<rbrakk> \<Longrightarrow> s \<turnstile> \<lbrace>P and K F\<rbrace> f' \<lbrace>Q\<rbrace>,\<lbrace>E\<rbrace>"
@@ -100,10 +96,10 @@ lemmas mapM_x_accumulate_checks
 lemma isRight_rel_sum_comb2:
   "\<lbrakk> (f \<oplus> r) v v'; isRight v' \<rbrakk>
        \<Longrightarrow> isRight v \<and> r (theRight v) (theRight v')"
-  by (clarsimp simp: isRight_def)
+  by (cases v; clarsimp)
 
 lemma isRight_case_sum: "isRight x \<Longrightarrow> case_sum f g x = g (theRight x)"
-  by (clarsimp simp add: isRight_def)
+  by (cases x; clarsimp)
 
 lemma enumerate_append:"enumerate i (xs @ ys) = enumerate i xs @ enumerate (i + length xs) ys"
   apply (induct xs arbitrary:ys i)
@@ -314,7 +310,7 @@ lemma card_of_dom_bounded:
   by (simp add: assms card_mono)
 
 lemma third_in: "(a, b, c) \<in> S \<Longrightarrow> c \<in> (snd \<circ> snd) ` S"
-  by (metis (erased, hide_lams) map_set_in image_comp snd_conv)
+  by (metis (erased, opaque_lifting) map_set_in image_comp snd_conv)
 
 lemma third_in2: "(a \<in> (snd \<circ> snd) ` (set (enumerate i xs))) = (a \<in> snd ` (set xs))"
   by (metis map_map map_snd_enumerate set_map)
@@ -357,7 +353,7 @@ lemma distinct_map_via_ran: "distinct (map fst xs) \<Longrightarrow> ran (map_of
   by (simp add: ran_distinct)
 
 lemma in_ran_in_set: "x \<in> ran (map_of xs) \<Longrightarrow> x \<in> set (map snd xs)"
-  by (metis (mono_tags, hide_lams) map_set_in map_of_SomeD ranE set_map snd_conv)
+  by (metis (mono_tags) map_set_in map_of_SomeD ranE set_map snd_conv)
 
 lemma in_ran_map_app: "x \<in> ran (xs ++ ys ++ zs) \<Longrightarrow> x \<in> ran xs \<or> x \<in> ran ys \<or> x \<in> ran zs"
   proof -
@@ -393,12 +389,8 @@ lemma none_some_map: "None \<notin> S \<Longrightarrow> Some x \<in> S = (x \<in
 
 lemma none_some_map2: "the ` Set.filter (\<lambda>s. \<not> Option.is_none s) (range f) = ran f"
   apply (rule subset_antisym)
-   apply clarsimp
-   apply (case_tac "f x", simp_all)
-   apply (simp add: ranI)
-  apply clarsimp
-  apply (subst none_some_map[symmetric])
-   apply clarsimp+
+   apply (clarsimp simp: Option.is_none_def ranI)
+  apply (clarsimp simp flip: none_some_map)
   apply (erule ranE)
   by (metis range_eqI)
 
@@ -467,6 +459,10 @@ lemma strenghten_False_imp:
   "\<not>P \<Longrightarrow> P \<longrightarrow> Q"
   by blast
 
+lemma None_in_range_Some [simp]:
+  "(None \<in> range Some) = False"
+  by auto
+
 lemma foldl_fun_or_alt:
   "foldl (\<lambda>x y. x \<or> f y) b ls = foldl (\<or>) b (map f ls)"
   apply (induct ls)
@@ -481,5 +477,89 @@ lemma sorted_imp_sorted_filter:
 lemma sorted_list_of_set_already_sorted:
   "\<lbrakk> distinct xs; sorted xs \<rbrakk> \<Longrightarrow> sorted_list_of_set (set xs) = xs"
   by (simp add: sorted_list_of_set_sort_remdups distinct_remdups_id sorted_sort_id)
+
+lemma inj_on_domD: "\<lbrakk>inj_on f (dom f); f x = Some z; f y = Some z\<rbrakk> \<Longrightarrow> x = y"
+  by (erule inj_onD) clarsimp+
+
+lemma not_emptyI:
+  "\<And>x A B. \<lbrakk>x\<in>A; x\<in>B\<rbrakk> \<Longrightarrow> A \<inter> B \<noteq> {}"
+  by auto
+
+lemma add_mask_lower_bits2:
+  "\<lbrakk>is_aligned (x :: 'a :: len word) n; p && ~~ mask n = 0\<rbrakk> \<Longrightarrow> x + p && ~~ mask n = x"
+  apply (subst word_plus_and_or_coroll)
+   apply (simp add: aligned_mask_disjoint and_mask_0_iff_le_mask)
+  apply (clarsimp simp: bit.conj_disj_distrib2)
+  done
+
+(* FIXME: move to GenericLib *)
+lemma if3_fold2:
+  "(if P then x else if Q then x else y) = (if P \<or> Q then x else y)"
+  by (rule z3_rule)
+
+lemma inter_UNIV_minus[simp]:
+  "x \<inter> (UNIV - y) = x-y" by blast
+
+lemma imp_and_strg: "Q \<and> C \<longrightarrow> (A \<longrightarrow> Q \<and> C) \<and> C" by blast
+
+lemma cases_conj_strg: "A \<and> B \<longrightarrow> (P \<and> A) \<or> (\<not> P \<and> B)" by simp
+
+lemma and_not_not_or_imp: "(~ A & ~ B | C) = ((A | B) \<longrightarrow> C)" by blast
+
+lemma filter_hd_equals_tl:
+  "\<lbrakk>distinct q; q \<noteq> []\<rbrakk> \<Longrightarrow> filter ((\<noteq>) (hd q)) q = tl q"
+  apply (induct q rule: length_induct)
+  apply (rename_tac list)
+  apply (case_tac list; simp)
+  apply (fastforce simp: filter_id_conv)
+  done
+
+lemma in_filter_neq:
+  "\<lbrakk>t \<in> set ts; t \<noteq> t'\<rbrakk> \<Longrightarrow> t \<in> set (filter ((\<noteq>) t') ts)"
+  by fastforce
+
+lemma Least_eq_trivial[simp]:
+  "(LEAST x. x = c) = (c :: 'a::preorder)"
+  unfolding Least_def
+  by (clarsimp cong: conj_cong)
+
+lemma Least_sym_eq_trivial[simp]:
+  "(LEAST x. c = x) = (c :: 'a::preorder)"
+  unfolding Least_def
+  by (clarsimp cong: conj_cong)
+
+lemma butlast_contract_Cons:
+  "xs \<noteq> [] \<Longrightarrow> x # butlast xs = butlast (x # xs)"
+  by simp
+
+lemma butlast_enum_Cons:
+  "\<lbrakk> x + 1 \<le> y; unat x \<noteq> 2 ^ LENGTH('a) - 1 \<rbrakk> \<Longrightarrow>
+   x # butlast [x + 1 .e. y] = butlast [x .e. y]" for x::"'a::len word"
+  apply (subst butlast_contract_Cons)
+   apply (simp add: upto_enum_def word_le_nat_alt)
+  apply (rule arg_cong[where f=butlast])
+  apply (simp add: upto_enum_def word_le_nat_alt)
+  apply (rule conjI, clarsimp)
+   apply (subst upt_rec[where i="unat x"])
+   apply simp
+   apply (rule conjI, clarsimp)
+    apply (subgoal_tac "unat (x + 1) = Suc (unat x)", simp)
+    apply unat_arith
+   apply unat_arith
+  apply unat_arith
+  done
+
+lemma find_absorb_all:
+  "\<forall>x \<in> set xs. Q x \<Longrightarrow> find (\<lambda>x. P x \<and> Q x) xs = find P xs"
+  by (induct xs; clarsimp split: if_split)
+
+lemma find_drop_elem:
+  "distinct (xs @ y # ys) \<Longrightarrow> find (\<lambda>x. P x \<and> x \<noteq> y) (xs @ y # ys) = find P (xs @ ys)"
+  apply (induct xs arbitrary: y ys)
+   apply simp
+   apply (subst find_absorb_all, fastforce)
+   apply simp
+  apply (clarsimp split: if_split)
+  done
 
 end

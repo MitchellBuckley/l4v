@@ -21,6 +21,7 @@ This module contains operations on machine-specific object types for x64.
 > import SEL4.Object.Structures
 > import SEL4.Kernel.VSpace.X64
 > import {-# SOURCE #-} SEL4.Object.IOPort.X64
+> import SEL4.Object.FPU.X64
 
 > import Data.Bits
 > import Data.Word(Word16)
@@ -78,13 +79,20 @@ ASID capabilities can be copied without modification, as can IOPort and IOSpace 
 >     ArchObjectCap (IOPortCap {}) -> isIOPortControlCap' srcCap
 >     _ -> False
 
+Whether the first capability is a parent of the second one. Can assume that
+sameRegionAs is true for the two capabilities. If this function returns True,
+the remaining cases of generic isMDBParentOf are still checked.
+
+> isArchMDBParentOf :: Capability -> Capability -> Bool -> Bool
+> isArchMDBParentOf _ _ _ = True
+
 % X64 has two writable user data caps
 
-> -- FIXME x64: io_space_capdata_get_domainID
+> -- FIXME x64-vtd: io_space_capdata_get_domainID
 >-- ioSpaceGetDomainID :: Word -> Word16
 >-- ioSpaceGetDomainID _ = error "Not implemented"
 
->-- -- FIXME x64: io_space_capdata_get_PCIDevice
+>-- -- FIXME x64-vtd: io_space_capdata_get_PCIDevice
 >-- ioSpaceGetPCIDevice :: Word -> Maybe IOASID
 >-- ioSpaceGetPCIDevice _ = error "Not implemented"
 
@@ -151,6 +159,11 @@ Page capabilities have read and write permission bits, which are used to restric
 >     IOPortCap f l -> freeIOPortRange f l
 >     _ -> return ()
 
+Nothing to do after resetting an Untyped region on x86.
+
+> postResetUntyped :: Bool -> Int -> Kernel ()
+> postResetUntyped _ _ = return ()
+
 > finaliseCap :: ArchCapability -> Bool -> Kernel (Capability, Capability)
 
 Deletion of a final capability to an ASID pool requires that the pool is removed from the global ASID table.
@@ -192,7 +205,7 @@ Deletion of a final capability to a page table that has been mapped requires tha
 >     unmapPageTable a v ptr
 >     return (NullCap, NullCap)
 
-> --finaliseCap (IOSpaceCap {}) True = return (NullCap, NullCap) -- FIXME x64: not yet implemented in C
+> --finaliseCap (IOSpaceCap {}) True = return (NullCap, NullCap) -- FIXME x64-vtd: unmapVTDContextEntry
 
 > finaliseCap (PageCap {
 >         capVPMappedAddress = Just (a, v),
@@ -227,6 +240,9 @@ Deletion of a final capability to a page table that has been mapped requires tha
 >--
 
 \subsection{Identifying Capabilities}
+
+> isIRQControlCapDescendant :: ArchCapability -> Bool
+> isIRQControlCapDescendant _ = False
 
 > sameRegionAs :: ArchCapability -> ArchCapability -> Bool
 > sameRegionAs (a@PageCap {}) (b@PageCap {}) =
@@ -280,8 +296,6 @@ Deletion of a final capability to a page table that has been mapped requires tha
 
 Create an architecture-specific object.
 
-% FIXME: it is not clear wheather we can have large device page
-
 > placeNewDataObject :: PPtr () -> Int -> Bool -> Kernel ()
 > placeNewDataObject regionBase sz isDevice = if isDevice
 >     then placeNewObject regionBase UserDataDevice sz
@@ -299,39 +313,39 @@ Create an architecture-specific object.
 >             modify (\ks -> ks { gsUserPages =
 >               funupd (gsUserPages ks)
 >                      (fromPPtr regionBase) (Just X64SmallPage)})
->             return $! PageCap (pointerCast regionBase)
+>             return $ PageCap (pointerCast regionBase)
 >                   VMReadWrite VMNoMap X64SmallPage isDevice Nothing
 >         Arch.Types.LargePageObject -> do
 >             placeNewDataObject regionBase ptTranslationBits isDevice
 >             modify (\ks -> ks { gsUserPages =
 >               funupd (gsUserPages ks)
 >                      (fromPPtr regionBase) (Just X64LargePage)})
->             return $! PageCap (pointerCast regionBase)
+>             return $ PageCap (pointerCast regionBase)
 >                   VMReadWrite VMNoMap X64LargePage isDevice Nothing
 >         Arch.Types.HugePageObject -> do
 >             placeNewDataObject regionBase (ptTranslationBits + ptTranslationBits) isDevice
 >             modify (\ks -> ks { gsUserPages =
 >               funupd (gsUserPages ks)
 >                      (fromPPtr regionBase) (Just X64HugePage)})
->             return $! PageCap (pointerCast regionBase)
+>             return $ PageCap (pointerCast regionBase)
 >                   VMReadWrite VMNoMap X64HugePage isDevice Nothing
 >         Arch.Types.PageTableObject -> do
 >             let ptSize = ptBits - objBits (makeObject :: PTE)
 >             placeNewObject regionBase (makeObject :: PTE) ptSize
->             return $! PageTableCap (pointerCast regionBase) Nothing
+>             return $ PageTableCap (pointerCast regionBase) Nothing
 >         Arch.Types.PageDirectoryObject -> do
 >             let pdSize = pdBits - objBits (makeObject :: PDE)
 >             placeNewObject regionBase (makeObject :: PDE) pdSize
->             return $! PageDirectoryCap (pointerCast regionBase) Nothing
+>             return $ PageDirectoryCap (pointerCast regionBase) Nothing
 >         Arch.Types.PDPointerTableObject -> do
 >             let pdptSize = pdptBits - objBits (makeObject :: PDPTE)
 >             placeNewObject regionBase (makeObject :: PDPTE) pdptSize
->             return $! PDPointerTableCap (pointerCast regionBase) Nothing
+>             return $ PDPointerTableCap (pointerCast regionBase) Nothing
 >         Arch.Types.PML4Object -> do
 >             let pml4Size = pml4Bits - objBits (makeObject :: PML4E)
 >             placeNewObject regionBase (makeObject :: PML4E) pml4Size
 >             copyGlobalMappings (pointerCast regionBase)
->             return $! PML4Cap (pointerCast regionBase) Nothing
+>             return $ PML4Cap (pointerCast regionBase) Nothing
 
 \subsection{Capability Invocation}
 
@@ -387,10 +401,4 @@ Create an architecture-specific object.
 Notify the FPU when deleting a thread, in case that thread is using the FPU
 
 > prepareThreadDelete :: PPtr TCB -> Kernel ()
-> prepareThreadDelete threadPtr = fpuThreadDelete threadPtr
-
-> fpuThreadDelete :: PPtr TCB -> Kernel ()
-> fpuThreadDelete threadPtr = do
->     usingFpu <- doMachineOp $ nativeThreadUsingFPU (fromPPtr threadPtr)
->     when usingFpu $ doMachineOp (switchFpuOwner 0 0)
-
+> prepareThreadDelete threadPtr = fpuRelease threadPtr

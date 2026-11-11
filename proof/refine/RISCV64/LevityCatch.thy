@@ -9,7 +9,7 @@ imports
   "BaseRefine.Include"
   "Lib.AddUpdSimps"
   "Lib.LemmaBucket"
-  "Lib.SimpStrategy"
+  "Lib.Corres_Method"
 begin
 
 no_notation bind_drop (infixl ">>" 60)
@@ -41,16 +41,21 @@ lemma updateObject_default_inv:
   unfolding updateObject_default_def
   by (wpsimp wp: magnitudeCheck_inv alignCheck_inv projectKO_inv)
 
-
-context begin interpretation Arch .
+context Arch begin arch_global_naming
 
 lemmas makeObject_simps =
   makeObject_endpoint makeObject_notification makeObject_cte
   makeObject_tcb makeObject_user_data makeObject_pte makeObject_asidpool
 
-lemma to_from_apiType[simp]: "toAPIType (fromAPIType x) = Some x"
-  by (cases x) (auto simp: fromAPIType_def toAPIType_def)
+lemma to_from_apiType[simp]:
+  "toAPIType (fromAPIType x) = Some x"
+  by (cases x) (auto simp add: fromAPIType_def toAPIType_def)
 
 end
+
+arch_requalify_facts
+  to_from_apiType (* FIXME arch-split: LevityCatch not split yet *)
+
+lemmas [simp] = to_from_apiType
 
 end

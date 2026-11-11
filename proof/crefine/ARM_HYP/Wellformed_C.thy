@@ -14,7 +14,7 @@ imports
   "CSpec.Substitute"
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 abbreviation
   cte_Ptr :: "word32 \<Rightarrow> cte_C ptr" where "cte_Ptr == Ptr"
@@ -42,8 +42,13 @@ abbreviation
   pt_Ptr :: "32 word \<Rightarrow> (pte_C[512]) ptr" where "pt_Ptr == Ptr"
 abbreviation
   pd_Ptr :: "32 word \<Rightarrow> (pde_C[2048]) ptr" where "pd_Ptr == Ptr"
+
+declare seL4_VCPUReg_Num_def[code]
+value_type num_vcpu_regs = "unat seL4_VCPUReg_Num"
+
 abbreviation
-  regs_C_Ptr :: "addr \<Rightarrow> (machine_word_len word[42]) ptr" where "regs_C_Ptr \<equiv> Ptr"
+  regs_C_Ptr :: "addr \<Rightarrow> (machine_word[num_vcpu_regs]) ptr" where"regs_C_Ptr \<equiv> Ptr"
+
 abbreviation
   vgic_lr_C_Ptr :: "addr \<Rightarrow> (virq_C[64]) ptr" where "vgic_lr_C_Ptr \<equiv> Ptr"
 abbreviation
@@ -53,6 +58,9 @@ abbreviation
 (* FIXME might be useful on other platforms if not existing already *)
 abbreviation
   word_Ptr :: "addr \<Rightarrow> machine_word ptr" where "word_Ptr \<equiv> Ptr"
+
+type_synonym registers_count = 20
+type_synonym registers_array = "machine_word[registers_count]"
 
 lemma halt_spec:
   "Gamma \<turnstile> {} Call halt_'proc {}"
@@ -165,10 +173,6 @@ where
 abbreviation
   "ep_queue_relation \<equiv> tcb_queue_relation tcbEPNext_C tcbEPPrev_C"
 
-abbreviation
-  "sched_queue_relation \<equiv> tcb_queue_relation tcbSchedNext_C tcbSchedPrev_C"
-
-
 definition
 wordSizeCase :: "'a \<Rightarrow> 'a \<Rightarrow> 'a" where
 "wordSizeCase a b \<equiv> (if bitSize (undefined::word32) = 32
@@ -261,7 +265,7 @@ record cte_CL =
   cap_CL :: cap_CL
   cteMDBNode_CL :: mdb_node_CL
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 definition
   cte_lift :: "cte_C \<rightharpoonup> cte_CL"
@@ -271,65 +275,6 @@ definition
                    | Some cap \<Rightarrow> Some \<lparr> cap_CL = cap,
                                        cteMDBNode_CL = mdb_node_lift (cteMDBNode_C c) \<rparr>"
 
-lemma to_bool_false [simp]: "\<not> to_bool false"
-  by (simp add: to_bool_def false_def)
-
-(* this is slightly weird, but the bitfield generator
-   masks everything with the expected bit length.
-   So we do that here too. *)
-definition
-  to_bool_bf :: "'a::len word \<Rightarrow> bool" where
-  "to_bool_bf w \<equiv> (w && mask 1) = 1"
-
-lemma to_bool_bf_mask1 [simp]:
-  "to_bool_bf (mask (Suc 0))"
-  by (simp add: mask_def to_bool_bf_def)
-
-lemma to_bool_bf_0 [simp]: "\<not>to_bool_bf 0"
-  by (simp add: to_bool_bf_def)
-
-lemma to_bool_bf_1 [simp]: "to_bool_bf 1"
-  by (simp add: to_bool_bf_def mask_def)
-
-lemma to_bool_bf_false [simp]:
-  "\<not>to_bool_bf false"
-  by (simp add: false_def)
-
-lemma to_bool_bf_true [simp]:
-  "to_bool_bf true"
-  by (simp add: true_def)
-
-lemma to_bool_to_bool_bf:
-  "w = false \<or> w = true \<Longrightarrow> to_bool_bf w = to_bool w"
-  by (auto simp: false_def true_def to_bool_def to_bool_bf_def mask_def)
-
-lemma to_bool_bf_mask_1 [simp]:
-  "to_bool_bf (w && mask (Suc 0)) = to_bool_bf w"
-  by (simp add: to_bool_bf_def)
-
-lemma to_bool_bf_and [simp]:
-  "to_bool_bf (a && b) = (to_bool_bf a \<and> to_bool_bf (b::word32))"
-  apply (clarsimp simp: to_bool_bf_def)
-  apply (rule iffI)
-   apply (subst (asm) bang_eq)
-   apply (simp add: word_size)
-   apply (rule conjI)
-    apply (rule word_eqI)
-    apply (auto simp add: word_size)[1]
-   apply (rule word_eqI)
-   apply (auto simp add: word_size)[1]
-  apply clarsimp
-  apply (rule word_eqI)
-  apply (subst (asm) bang_eq)+
-  apply (auto simp add: word_size)[1]
-  done
-
-lemma to_bool_bf_to_bool_mask:
-  "w && mask (Suc 0) = w \<Longrightarrow> to_bool_bf w = to_bool (w::word32)"
-  apply (auto simp add: to_bool_bf_def to_bool_def mask_eq_iff_w2p word_size)
-  apply (auto simp add: mask_def dest: word_less_cases)
-  done
-
 definition
   mdb_node_to_H :: "mdb_node_CL \<Rightarrow> mdbnode"
   where
@@ -337,7 +282,6 @@ definition
                          (mdbPrev_CL n)
                          (to_bool (mdbRevocable_CL n))
                          (to_bool (mdbFirstBadged_CL n))"
-
 
 definition
 cap_to_H :: "cap_CL \<Rightarrow> capability"
@@ -395,7 +339,9 @@ where
                                            then Some (capPDMappedASID_CL pdf)
                                            else None))
  | Cap_domain_cap \<Rightarrow> DomainCap
- | Cap_vcpu_cap vcpu \<Rightarrow> ArchObjectCap (VCPUCap (capVCPUPtr_CL vcpu))"
+ | Cap_vcpu_cap vcpu \<Rightarrow> ArchObjectCap (VCPUCap (capVCPUPtr_CL vcpu))
+ | Cap_sgi_signal_cap sgi \<Rightarrow> ArchObjectCap (SGISignalCap (ucast (capSGIIRQ_CL sgi))
+                                                         (ucast (capSGITarget_CL sgi)))"
 
 lemmas cap_to_H_simps = cap_to_H_def[split_simps cap_CL.split]
 
@@ -405,15 +351,12 @@ definition
   "cte_to_H cte \<equiv> CTE (cap_to_H (cap_CL cte)) (mdb_node_to_H (cteMDBNode_CL cte))"
 
 
-
-definition
-cl_valid_cap :: "cap_CL \<Rightarrow> bool"
-where
-"cl_valid_cap c \<equiv>
-   case c of
-     Cap_frame_cap fc \<Rightarrow> ((capFSize_CL fc) \<noteq>  scast Kernel_C.ARMSmallPage)
-     | Cap_irq_handler_cap fc \<Rightarrow> ((capIRQ_CL fc) && mask 10 = capIRQ_CL fc)
-     | x \<Rightarrow> True"
+definition cl_valid_cap :: "cap_CL \<Rightarrow> bool" where
+  "cl_valid_cap c \<equiv>
+     case c of
+         Cap_frame_cap fc \<Rightarrow> capFSize_CL fc \<noteq> scast Kernel_C.ARMSmallPage
+       | Cap_irq_handler_cap fc \<Rightarrow> capIRQ_CL fc && mask irq_len = capIRQ_CL fc
+       | _ \<Rightarrow> True"
 
 definition
 c_valid_cap :: "cap_C \<Rightarrow> bool"
@@ -447,6 +390,7 @@ lemma  c_valid_cap_simps [simp]:
   "cap_get_tag c = scast cap_zombie_cap \<Longrightarrow> c_valid_cap c"
   "cap_get_tag c = scast cap_reply_cap \<Longrightarrow> c_valid_cap c"
   "cap_get_tag c = scast cap_vcpu_cap \<Longrightarrow> c_valid_cap c"
+  "cap_get_tag c = scast cap_sgi_signal_cap \<Longrightarrow> c_valid_cap c"
   "cap_get_tag c = scast cap_null_cap \<Longrightarrow> c_valid_cap c"
   unfolding c_valid_cap_def  cap_lift_def cap_tag_defs
   by (simp add: cl_valid_cap_def)+
@@ -459,13 +403,275 @@ lemma ptr_val_tcb_ptr_mask2:
   apply (simp add: is_aligned_add_helper ctcb_offset_defs objBits_simps')
   done
 
+
+section \<open>Domains\<close>
+
+text \<open>
+  seL4's build system allows configuration of the number of domains. This means the proofs have to
+  work for any number of domains provided it fits into the hard limit of a 8-bit word.
+
+  In the C code, we have the enumerated constant numDomains, one greater than maxDom. In the
+  abstract specs, we have the corresponding Platform_Config.numDomains and maxDomain.
+
+  To keep the proofs as general as possible, we avoid unfolding definitions of:
+  maxDom, maxDomain, numDomains except in this theory where we need to establish basic properties.
+
+  Unfortunately, array bounds checks coming from the C code use numerical values, meaning we might
+  get 0x10 instead of the number of domains, or 0x1000 for numDomains * numPriorities. To solve
+  these, the "explicit" lemmas expose direct numbers. They are more risky to deploy, as one could
+  prove that 0x5 is less than the number of domains when that's the case, and then the proof will
+  break upon reconfiguration.
+\<close>
+
+text \<open>The @{text num_domains} enumerated type and constant represent the number of domains.\<close>
+
+value_type num_domains = "numDomains"
+
+context includes no_less_1_simps begin
+
+(* The proofs expect the minimum priority and minimum domain to be zero.
+   Note that minDom is unused in the C code. *)
+lemma min_prio_dom_sanity:
+  "seL4_MinPrio = 0"
+  "Kernel_C.minDom = 0"
+  by (auto simp: seL4_MinPrio_def minDom_def)
+
+lemma less_numDomains_is_domain[simplified word_size, simplified]:
+  "x < numDomains \<Longrightarrow> x < 2 ^ size (y::domain)"
+  unfolding Kernel_Config.numDomains_def
+  by (simp add: word_size)
+
+lemma sint_numDomains_to_H:
+  "sint Kernel_C.numDomains = int Kernel_Config.numDomains"
+  by (clarsimp simp: Kernel_C.numDomains_def Kernel_Config.numDomains_def)
+
+lemma unat_numDomains_to_H:
+  "unat Kernel_C.numDomains = Kernel_Config.numDomains"
+  by (clarsimp simp: Kernel_C.numDomains_def Kernel_Config.numDomains_def)
+
 lemma maxDom_to_H:
   "ucast maxDom = maxDomain"
-  by (simp add: maxDomain_def maxDom_def numDomains_def)
+  by (simp add: maxDomain_def Kernel_C.maxDom_def Kernel_Config.numDomains_def)
+
+lemma maxDom_sgt_0_maxDomain:
+  "0 <s maxDom \<longleftrightarrow> 0 < maxDomain"
+  unfolding Kernel_C.maxDom_def maxDomain_def Kernel_Config.numDomains_def
+  by clarsimp
+
+lemma num_domains_calculation:
+  "num_domains = numDomains"
+  unfolding num_domains_val by eval
+
+private lemma num_domains_card_explicit:
+  "num_domains = CARD(num_domains)"
+  by (simp add: num_domains_val)
+
+lemmas num_domains_index_updates =
+  index_update[where 'b=num_domains, folded num_domains_card_explicit num_domains_val,
+               simplified num_domains_calculation]
+  index_update2[where 'b=num_domains, folded num_domains_card_explicit num_domains_val,
+                simplified num_domains_calculation]
+
+(* C ArrayGuards will throw these at us and there is no way to avoid a proof of being less than a
+   specific number expressed as a word, so we must introduce these. However, being explicit means
+   lack of discipline can lead to a violation. *)
+lemma numDomains_less_numeric_explicit[simplified num_domains_val One_nat_def]:
+  "x < Kernel_Config.numDomains \<Longrightarrow> x < num_domains"
+  by (simp add: num_domains_calculation)
+
+lemma numDomains_less_unat_ucast_explicit[simplified num_domains_val]:
+  "unat x < Kernel_Config.numDomains \<Longrightarrow> (ucast (x::domain) :: machine_word) < of_nat num_domains"
+  apply (rule word_less_nat_alt[THEN iffD2])
+  apply transfer
+  apply simp
+  apply (drule numDomains_less_numeric_explicit, simp add: num_domains_val)
+  done
+
+lemmas maxDomain_le_unat_ucast_explicit =
+  numDomains_less_unat_ucast_explicit[simplified le_maxDomain_eq_less_numDomains(2)[symmetric],
+                                      simplified]
+
+lemma unat_scast_domScheduleLength:
+  "unat (scast domScheduleLength :: machine_word) = unat domScheduleLength"
+  by (simp add: domScheduleLength_def)
+
+lemma unat_scast_domScheduleLength_m1:
+  "unat (scast (domScheduleLength - 1) :: machine_word) = unat domScheduleLength - Suc 0"
+  by (simp add: domScheduleLength_def)
+
+lemma domScheduleLength_le_unat:
+  "(scast domScheduleLength \<le> n) = (unat domScheduleLength \<le> unat n)" for n::machine_word
+  by (simp add: word_le_nat_alt unat_scast_domScheduleLength)
+
+lemma less_domScheduleLength_plus_1:
+  "unat n < unat domScheduleLength \<Longrightarrow> unat (n + 1) = Suc (unat n)" for n::machine_word
+  by (simp add: domScheduleLength_def unat_add_lem')
+
+end (* numDomain abstraction definitions and lemmas *)
+
+
+text \<open>Priorities - not expected to be configurable\<close>
 
 lemma maxPrio_to_H:
   "ucast seL4_MaxPrio = maxPriority"
   by (simp add: maxPriority_def seL4_MaxPrio_def numPriorities_def)
+
+
+text \<open>TCB scheduling queues\<close>
+
+(* establish and sanity-check relationship between the calculation of the number of TCB queues and
+   the size of the array in C *)
+value_type num_tcb_queues = "numDomains * numPriorities"
+
+lemma num_tcb_queues_calculation:
+  "num_tcb_queues = numDomains * numPriorities"
+  unfolding num_tcb_queues_val by eval
+
+
+text \<open>maxIRQ interface\<close>
+
+(* Main lemma to use when one encounters Kernel_C.maxIRQ *)
+lemma Kernel_C_maxIRQ:
+  "Kernel_C.maxIRQ = Kernel_Config.maxIRQ"
+  by (simp add: Kernel_C.maxIRQ_def Kernel_Config.maxIRQ_def)
+
+value_type irq_array_size = "Suc Kernel_Config.maxIRQ"
+
+(* For numeral array guard assertions. *)
+lemma unat_irq_array_guard[unfolded irq_array_size_val, simplified]:
+  "unat irq \<le> Kernel_Config.maxIRQ \<Longrightarrow> unat irq < irq_array_size" for irq::irq
+  by (simp add: irq_array_size_def)
+
+lemma ucast_irq_array_guard[unfolded irq_array_size_val, simplified]:
+  "irq \<le> Kernel_Config.maxIRQ \<Longrightarrow> ucast irq < (of_nat irq_array_size :: machine_word)" for irq::irq
+  apply (simp add: irq_array_size_def word_less_nat_alt word_le_nat_alt)
+  apply (rule order_le_less_trans, rule unat_ucast_le)
+  apply simp
+  done
+
+
+text \<open>cacheLineBits interface\<close>
+
+(* only use this inside cache op functions; see Arch_Kernel_Config_Lemmas.cacheLineBits_sanity *)
+lemmas cacheLineBits_val =
+  cacheLineBits_def[unfolded Kernel_Config.CONFIG_L1_CACHE_LINE_SIZE_BITS_def]
+
+lemma cacheLineBits_le_ptBits:
+  "cacheLineBits \<le> ptBits"
+  using cacheLineBits_sanity
+  by (simp add: pt_bits_def pte_bits_def)
+
+(* This lemma and ptBits_leq_pdBits are for use with cacheLineBits_le_ptBits *)
+lemma ptBits_leq_pageBits:
+  "ptBits \<le> pageBits"
+  by (simp add: pt_bits_def pte_bits_def pageBits_def)
+
+lemma ptBits_leq_pdBits:
+  "ptBits \<le> pdBits"
+  by (simp add: pt_bits_def pd_bits_def pde_bits_def pte_bits_def)
+
+lemma cacheLineBits_leq_pageBits:
+  "cacheLineBits \<le> pageBits"
+  using ptBits_leq_pageBits cacheLineBits_le_ptBits
+  by simp
+
+lemma cacheLineBits_leq_pdBits:
+  "cacheLineBits \<le> pdBits"
+  using ptBits_leq_pdBits cacheLineBits_le_ptBits
+  by simp
+
+lemma cacheLineBits_le_machine_word:
+  "cacheLineBits < LENGTH(machine_word_len)"
+  apply (rule le_less_trans, rule cacheLineBits_le_ptBits)
+  by (simp add: pt_bits_def pte_bits_def)
+
+lemma APIType_capBits_PageDirectoryObject_pdBits:
+  "APIType_capBits PageDirectoryObject us = pdBits"
+  by (simp add: pd_bits_def APIType_capBits_def pde_bits_def)
+
+lemma cacheLineBits_le_PageDirectoryObject_sz:
+  "cacheLineBits \<le> APIType_capBits PageDirectoryObject us"
+  using APIType_capBits_PageDirectoryObject_pdBits cacheLineBits_leq_pdBits
+  by simp
+
+lemma cacheLineBits_leq_pbfs:
+  "cacheLineBits \<le> pageBitsForSize sz"
+  by (rule order.trans, rule cacheLineBits_leq_pageBits, rule pbfs_atleast_pageBits)
+
+lemma addrFromPPtr_mask_SuperSection:
+  "n \<le> pageBitsForSize ARMSuperSection
+   \<Longrightarrow> addrFromPPtr ptr && mask n = ptr && mask n"
+  apply (simp add: addrFromPPtr_def)
+  apply (prop_tac "pptrBaseOffset AND mask n = 0")
+   apply (rule mask_zero[OF is_aligned_weaken[OF pptrBaseOffset_aligned]], simp)
+  apply (simp flip: mask_eqs(8))
+  done
+
+lemma ptrFromPAddr_mask_SuperSection:
+  "n \<le> pageBitsForSize ARMSuperSection
+   \<Longrightarrow> ptrFromPAddr ptr && mask n = ptr && mask n"
+  apply (simp add: ptrFromPAddr_def)
+  apply (prop_tac "pptrBaseOffset AND mask n = 0")
+   apply (rule mask_zero[OF is_aligned_weaken[OF pptrBaseOffset_aligned]], simp)
+  apply (simp flip: mask_eqs(7))
+  done
+
+lemma addrFromPPtr_mask_cacheLineBits[simp]:
+  "addrFromPPtr ptr && mask cacheLineBits = ptr && mask cacheLineBits"
+  by (rule addrFromPPtr_mask_SuperSection, rule cacheLineBits_leq_pbfs)
+
+lemma ptrFromPAddr_mask_cacheLineBits[simp]:
+  "ptrFromPAddr ptr && mask cacheLineBits = ptr && mask cacheLineBits"
+  by (rule ptrFromPAddr_mask_SuperSection, rule cacheLineBits_leq_pbfs)
+
+lemma shiftr_cacheLineBits_less_mask_word_bits:
+  "x >> cacheLineBits < mask word_bits" for x :: machine_word
+  using shiftr_less_max_mask[where n=cacheLineBits and x=x] cacheLineBits_sanity
+  by (simp add: word_bits_def)
+
+
+text \<open>hcrVCPU interface\<close>
+
+arch_requalify_facts hcrCommon_def hcrTWE_def hcrTWI_def
+
+(* hcrVCPU can have two values, based on configuration. We only need need the numerical value
+   to match with C, no other computations depend on it *)
+schematic_goal hcrVCPU_val:
+  "hcrVCPU = ?val"
+  by (simp add: hcrVCPU_def hcrCommon_def hcrTWE_def hcrTWI_def
+                Kernel_Config.config_DISABLE_WFI_WFE_TRAPS_def)
+
+(* numerical value of cpacrDefault, only needed to match with C *)
+schematic_goal cpacrDefault_val:
+  "cpacrDefault = numeral ?val"
+  by (simp add: cpacrDefault_def del: word_eq_numeral_iff_iszero)
+
+
+text \<open>VGIC HCR interface\<close>
+
+(* The initial VGIC HCR value for a VCPU depends on the GIC version. We only need the numerical
+   value to match with C, no other computations depend on it *)
+schematic_goal vgicHCR_init_val:
+  "vgicHCREN || vgicHCRTALL0 = numeral ?n"
+  by (simp add: vgicHCREN_def vgicHCRTALL0_def Kernel_Config.config_ARM_GIC_V3_def
+           del: word_eq_numeral_iff_iszero)
+     (rule numeral_One[symmetric])? (* can be 1, depending on GIC version *)
+
+
+text \<open>TCBFlags interface\<close>
+
+lemma scast_seL4_TCBFlag_simps[simp]:
+  "scast seL4_TCBFlag_NoFlag = 0"
+  "scast seL4_TCBFlag_fpuDisabled = tcbFlagToWord FpuDisabled"
+  by (clarsimp simp: seL4_TCBFlag_fpuDisabled_def seL4_TCBFlag_NoFlag_def tcbFlagToWord_def)+
+
+(* config_HAVE_FPU has to be unfolded here to match the implicit enum value from the preprocessor. *)
+lemma scast_seL4_TCBFlag_MASK_tcbFlagMask[simp]:
+  "scast seL4_TCBFlag_MASK = tcbFlagMask"
+  by (clarsimp simp: seL4_TCBFlag_MASK_def tcbFlagMask_def Kernel_Config.config_HAVE_FPU_def tcbFlagToWord_def)
+
+(* end of Kernel_Config interface section *)
+
 
 (* Input abbreviations for API object types *)
 (* disambiguates names *)
@@ -549,6 +755,47 @@ abbreviation(input)
   prioInvalid :: sword32
 where
   "prioInvalid == seL4_InvalidPrio"
+
+(* The magic 4 comes out of the bitfield generator -- this applies to all versions of the kernel. *)
+lemma
+  shows ThreadState_Restart_mask[simp]:
+  "(scast ThreadState_Restart :: machine_word) && mask 4 = scast ThreadState_Restart"
+  and ThreadState_Inactive_mask[simp]:
+  "(scast ThreadState_Inactive :: machine_word) && mask 4 = scast ThreadState_Inactive"
+  and ThreadState_Running_mask[simp]:
+  "(scast ThreadState_Running :: machine_word) && mask 4 = scast ThreadState_Running"
+  and ThreadState_BlockedOnReceive_mask[simp]:
+  "(scast ThreadState_BlockedOnReceive :: machine_word) && mask 4
+   = scast ThreadState_BlockedOnReceive"
+  and ThreadState_BlockedOnSend_mask[simp]:
+  "(scast ThreadState_BlockedOnSend :: machine_word) && mask 4 = scast ThreadState_BlockedOnSend"
+  and ThreadState_BlockedOnReply_mask[simp]:
+  "(scast ThreadState_BlockedOnReply :: machine_word) && mask 4 = scast ThreadState_BlockedOnReply"
+  and ThreadState_BlockedOnNotification_mask[simp]:
+  "(scast ThreadState_BlockedOnNotification :: machine_word) && mask 4
+   = scast ThreadState_BlockedOnNotification"
+  and ThreadState_IdleThreadState_mask[simp]:
+  "(scast ThreadState_IdleThreadState :: machine_word) && mask 4 = scast ThreadState_IdleThreadState"
+  by (simp add: ThreadState_defs mask_def)+
+
+lemma aligned_tcb_ctcb_not_NULL:
+  assumes "is_aligned p tcbBlockSizeBits"
+  shows "tcb_ptr_to_ctcb_ptr p \<noteq> NULL"
+proof
+  assume "tcb_ptr_to_ctcb_ptr p = NULL"
+  hence "p + ctcb_offset = 0"
+     by (simp add: tcb_ptr_to_ctcb_ptr_def)
+  moreover
+  from `is_aligned p tcbBlockSizeBits`
+  have "p + ctcb_offset = p || ctcb_offset"
+    by (rule word_and_or_mask_aligned) (simp add: ctcb_offset_defs objBits_defs mask_def)
+  moreover
+  have "ctcb_offset !! ctcb_size_bits"
+    by (simp add: ctcb_offset_defs objBits_defs)
+  ultimately
+  show False
+    by (simp add: bang_eq)
+qed
 
 end
 

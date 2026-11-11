@@ -17,9 +17,7 @@ be defined as 0. The important thing is that the simplifier doesn't know they're
 equal.
 \<close>
 
-definition
-  simp_strategy :: "nat \<Rightarrow> ('a :: {}) \<Rightarrow> 'a"
-where
+definition simp_strategy :: "nat \<Rightarrow> ('a :: {}) \<Rightarrow> 'a" where
   "simp_strategy name x \<equiv> x"
 
 text \<open>
@@ -35,18 +33,16 @@ text \<open>
 This strategy, or rather lack thereof, can be used to forbid simplification.
 \<close>
 
-definition
-  NoSimp :: nat
-where "NoSimp = 0"
+definition NoSimp :: nat where
+  "NoSimp = 0"
 
 text \<open>
 This strategy indicates that a boolean subterm should be simplified only by
 using explicit assumptions of the simpset.
 \<close>
 
-definition
-  ByAssum :: nat
-where "ByAssum = 0"
+definition ByAssum :: nat where
+  "ByAssum = 0"
 
 lemma Eq_TrueI_ByAssum:
   "P \<Longrightarrow> simp_strategy ByAssum P \<equiv> True"
@@ -55,7 +51,7 @@ lemma Eq_TrueI_ByAssum:
 simproc_setup simp_strategy_ByAssum ("simp_strategy ByAssum b") =
   \<open>K (fn ss => fn ct => let
       val b = Thm.dest_arg ct
-      val t = Thm.instantiate ([],[((("P",0),@{typ bool}), b)])
+      val t = Thm.instantiate (TVars.empty, Vars.make [((("P",0),@{typ bool}), b)])
         @{thm Eq_TrueI_ByAssum}
       val prems = Raw_Simplifier.prems_of ss
     in get_first (try (fn p => p RS t)) prems end)\<close>
@@ -83,24 +79,25 @@ lemma simp_strategy_Eq_True:
 ML \<open>
 fun simp_strategy_True_conv ct = case Thm.term_of ct of
     (Const (@{const_name simp_strategy}, _) $ _ $ @{term True})
-      => Thm.instantiate ([], [((("name",0), @{typ nat}), Thm.dest_arg1 ct)])
+      => Thm.instantiate (TVars.empty, Vars.make [((("name",0), @{typ nat}), Thm.dest_arg1 ct)])
           @{thm simp_strategy_Eq_True}
   | _ => Conv.all_conv ct
 
 fun new_simp_strategy thy (name : term) ss rewr_True =
 let
   val ctxt = Proof_Context.init_global thy;
-  val ss = Simplifier.make_simproc ctxt ("simp_strategy_" ^ fst (dest_Const name))
-    {lhss = [@{term simp_strategy} $ name $ @{term x}],
+in
+  Simplifier.make_simproc ctxt
+    {name = "simp_strategy_" ^ fst (dest_Const name),
+     lhss = [@{term simp_strategy} $ name $ @{term x}],
+     kind = Simproc,
      proc = (fn _ => fn ctxt' => fn ct =>
         ct
         |> (Conv.arg_conv (Simplifier.rewrite (put_simpset ss ctxt'))
           then_conv (if rewr_True then simp_strategy_True_conv
                       else Conv.all_conv))
-        |> (fn c => if Thm.is_reflexive c then NONE else SOME c))
-     }
-in
-  ss
+        |> (fn c => if Thm.is_reflexive c then NONE else SOME c)),
+     identifier = []}
 end
 \<close>
 

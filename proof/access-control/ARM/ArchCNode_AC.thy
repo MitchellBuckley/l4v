@@ -10,7 +10,7 @@ begin
 
 section\<open>Arch-specific CNode AC.\<close>
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 declare arch_post_modify_registers_def[simp]
 declare arch_post_cap_deletion_def[simp]
@@ -64,28 +64,24 @@ lemma set_cap_state_vrefs[CNode_AC_assms, wp]:
              split: if_split_asm simp: vs_refs_no_global_pts_def)
   done
 
-crunches maskInterrupt
+crunch maskInterrupt
   for underlying_memory[CNode_AC_assms, wp]: "\<lambda>s. P (underlying_memory s)"
   and device_state[CNode_AC_assms, wp]: "\<lambda>s. P (device_state s)"
   (simp: maskInterrupt_def)
 
-crunches set_cdt
+crunch set_cdt
   for state_vrefs[CNode_AC_assms, wp]: "\<lambda>s. P (state_vrefs s)"
   and state_asids_to_policy[CNode_AC_assms, wp]: "\<lambda>s. P (state_asids_to_policy aag s)"
 
-crunches prepare_thread_delete, arch_finalise_cap
-  for cur_domain[CNode_AC_assms, wp]:"\<lambda>s. P (cur_domain s)"
-  (wp: crunch_wps select_wp hoare_vcg_if_lift2 simp: unless_def)
-
 lemma state_vrefs_tcb_upd[CNode_AC_assms]:
-  "get_tcb t s = Some y \<Longrightarrow> state_vrefs (s\<lparr>kheap := kheap s(t \<mapsto> TCB tcb)\<rparr>) = state_vrefs s"
+  "tcb_at t s \<Longrightarrow> state_vrefs (s\<lparr>kheap := (kheap s)(t \<mapsto> TCB tcb)\<rparr>) = state_vrefs s"
   apply (rule ext)
-  apply (auto simp: state_vrefs_def vs_refs_no_global_pts_def dest!: get_tcb_SomeD)
+  apply (auto simp: state_vrefs_def vs_refs_no_global_pts_def tcb_at_def dest!: get_tcb_SomeD)
   done
 
 lemma state_vrefs_simple_type_upd[CNode_AC_assms]:
   "\<lbrakk> ko_at ko ptr s; is_simple_type ko; a_type ko = a_type (f val) \<rbrakk>
-     \<Longrightarrow> state_vrefs (s\<lparr>kheap := kheap s(ptr \<mapsto> f val)\<rparr>) = state_vrefs s"
+     \<Longrightarrow> state_vrefs (s\<lparr>kheap := (kheap s)(ptr \<mapsto> f val)\<rparr>) = state_vrefs s"
   apply (rule ext)
   apply (auto simp: state_vrefs_def vs_refs_no_global_pts_def obj_at_def partial_inv_def a_type_def
              split: kernel_object.splits arch_kernel_obj.splits if_splits)
@@ -95,10 +91,6 @@ lemma state_vrefs_simple_type_upd[CNode_AC_assms]:
 lemma a_type_arch_object_not_tcb[CNode_AC_assms, simp]:
   "a_type (ArchObj arch_kernel_obj) \<noteq> ATCB"
   by auto
-
-lemma arch_post_cap_deletion_cur_domain[CNode_AC_assms, wp]:
-  "arch_post_cap_deletion acap \<lbrace>\<lambda>s. P (cur_domain s)\<rbrace>"
-  by wpsimp
 
 lemma arch_post_cap_deletion_integrity[CNode_AC_assms]:
   "arch_post_cap_deletion acap \<lbrace>integrity aag X st\<rbrace>"
@@ -114,18 +106,22 @@ lemma list_integ_lift[CNode_AC_assms]:
     "\<lbrace>list_integ (cdt_change_allowed aag {pasSubject aag} (cdt st) (tcb_states_of_state st)) st and Q\<rbrace>
      f
      \<lbrace>\<lambda>_. list_integ (cdt_change_allowed aag {pasSubject aag}  (cdt st) (tcb_states_of_state st)) st\<rbrace>"
-  assumes ekh: "\<And>P. f \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>"
-  assumes rq: "\<And>P. f \<lbrace>\<lambda>s. P (ready_queues s)\<rbrace>"
   shows "\<lbrace>integrity aag X st and Q\<rbrace> f \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
   apply (rule hoare_pre)
    apply (unfold integrity_def[abs_def] integrity_asids_def)
    apply (simp only: integrity_cdt_list_as_list_integ)
-   apply (rule hoare_lift_Pf2[where f="ekheap"])
-    apply (simp add: tcb_states_of_state_def get_tcb_def)
-    apply (wp li[simplified tcb_states_of_state_def get_tcb_def] ekh rq)+
+   apply (simp add: tcb_states_of_state_def get_tcb_def)
+   apply (wp li[simplified tcb_states_of_state_def get_tcb_def])+
   apply (simp only: integrity_cdt_list_as_list_integ)
   apply (simp add: tcb_states_of_state_def get_tcb_def)
   done
+
+lemma set_irq_state_respects[CNode_AC_assms,wp]:
+  "\<lbrace>integrity aag X st and K (is_subject_irq aag irq)\<rbrace>
+   set_irq_state irqst irq
+   \<lbrace>\<lambda>_. integrity aag X st\<rbrace>"
+  unfolding set_irq_state_def maskInterrupt_def
+  by (wpsimp wp: dmo_no_mem_respects simp: integrity_subjects_def integrity_interrupts_def)
 
 end
 
@@ -134,22 +130,22 @@ global_interpretation CNode_AC_1?: CNode_AC_1
 proof goal_cases
   interpret Arch .
   case 1 show ?case
-    by (unfold_locales; fact CNode_AC_assms)
+    by (unfold_locales; (fact CNode_AC_assms | solves \<open>wp only: CNode_AC_assms; simp\<close>)?)
 qed
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 lemma integrity_asids_set_cap_Nullcap[CNode_AC_assms]:
-  "\<lbrace>(=) s\<rbrace> set_cap NullCap slot \<lbrace>\<lambda>_. integrity_asids aag subjects x s\<rbrace>"
+  "\<lbrace>(=) s\<rbrace> set_cap NullCap slot \<lbrace>\<lambda>_. integrity_asids aag subjects x a s\<rbrace>"
   unfolding integrity_asids_def by wpsimp
 
-crunches set_original
+crunch set_original
   for state_asids_to_policy[CNode_AC_assms, wp]: "\<lambda>s. P (state_asids_to_policy aag s)"
   and state_objs_to_policy[CNode_AC_assms, wp]: "\<lambda>s. P (state_objs_to_policy s)"
   (simp: state_objs_to_policy_def)
 
-crunches set_cdt_list, update_cdt_list
+crunch set_cdt_list, update_cdt_list
   for state_vrefs[CNode_AC_assms, wp]: "\<lambda>s. P (state_vrefs s)"
   and state_asids_to_policy[CNode_AC_assms, wp]: "\<lambda>s. P (state_asids_to_policy aag s)"
   (simp: set_cdt_list_def)
@@ -161,11 +157,11 @@ global_interpretation CNode_AC_2?: CNode_AC_2
 proof goal_cases
   interpret Arch .
   case 1 show ?case
-    by (unfold_locales; fact CNode_AC_assms)
+    by (unfold_locales; (fact CNode_AC_assms | solves \<open>rule integrity_arch_triv\<close>)?)
 qed
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 lemma arch_post_cap_deletion_pas_refined[CNode_AC_assms, wp]:
   "arch_post_cap_deletion irqopt \<lbrace>pas_refined aag\<rbrace>"
@@ -174,6 +170,15 @@ lemma arch_post_cap_deletion_pas_refined[CNode_AC_assms, wp]:
 lemma aobj_ref'_same_aobject[CNode_AC_assms]:
   "same_aobject_as ao' ao \<Longrightarrow> aobj_ref' ao = aobj_ref' ao'"
   by (cases ao; clarsimp split: arch_cap.splits)
+
+lemma thread_set_arch_trivT[CNode_AC_assms]:
+  assumes arch: "\<And>tcb. tcb_arch (f tcb) = tcb_arch tcb"
+  shows "thread_set f t \<lbrace>\<lambda>s. P (state_hyp_refs_of s)\<rbrace>"
+  apply (wpsimp simp: thread_set_def wp: set_object_wp )
+  apply (erule_tac P=P in back_subst)
+  apply (rule ext)
+  apply (simp add: arch state_hyp_refs_of_def get_tcb_def split: option.splits kernel_object.splits)
+  done
 
 end
 
@@ -196,11 +201,11 @@ global_interpretation CNode_AC_3?: CNode_AC_3
 proof goal_cases
   interpret Arch .
   case 1 show ?case
-    by (unfold_locales; fact CNode_AC_assms)
+    by (unfold_locales; (fact CNode_AC_assms)?)
 qed
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 lemma arch_derive_cap_auth_derived[CNode_AC_assms]:
   "\<lbrace>\<lambda>s. cte_wp_at (auth_derived (ArchObjectCap cap)) src_slot s\<rbrace>
@@ -248,10 +253,10 @@ lemma arch_derive_cap_clas[CNode_AC_assms]:
   done
 
 lemma arch_derive_cap_obj_refs_auth[CNode_AC_assms]:
-  "\<lbrace>K (\<forall>r\<in>obj_refs (ArchObjectCap cap).
+  "\<lbrace>K (\<forall>r\<in>obj_refs_ac (ArchObjectCap cap).
        \<forall>auth\<in>cap_auth_conferred (ArchObjectCap cap). aag_has_auth_to aag auth r)\<rbrace>
    arch_derive_cap cap
-   \<lbrace>(\<lambda>x s. \<forall>r\<in>obj_refs x. \<forall>auth\<in>cap_auth_conferred x. aag_has_auth_to aag auth r)\<rbrace>, -"
+   \<lbrace>(\<lambda>x s. \<forall>r\<in>obj_refs_ac x. \<forall>auth\<in>cap_auth_conferred x. aag_has_auth_to aag auth r)\<rbrace>, -"
   unfolding arch_derive_cap_def
   apply (rule hoare_pre)
    apply (wp | wpc)+
@@ -260,7 +265,7 @@ lemma arch_derive_cap_obj_refs_auth[CNode_AC_assms]:
 
 (* FIXME: move *)
 lemma arch_derive_cap_obj_refs_subset[CNode_AC_assms]:
-  "\<lbrace>\<lambda>s. (\<forall>x \<in> aobj_ref' acap. P x s)\<rbrace> arch_derive_cap acap \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs rv. P x s\<rbrace>, -"
+  "\<lbrace>\<lambda>s. (\<forall>x \<in> aobj_ref' acap. P x s)\<rbrace> arch_derive_cap acap \<lbrace>\<lambda>rv s. \<forall>x \<in> obj_refs_ac rv. P x s\<rbrace>, -"
   by (wpsimp simp: arch_derive_cap_def) fastforce
 
 lemma arch_derive_cap_clip[CNode_AC_assms]:
@@ -277,7 +282,7 @@ lemma arch_derive_cap_untyped_range_subset[CNode_AC_assms]:
   by (wpsimp simp: arch_derive_cap_def)
 
 lemma arch_update_cap_obj_refs_subset[CNode_AC_assms]:
-  "\<lbrakk> x \<in> obj_refs (arch_update_cap_data pres data cap) \<rbrakk> \<Longrightarrow> x \<in> aobj_ref' cap"
+  "\<lbrakk> x \<in> obj_refs_ac (arch_update_cap_data pres data cap) \<rbrakk> \<Longrightarrow> x \<in> aobj_ref' cap"
   by (simp add: arch_update_cap_data_def)
 
 lemma arch_update_cap_untyped_range_empty[CNode_AC_assms, simp]:
@@ -308,14 +313,15 @@ proof goal_cases
 qed
 
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming
 
 lemma pas_refined_arch_state_update_not_asids[simp]:
  "arm_asid_table (f (arch_state s)) = arm_asid_table (arch_state s)
   \<Longrightarrow> pas_refined aag (arch_state_update f s) = pas_refined aag s"
   by (simp add: pas_refined_def state_objs_to_policy_def)
 
-crunch cdt[wp]: store_pte "\<lambda>s. P (cdt s)"
+crunch store_pte
+  for cdt[wp]: "\<lambda>s. P (cdt s)"
 
 lemma store_pte_state_refs[wp]:
   "store_pte p pte \<lbrace>\<lambda>s. P (state_refs_of s)\<rbrace>"
@@ -348,11 +354,11 @@ lemma store_pte_st_vrefs[wp]:
                      word_bw_assocs mask_def pt_bits_def pageBits_def)
   done
 
-lemma store_pte_thread_states[wp]:
-  "store_pte p pte \<lbrace>\<lambda>s. P (thread_states s)\<rbrace>"
+lemma store_pte_thread_st_auth[wp]:
+  "store_pte p pte \<lbrace>\<lambda>s. P (thread_st_auth s)\<rbrace>"
   apply (simp add: store_pte_def set_pt_def set_object_def)
   apply (wp get_object_wp)
-  apply (clarsimp simp: thread_states_def obj_at_def get_tcb_def tcb_states_of_state_def
+  apply (clarsimp simp: thread_st_auth_def obj_at_def get_tcb_def tcb_states_of_state_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm option.split)
   done
@@ -370,15 +376,14 @@ lemma auth_graph_map_def2:
   "auth_graph_map f S = (\<lambda>(x, auth, y). (f x, auth, f y)) ` S"
   by (auto simp add: auth_graph_map_def image_def intro: rev_bexI)
 
-(* FIXME move to AInvs *)
-lemma store_pte_ekheap[wp]:
-  "store_pte p pte \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>"
-  apply (simp add: store_pte_def set_pt_def)
-  apply (wp get_object_wp)
-  apply simp
-  done
+crunch store_pte
+  for etcbs_of[wp]: "\<lambda>s. P (etcbs_of s)"
+  and asid_table_inv[wp]: "\<lambda>s. P (asid_table s)"
 
-crunch asid_table_inv [wp]: store_pte "\<lambda>s. P (asid_table s)"
+lemma state_hyp_refs_empty[simp]:
+  "state_hyp_refs_of s = (\<lambda>_. {})"
+  by (auto simp: state_hyp_refs_of_def hyp_refs_of_def tcb_hyp_refs_def refs_of_a_def
+          split: option.splits kernel_object.splits)
 
 lemma store_pte_pas_refined[wp]:
   "\<lbrace>pas_refined aag and
@@ -423,11 +428,11 @@ lemma store_pde_st_vrefs[wp]:
   apply (cases "pde_ref2 pde")
   by (auto simp: split_def insert_Diff_if Un_ac ucast_ucast_mask_shift_helper)
 
-lemma store_pde_thread_states[wp]:
-  "store_pde p pde \<lbrace>\<lambda>s. P (thread_states s)\<rbrace>"
+lemma store_pde_thread_st_auth[wp]:
+  "store_pde p pde \<lbrace>\<lambda>s. P (thread_st_auth s)\<rbrace>"
   apply (simp add: store_pde_def set_pd_def set_object_def)
   apply (wp get_object_wp)
-  apply (clarsimp simp: thread_states_def obj_at_def get_tcb_def tcb_states_of_state_def
+  apply (clarsimp simp: thread_st_auth_def obj_at_def get_tcb_def tcb_states_of_state_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm option.split)
   done
@@ -478,11 +483,11 @@ lemma set_asid_pool_st_vrefs[wp]:
                  elim!: rsubst[where P=P, OF _ ext])
   done
 
-lemma set_asid_pool_thread_states[wp]:
-  "set_asid_pool p pool \<lbrace>\<lambda>s. P (thread_states s)\<rbrace>"
+lemma set_asid_pool_thread_st_auth[wp]:
+  "set_asid_pool p pool \<lbrace>\<lambda>s. P (thread_st_auth s)\<rbrace>"
   apply (simp add: set_asid_pool_def)
   apply (wpsimp wp: set_object_wp_strong)
-  apply (clarsimp simp: thread_states_def obj_at_def get_tcb_def tcb_states_of_state_def
+  apply (clarsimp simp: thread_st_auth_def obj_at_def get_tcb_def tcb_states_of_state_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm option.split)
   done
@@ -494,13 +499,6 @@ lemma set_asid_pool_thread_bound_ntfns[wp]:
   apply (clarsimp simp: thread_bound_ntfns_def obj_at_def get_tcb_def tcb_states_of_state_def
                  elim!: rsubst[where P=P, OF _ ext]
                  split: kernel_object.split_asm option.split)
-  done
-
-(* FIXME move to AInvs *)
-lemma set_asid_pool_ekheap[wp]:
-  "set_asid_pool p pool \<lbrace>\<lambda>s. P (ekheap s)\<rbrace>"
-  apply (simp add: set_asid_pool_def)
-  apply (wp get_object_wp | simp)+
   done
 
 lemma set_asid_pool_pas_refined[wp]:
@@ -537,7 +535,8 @@ lemma pas_refined_clear_asid:
                elim!: state_asids_to_policy_aux.cases
                split: if_split_asm)
 
-crunch integrity_autarch: set_asid_pool "integrity aag X st"
+crunch set_asid_pool
+  for integrity_autarch: "integrity aag X st"
   (wp: crunch_wps)
 
 end

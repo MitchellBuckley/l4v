@@ -8,11 +8,12 @@ theory CLevityCatch
 imports
   "CBaseRefine.Include_C"
   ArchMove_C
-  "CLib.LemmaBucket_C"
+  "CParser.LemmaBucket_C"
   "Lib.LemmaBucket"
+  Boolean_C
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 declare word_neq_0_conv [simp del]
 
@@ -53,31 +54,23 @@ lemma no_overlap_new_cap_addrs_disjoint:
      pspace_no_overlap' ptr sz s \<rbrakk> \<Longrightarrow>
    set (new_cap_addrs n ptr ko) \<inter> dom (ksPSpace s) = {}"
   apply (erule disjoint_subset [OF new_cap_addrs_subset, where sz1=sz])
-  apply (clarsimp simp: Word_Lib.ptr_add_def field_simps)
+  apply (clarsimp simp: More_Word_Operations.ptr_add_def field_simps)
   apply (rule pspace_no_overlap_disjoint')
   apply auto
   done
 
 declare empty_fail_doMachineOp [simp]
 
-lemma empty_fail_loadWordUser[intro!, simp]:
-  "empty_fail (loadWordUser x)"
-  by (simp add: loadWordUser_def ef_loadWord)
-
-lemma empty_fail_getMRs[iff]:
-  "empty_fail (getMRs t buf mi)"
-  by (auto simp add: getMRs_def split: option.split)
-
 lemma empty_fail_getExtraCPtrs [intro!, simp]:
   "empty_fail (getExtraCPtrs sendBuffer info)"
   apply (simp add: getExtraCPtrs_def)
   apply (cases info, simp)
-  apply (cases sendBuffer, simp_all)
+  apply (cases sendBuffer; fastforce)
   done
 
 lemma empty_fail_loadCapTransfer [intro!, simp]:
   "empty_fail (loadCapTransfer a)"
-  by (simp add: loadCapTransfer_def capTransferFromWords_def)
+  by (fastforce simp: loadCapTransfer_def capTransferFromWords_def)
 
 lemma empty_fail_emptyOnFailure [intro!, simp]:
   "empty_fail m \<Longrightarrow> empty_fail (emptyOnFailure m)"
@@ -92,12 +85,12 @@ lemma empty_fail_unifyFailure [intro!, simp]:
 lemma asUser_get_registers:
   "\<lbrace>tcb_at' target\<rbrace>
      asUser target (mapM getRegister xs)
-   \<lbrace>\<lambda>rv s. obj_at' (\<lambda>tcb. map ((atcbContextGet o tcbArch) tcb) xs = rv) target s\<rbrace>"
+   \<lbrace>\<lambda>rv s. obj_at' (\<lambda>tcb. map ((user_regs \<circ> atcbContextGet \<circ> tcbArch) tcb) xs = rv) target s\<rbrace>"
   apply (induct xs)
    apply (simp add: mapM_empty asUser_return)
    apply wp
    apply simp
-  apply (simp add: mapM_Cons asUser_bind_distrib asUser_return)
+  apply (simp add: mapM_Cons asUser_bind_distrib asUser_return empty_fail_cond)
   apply wp
    apply simp
    apply (rule hoare_strengthen_post)
@@ -113,38 +106,6 @@ lemma asUser_get_registers:
   apply (clarsimp simp: getRegister_def simpler_gets_def
                         obj_at'_def)
   done
-
-
-lemma projectKO_user_data_device:
-  "(projectKO_opt ko = Some (t :: user_data_device)) = (ko = KOUserDataDevice)"
-  by (cases ko)
-     (auto simp: projectKO_opts_defs split: arch_kernel_object.splits)
-
-lemma empty_fail_getReceiveSlots:
-  "empty_fail (getReceiveSlots r rbuf)"
-proof -
-  note
-    empty_fail_assertE[iff]
-    empty_fail_resolveAddressBits[iff]
-  show ?thesis
-  apply (clarsimp simp: getReceiveSlots_def loadCapTransfer_def split_def
-                 split: option.split)
-  apply (rule empty_fail_bind)
-   apply (simp add: capTransferFromWords_def)
-  apply (simp add: emptyOnFailure_def unifyFailure_def)
-  apply (intro empty_fail_catch empty_fail_bindE empty_fail_rethrowFailure,
-         simp_all add: empty_fail_whenEs)
-   apply (simp_all add: lookupCap_def split_def lookupCapAndSlot_def
-                        lookupSlotForThread_def liftME_def
-                        getThreadCSpaceRoot_def locateSlot_conv bindE_assoc
-                        lookupSlotForCNodeOp_def lookupErrorOnFailure_def
-                  cong: if_cong)
-   apply (intro empty_fail_bindE,
-          simp_all add: getSlotCap_def)
-  apply (intro empty_fail_If empty_fail_bindE empty_fail_rethrowFailure impI,
-         simp_all add: empty_fail_whenEs rangeCheck_def)
-  done
-qed
 
 lemma exec_Basic_Guard_UNIV:
   "Semantic.exec \<Gamma> (Basic f;; Guard F UNIV (Basic g)) x y =
@@ -177,4 +138,12 @@ lemma option_to_ptr_not_0:
   "\<lbrakk> p \<noteq> 0 ; option_to_ptr v = Ptr p \<rbrakk> \<Longrightarrow> v = Some p"
   by (clarsimp simp: option_to_ptr_def option_to_0_def split: option.splits)
 
+schematic_goal sz8_helper:
+  "((-1) << 8 :: addr) = ?v"
+  by (simp add: shiftl_t2n)
+
+lemmas reset_name_seq_bound_helper2
+    = reset_name_seq_bound_helper[where sz=8 and v="v :: addr" for v,
+          simplified sz8_helper word_bits_def[symmetric],
+          THEN name_seq_bound_helper]
 end

@@ -4,17 +4,13 @@
 # SPDX-License-Identifier: BSD-2-Clause
 #
 
-from __future__ import print_function
-from __future__ import absolute_import
-import braces
 import re
 import sys
 import os
-import six
-from six.moves import map
-from six.moves import range
-from six.moves import zip
 from functools import reduce
+
+import braces
+from msgs import error, warning
 
 
 class Call(object):
@@ -134,8 +130,7 @@ def top_transform(input, isLhs):
     comments = []
     for n, line in enumerate(input):
         if '\t' in line:
-            sys.stderr.write('WARN: tab in line %d, %s.\n' %
-                             (n, filename))
+            warning('tab in line %d, %s.\n' % (n, filename))
         if isLhs:
             if line.startswith('> '):
                 if '--' in line:
@@ -429,8 +424,7 @@ def def_lines(d, call):
             if d.sig:
                 defname = '%s_def' % d.defined
                 if d.primrec:
-                    print('warning body-only primrec:')
-                    print(body[0])
+                    warning('body-only primrec:\n' + body[0], call.filename)
                     return comments + ['primrec'] + body
                 return comments + ['defs %s:' % defname] + body
             else:
@@ -500,7 +494,7 @@ def type_transform(string):
             var_annotes.setdefault(var, [])
             var_annotes[var].extend(names)
         transformed = type_transform(bits[1])
-        for (var, insts) in six.iteritems(var_annotes):
+        for (var, insts) in var_annotes.items():
             if len(insts) == 1:
                 newvar = '(%s :: %s)' % (var, insts[0])
             else:
@@ -515,7 +509,7 @@ def type_transform(string):
     # apply everything locally then work back up
     bstring = braces.str(string, '(', ')')
     bits = bstring.split('->')
-    r = ' \<Rightarrow> '
+    r = r' \<Rightarrow> '
     if len(bits) == 1:
         bits = bstring.split(',')
         r = ' * '
@@ -612,7 +606,7 @@ def constructor_reversing(tokens):
         listToken = braces.str('(List %s)' % tokens[2], '(', ')')
         return [listToken, tokens[0]]
     elif tokens[0] == 'array':
-        arrow_token = braces.str('\<Rightarrow>', '(', ')')
+        arrow_token = braces.str(r'\<Rightarrow>', '(', ')')
         return [tokens[1], arrow_token, tokens[2]]
     elif tokens[0] == 'either':
         plus_token = braces.str('+', '(', ')')
@@ -630,8 +624,8 @@ def constructor_reversing(tokens):
         comma = braces.str(',', '+', '+')
         return [lbrack, tokens[1], comma, tokens[2], rbrack, tokens[0]]
     else:
-        print("Error parsing " + filename)
-        print("Can't deal with %s" % tokens)
+        error(f"error parsing {filename}\n"
+              f"Can't deal with {tokens}")
         sys.exit(1)
 
 
@@ -679,17 +673,39 @@ def newtype_transform(d):
         return named_newtype_transform(line, header, d)
 
 
+# parameterised types of which we know that they are already defined in Isabelle
+known_type_assignments = [
+    'domain_schedule',
+    'kernel',
+    'kernel_f',
+    'kernel_f f',  # there is a KernelF instance that gets transformed into this
+    'kernel_init',
+    'kernel_init_state',
+    'machine_data',
+    'machine_monad',
+    'ready_queue',
+    'user_monad',
+    'fpustate',
+    'eight_tuple a',
+    'domain_schedule_item'
+]
+
+
 def typename_transform(line, header, d):
     try:
         [oldtype] = line.split()
     except:
-        sys.stderr.write('Warning: type assignment with parameters not supported %s\n' % d.body)
-        call.bad_type_assignment = True
+        if header not in known_type_assignments:
+            warning('Type assignment with parameters not supported %s\n  Translated string was "%s"'
+                    % (d.body, header), filename)
+            call.bad_type_assignment = True
         return
     if oldtype.startswith('Data.Word.Word'):
         # take off the prefix, leave Word32 or Word64 etc
         oldtype = oldtype[10:]
     oldtype = type_conv(oldtype)
+    # get rid of (), insert unit
+    oldtype = 'unit'.join(oldtype.split('()'))
     bits = oldtype.split()
     for bit in bits:
         d.typedeps.add(bit)
@@ -790,7 +806,7 @@ def named_newtype_transform(line, header, d):
             names[name][cons] = i
             types[name] = type
 
-    for name, map in six.iteritems(names):
+    for name, map in names.items():
         lines.append('')
         lines.extend(named_update_definitions(name, map, types[name], header,
                                               dict(constructors)))
@@ -808,8 +824,8 @@ def named_newtype_transform(line, header, d):
             lines.extend(check)
 
     if len(constructors) == 1:
-        for ex_name, _ in six.iteritems(names):
-            for up_name, _ in six.iteritems(names):
+        for ex_name in names:
+            for up_name in names:
                 lines.append('')
                 lines.extend(named_extractor_update_lemma(ex_name, up_name))
 
@@ -845,11 +861,11 @@ def named_extractor_update_lemma(ex_name, up_name):
 def named_extractor_definitions(name, map, type, header, constructors):
     lines = []
     lines.append('primrec')
-    lines.append('  %s :: "%s \<Rightarrow> %s"'
+    lines.append('  %s :: "%s \\<Rightarrow> %s"'
                  % (name, header, type))
     lines.append('where')
     is_first = True
-    for cons, i in six.iteritems(map):
+    for cons, i in map.items():
         if is_first:
             l = '  "%s (%s' % (name, cons)
             is_first = False
@@ -867,14 +883,14 @@ def named_extractor_definitions(name, map, type, header, constructors):
 def named_update_definitions(name, map, type, header, constructors):
     lines = []
     lines.append('primrec')
-    ra = '\<Rightarrow>'
+    ra = r'\<Rightarrow>'
     if len(type.split()) > 1:
         type = '(%s)' % type
     lines.append('  %s_update :: "(%s %s %s) %s %s %s %s"'
                  % (name, type, ra, type, ra, header, ra, header))
     lines.append('where')
     is_first = True
-    for cons, i in six.iteritems(map):
+    for cons, i in map.items():
         if is_first:
             l = '  "%s_update f (%s' % (name, cons)
             is_first = False
@@ -900,17 +916,17 @@ def named_constructor_translation(name, map, header):
     lines.append('abbreviation (input)')
     l = '  %s_trans :: "' % name
     for n, type in map:
-        l = l + '(' + type + ') \<Rightarrow> '
-    l = l + '%s" ("%s\'_ \<lparr> %s= _' % (header, name, map[0][0])
+        l = l + '(' + type + r') \<Rightarrow> '
+    l = l + '%s" ("%s\'_ \\<lparr> %s= _' % (header, name, map[0][0])
     for n, type in map[1:]:
-        l = l + ', %s= _' % n
-    l = l + ' \<rparr>")'
+        l = l + ', %s= _' % n.replace("_", "'_")
+    l = l + r' \<rparr>")'
     lines.append(l)
     lines.append('where')
-    l = '  "%s_ \<lparr> %s= v0' % (name, map[0][0])
+    l = '  "%s_ \\<lparr> %s= v0' % (name, map[0][0])
     for i, (n, type) in enumerate(map[1:]):
         l = l + ', %s= v%d' % (n, i + 1)
-    l = l + ' \<rparr> == %s' % name
+    l = l + ' \\<rparr> == %s' % name
     for i in range(len(map)):
         l = l + ' v%d' % i
     l = l + '"'
@@ -922,15 +938,15 @@ def named_constructor_translation(name, map, header):
 def named_constructor_check(name, map, header):
     lines = []
     lines.append('definition')
-    lines.append('  is%s :: "%s \<Rightarrow> bool"' % (name, header))
+    lines.append('  is%s :: "%s \\<Rightarrow> bool"' % (name, header))
     lines.append('where')
-    lines.append(' "is%s v \<equiv> case v of' % name)
+    lines.append(' "is%s v \\<equiv> case v of' % name)
     l = '    %s ' % name
     for i, _ in enumerate(map):
         l = l + 'v%d ' % i
-    l = l + '\<Rightarrow> True'
+    l = l + r'\<Rightarrow> True'
     lines.append(l)
-    lines.append('  | _ \<Rightarrow> False"')
+    lines.append(r'  | _ \<Rightarrow> False"')
 
     return lines
 
@@ -964,7 +980,7 @@ def type_wrapper_type(header, cons, rhs, d, decons=None):
             % (decons, header, header, header, header),
             'where',
             '  %s_update_def[simp]:' % decons,
-            ' "%s_update f y \<equiv> f y"' % decons,
+            ' "%s_update f y \\<equiv> f y"' % decons,
             ''
         ])
         lines.extend(named_constructor_translation(cons, [(decons, decons_type)
@@ -981,10 +997,10 @@ def instance_transform(d):
     classname = bits[1]
     typename = type_conv(bits[2])
     if classname == 'Show':
-        print("Warning: discarding class instance '%s :: Show'" % typename)
+        warning("discarding class instance '%s :: Show'" % typename, filename)
         return None
     if typename == '()':
-        print("Warning: discarding class instance 'unit :: %s'" % classname)
+        warning("discarding class instance 'unit :: %s'" % classname, filename)
         return None
     if len(bits) == 3:
         if children == []:
@@ -1007,12 +1023,12 @@ def instance_transform(d):
     d.instance_defs = defs_dict
     d.deriving = [classname]
     if typename not in all_type_arities:
-        sys.stderr.write('FAIL: attempting %s\n' % d.defined)
-        sys.stderr.write('(typename %r)\n' % typename)
-        sys.stderr.write('when reading %s\n' % filename)
-        sys.stderr.write('but class not defined yet\n')
-        sys.stderr.write('perhaps parse in different order?\n')
-        sys.stderr.write('hint: #INCLUDE_HASKELL_PREPARSE\n')
+        error(f'attempting {d.defined}\n'
+              f'(typename {repr(typename)})\n'
+              f'when reading {filename}\n'
+              f'but class not defined yet\n'
+              f'perhaps parse in different order?\n'
+              f'hint: #INCLUDE_HASKELL_PREPARSE\n')
         sys.exit(1)
     arities = all_type_arities[typename]
     set_instance_proofs(typename, arities, d)
@@ -1081,7 +1097,7 @@ def storable_instance_proofs(header, canonical, d):
     next_type_tag = next_type_tag + 1
     proofs.extend([
         '', 'defs (overloaded)', '  typetag_%s[simp]:' % header,
-        ' "typetag (x :: %s) \<equiv> %d"' % (header, next_type_tag), ''
+        ' "typetag (x :: %s) \\<equiv> %d"' % (header, next_type_tag), ''
         'instance %s :: dynamic' % header, '  by (intro_classes, simp)'
     ])
 
@@ -1119,7 +1135,7 @@ def storable_instance_proofs(header, canonical, d):
     else:
         extradefs.extend([
             '  loadObject_%s[simp]:' % header,
-            ' "(loadObject p q n obj) :: %s \<equiv>' % header,
+            ' "(loadObject p q n obj) :: %s \\<equiv>' % header,
             '    loadObject_default p q n obj"',
         ])
 
@@ -1136,7 +1152,7 @@ def storable_instance_proofs(header, canonical, d):
     else:
         extradefs.extend([
             '  updateObject_%s[simp]:' % header,
-            ' "updateObject (val :: %s) \<equiv>' % header,
+            ' "updateObject (val :: %s) \\<equiv>' % header,
             '    updateObject_default val"',
         ])
 
@@ -1187,7 +1203,7 @@ def pspace_storable_instance_proofs(header, canonical, d):
     else:
         extradefs.extend([
             '  loadObject_%s[simp]:' % header,
-            ' "(loadObject p q n obj) :: %s kernel \<equiv>' % header,
+            ' "(loadObject p q n obj) :: %s kernel \\<equiv>' % header,
             '    loadObject_default p q n obj"',
         ])
 
@@ -1204,7 +1220,7 @@ def pspace_storable_instance_proofs(header, canonical, d):
     else:
         extradefs.extend([
             '  updateObject_%s[simp]:' % header,
-            ' "updateObject (val :: %s) \<equiv>' % header,
+            ' "updateObject (val :: %s) \\<equiv>' % header,
             '    updateObject_default val"',
         ])
 
@@ -1252,7 +1268,7 @@ def enum_instance_proofs(header, canonical, d):
         if call.current_context:
             lines.append('interpretation Arch .')
         lines.append('definition')
-        lines.append('  enum_%s: "enum_class.enum \<equiv> map %s enum"'
+        lines.append('  enum_%s: "enum_class.enum \\<equiv> map %s enum"'
                      % (header, cons))
 
     else:
@@ -1264,7 +1280,7 @@ def enum_instance_proofs(header, canonical, d):
         if call.current_context:
             lines.append('interpretation Arch .')
         lines.append('definition')
-        lines.append('  enum_%s: "enum_class.enum \<equiv> ' % header)
+        lines.append('  enum_%s: "enum_class.enum \\<equiv> ' % header)
         if len(cons_no_args) == 0:
             lines.append('    []')
         else:
@@ -1284,11 +1300,11 @@ def enum_instance_proofs(header, canonical, d):
         lines.append('  by (meson injI %s.inject)' % header)
     lines.append('')
     lines.append('definition')
-    lines.append('  "enum_class.enum_all (P :: %s \<Rightarrow> bool) \<longleftrightarrow> Ball UNIV P"'
+    lines.append('  "enum_class.enum_all (P :: %s \\<Rightarrow> bool) \\<longleftrightarrow> Ball UNIV P"'
                  % header)
     lines.append('')
     lines.append('definition')
-    lines.append('  "enum_class.enum_ex (P :: %s \<Rightarrow> bool) \<longleftrightarrow> Bex UNIV P"'
+    lines.append('  "enum_class.enum_ex (P :: %s \\<Rightarrow> bool) \\<longleftrightarrow> Bex UNIV P"'
                  % header)
     lines.append('')
     lines.append('  instance')
@@ -1311,7 +1327,7 @@ def enum_instance_proofs(header, canonical, d):
     if call.current_context:
         lines.append('interpretation Arch .')
     lines.append('definition')
-    lines.append('  enum_alt_%s: "enum_alt \<equiv> ' % header)
+    lines.append('  enum_alt_%s: "enum_alt \\<equiv> ' % header)
     lines.append('    alt_from_ord (enum :: %s list)"' % header)
     lines.append('instance ..')
     lines.append('end')
@@ -1385,9 +1401,9 @@ def bij_instance(classname, typename, constructor, fns):
         names2 = tuple([name + "'" for name in names])
         fstr1 = fstr % names
         fstr2 = fstr % names2
-        L.append('  %s_%s: "%s \<equiv>' % (fname, typename, fstr1))
+        L.append('  %s_%s: "%s \\<equiv>' % (fname, typename, fstr1))
         for name in names:
-            L.append("    case %s of %s %s' \<Rightarrow>"
+            L.append("    case %s of %s %s' \\<Rightarrow>"
                      % (name, constructor, name))
         if cast_return:
             L.append('      %s (%s)"' % (constructor, fstr2))
@@ -1407,10 +1423,10 @@ def get_type_map(string):
         return (header, [])
     actual_map = bits[1].strip()
     if not (actual_map.startswith('{') and actual_map.endswith('}')):
-        print('Error in ' + filename)
-        print('Expected "A { blah :: blah etc }"')
-        print('However { and } not found correctly')
-        print('When parsing %s' % string)
+        error(f'in {filename}\n'
+              'Expected "A { blah :: blah etc }"\n'
+              'However { and } not found correctly\n'
+              f'When parsing {string}')
         sys.exit(1)
     actual_map = actual_map[1:-1]
 
@@ -1450,25 +1466,25 @@ def body_transform(body, defined, sig, nopattern=False):
         bits = line.split()
         numLiftIO[0] = numLiftIO[0] + 1
         rhs = '(%d :: Int) %s' % (numLiftIO[0], ' '.join(bits[1:]))
-        line = '%s\<equiv> underlying_arch_op %s' % (line, rhs)
+        line = '%s\\<equiv> underlying_arch_op %s' % (line, rhs)
         children = []
     elif '=' in line:
-        line = '\<equiv>'.join(line.split('=', 1))
+        line = '\\<equiv>'.join(line.split('=', 1))
     elif leading_bar.match(children[0][0]):
         pass
     elif '=' in children[0][0]:
         (nextline, c2) = children[0]
-        children[0] = ('\<equiv>'.join(nextline.split('=', 1)), c2)
+        children[0] = ('\\<equiv>'.join(nextline.split('=', 1)), c2)
     else:
-        sys.stderr.write('WARN: def of %s missing =\n' % defined)
+        warning('def of %s missing =\n' % defined, filename)
 
     if children and (children[-1][0].endswith('where') or
                      children[-1][0].lstrip().startswith('where')):
-        bits = line.split('\<equiv>')
+        bits = line.split(r'\<equiv>')
         where_clause = where_clause_transform(children[-1])
         children = children[:-1]
         if len(bits) == 2 and bits[1].strip():
-            line = bits[0] + '\<equiv>'
+            line = bits[0] + r'\<equiv>'
             new_line = ' ' * len(line) + bits[1]
             children = [(new_line, children)]
     else:
@@ -1483,7 +1499,7 @@ def body_transform(body, defined, sig, nopattern=False):
     (line, children) = do_clauses_transform((line, children), sig)
 
     if children and leading_bar.match(children[0][0]):
-        line = line + ' \<equiv>'
+        line = line + r' \<equiv>'
         children = guarded_body_transform(children, ' = ')
 
     children = where_clause + children
@@ -1511,7 +1527,7 @@ def bracket_dollar_lambdas(xxx_todo_changeme):
     (line, children) = xxx_todo_changeme
     if dollar_lambda_regex.search(line):
         [left, right] = dollar_lambda_regex.split(line)
-        line = '%s(\<lambda>%s' % (left, right)
+        line = '%s(\\<lambda>%s' % (left, right)
         both = (line, children)
         if has_trailing_string(';', both):
             both = remove_trailing_string(';', both)
@@ -1783,7 +1799,7 @@ left_start_table = {
 
 def do_clause_pattern(line, children, type, n=0):
     bits = line.split('<-')
-    default = [('\<leftarrow>'.join(bits), children)]
+    default = [('\\<leftarrow>'.join(bits), children)]
     if len(bits) == 1:
         return default
     (left, right) = line.split('<-', 1)
@@ -1981,9 +1997,8 @@ def case_clauses_transform(xxx_todo_changeme5):
             x = str(bits[0]) + ':: ' + type_transform(str(bits[1]))
 
     if children and children[-1][0].strip().startswith('where'):
-        sys.stderr.write('Warning: where clause in case: %r\n'
-                         % line)
-        return (beforecase + '\<comment> \<open>case removed\<close> undefined', [])
+        warning('where clause in case: %r, removing case.' % line, filename)
+        return (beforecase + r'\<comment> \<open>case removed\<close> undefined', [])
         # where_clause = where_clause_transform(children[-1])
         # children = children[:-1]
         # (in_stmt, l) = where_clause[-1]
@@ -1996,7 +2011,7 @@ def case_clauses_transform(xxx_todo_changeme5):
         bits = l.split('->', 1)
         while len(bits) == 1:
             if c == []:
-                sys.stderr.write('wtf %r\n' % l)
+                error('wtf %r\n' % l, filename)
                 sys.exit(1)
             if c[0][0].strip().startswith('|'):
                 bits = [bits[0], '']
@@ -2024,10 +2039,10 @@ def case_clauses_transform(xxx_todo_changeme5):
         print(line)
     conv = get_case_conv(cases)
     if conv == '<X>':
-        sys.stderr.write('Warning: blanked case in caseconvs\n')
-        return (beforecase + '\<comment> \<open>case removed\<close> undefined', [])
+        warning('blanked case in caseconvs', filename)
+        return (beforecase + r'\<comment> \<open>case removed\<close> undefined', [])
     if not conv:
-        sys.stderr.write('Warning: case %r\n' % (cases, ))
+        warning('no caseconv for %r\n' % (cases, ), filename)
         if cases not in cases_added:
             casestr = 'case \\x of ' + ' -> '.join(cases) + ' -> '
 
@@ -2035,7 +2050,7 @@ def case_clauses_transform(xxx_todo_changeme5):
             f.write('%s ---X>\n\n' % casestr)
             f.close()
             cases_added[cases] = 1
-        return (beforecase + '\<comment> \<open>case removed\<close> undefined', [])
+        return (beforecase + r'\<comment> \<open>case removed\<close> undefined', [])
     conv = subs_nums_and_x(conv, x)
 
     new_line = beforecase + '(' + conv[0][0]
@@ -2048,9 +2063,7 @@ def case_clauses_transform(xxx_todo_changeme5):
             new_children.append((ws + header, []))
         else:
             if (len(bodies) <= endnum):
-                sys.stderr.write('ERROR: index %d out of bounds in case %r\n' %
-                                 (endnum,
-                                  cases, ))
+                error('index %d out of bounds in case %r\n' % (endnum, cases), filename)
                 sys.exit(1)
 
             (body, c) = bodies[endnum]
@@ -2078,14 +2091,12 @@ def guarded_body_transform(body, div):
                 children = c + children[1:]
                 line = line + ' ' + l.strip()
         except:
-            sys.stderr.write('missing %r in %r\n' % (div, line))
-            sys.stderr.write('\nhandling %r\n' % body)
+            error('missing %r in %r\nhandling %r' % (div, line, body), filename)
             sys.exit(1)
         try:
             [ws, guts] = line.split('| ', 1)
         except:
-            sys.stderr.write('missing "|" in %r\n' % line)
-            sys.stderr.write('\nhandling %r\n' % body)
+            error('missing "|" in %r\nhandling %r' % (line, body), filename)
             sys.exit(1)
         if i == 0:
             new_body.append((ws + 'if', []))
@@ -2102,7 +2113,7 @@ def lhs_transform(line):
     if '(' not in line:
         return line
 
-    [left, right] = line.split('\<equiv>')
+    [left, right] = line.split(r'\<equiv>')
 
     ws = left[:len(left) - len(left.lstrip())]
 
@@ -2113,17 +2124,17 @@ def lhs_transform(line):
     for (i, bit) in enumerate(bits):
         if bit.startswith('('):
             bits[i] = 'arg%d' % i
-            case = 'case arg%d of %s \<Rightarrow> ' % (i, bit)
+            case = 'case arg%d of %s \\<Rightarrow> ' % (i, bit)
             right = case + right
 
-    return ws + ' '.join([str(bit) for bit in bits]) + '\<equiv>' + right
+    return ws + ' '.join([str(bit) for bit in bits]) + r'\<equiv>' + right
 
 
 def lhs_de_underscore(line):
     if '_' not in line:
         return line
 
-    [left, right] = line.split('\<equiv>')
+    [left, right] = line.split(r'\<equiv>')
 
     ws = left[:len(left) - len(left.lstrip())]
 
@@ -2134,14 +2145,14 @@ def lhs_de_underscore(line):
         if bit == '_':
             bits[i] = 'arg%d' % i
 
-    return ws + ' '.join([str(bit) for bit in bits]) + ' \<equiv>' + right
+    return ws + ' '.join([str(bit) for bit in bits]) + r' \<equiv>' + right
 
 
 regexes = [
     (re.compile(r" \. "), r" \<circ> "),
     (re.compile('-1'), '- 1'),
     (re.compile('-2'), '- 2'),
-    (re.compile(r"\(!(\w+)\)"), r"(flip id \1)"),
+    (re.compile(r"\(![ ]*(\w+)\)"), r"(flip id \1)"),
     (re.compile(r"\(\+(\w+)\)"), r"(\<lambda> x. x + \1)"),
     (re.compile(r"\\([^<].*?)\s*->"), r"\<lambda> \1."),
     (re.compile('}'), r"\<rparr>"),
@@ -2156,11 +2167,11 @@ regexes = [
     (re.compile('assert '), 'haskell_assert '),
     (re.compile('assertE '), 'haskell_assertE '),
     (re.compile('=='), '='),
-    (re.compile(r"\(/="), '(\<lambda>x. x \<noteq>'),
-    (re.compile('/='), '\<noteq>'),
+    (re.compile(r"\(/="), r'(\<lambda>x. x \<noteq>'),
+    (re.compile('/='), r'\<noteq>'),
     (re.compile('"([^"])*"'), '[]'),
-    (re.compile('&&'), '\<and>'),
-    (re.compile('\|\|'), '\<or>'),
+    (re.compile('&&'), r'\<and>'),
+    (re.compile(r'\|\|'), r'\<or>'),
     (re.compile(r"(\W)not(\s)"), r"\1Not\2"),
     (re.compile(r"(\W)and(\s)"), r"\1andList\2"),
     (re.compile(r"(\W)or(\s)"), r"\1orList\2"),
@@ -2195,7 +2206,7 @@ regexes = [
     (re.compile(r"\$!"), r"$"),
     (re.compile('([^>])>='), r'\1\<ge>'),
     (re.compile('>>([^=])'), r'>>_\1'),
-    (re.compile('<='), '\<le>'),
+    (re.compile('<='), r'\<le>'),
     (re.compile(r" \\\\ "), " `~listSubtract~` "),
     (re.compile(r"(\s\w+)\s*@\s*\w+\s*{\s*}\s*\<leftarrow>"),
      r"\1 \<leftarrow>"),
@@ -2278,13 +2289,11 @@ def get_case_rhs(rhs):
     conv = [(s, n) for (s, n) in conv if s != '' or n is not None]
 
     if conv[0][1] is not None:
-        sys.stderr.write('%r\n' % conv[0][1])
-        sys.stderr.write(
-            'For technical reasons the first line of this case conversion must be split with \\n: \n')
-        sys.stderr.write('  %r\n' % rhs)
-        sys.stderr.write(
-            '(further notes: the rhs of each caseconv must have multiple lines\n'
-            'and the first cannot contain any ->1, ->2 etc.)\n')
+        error(f'{repr(conv[0][1])}\n'
+              f'For technical reasons the first line of this case conversion must be split with \\n:\n'
+              f'  {repr(rhs)}\n'
+              f'(further notes: the rhs of each caseconv must have multiple lines\n'
+              f'and the first cannot contain any ->1, ->2 etc.)\n', filename)
         sys.exit(1)
 
     # this is a tad dodgy, but means that case_clauses_transform
@@ -2330,8 +2339,7 @@ def get_case_conv_table():
                         not is_extended_pattern(cases)):
                     render_caseconv(cases, to_case, f2)
         except Exception as e:
-            sys.stderr.write('Error parsing %r\n' % line)
-            sys.stderr.write('%s\n ' % e)
+            error(f'error parsing {repr(line)}\n {e}', 'caseconvs')
             sys.exit(1)
 
     f.close()
@@ -2394,9 +2402,9 @@ constructor_conv_table = {
     'Nothing': 'None',
     'Left': 'Inl',
     'Right': 'Inr',
-    'PPtr': '\<comment> \<open>PPtr\<close>',
-    'Register': '\<comment> \<open>Register\<close>',
-    'Word': '\<comment> \<open>Word\<close>',
+    'PPtr': r'\<comment> \<open>PPtr\<close>',
+    'Register': r'\<comment> \<open>Register\<close>',
+    'Word': r'\<comment> \<open>Word\<close>',
 }
 
 unique_ids_per_file = {}
@@ -2420,9 +2428,9 @@ def all_constructor_conv(cases):
                 bits[j] = 'v%d' % get_next_unique_id()
         pat = ' '.join(bits)
         if i == 0:
-            conv.append(('  %s \<Rightarrow> ' % pat, i))
+            conv.append(('  %s \\<Rightarrow> ' % pat, i))
         else:
-            conv.append(('| %s \<Rightarrow> ' % pat, i))
+            conv.append(('| %s \\<Rightarrow> ' % pat, i))
     return conv
 
 
@@ -2447,9 +2455,9 @@ def extended_pattern_conv(cases):
         bits = [constructor_conv_table.get(bit, bit) for bit in bits]
         pat = ''.join(bits)
         if i == 0:
-            conv.append(('  %s \<Rightarrow> ' % pat, i))
+            conv.append(('  %s \\<Rightarrow> ' % pat, i))
         else:
-            conv.append(('| %s \<Rightarrow> ' % pat, i))
+            conv.append(('| %s \\<Rightarrow> ' % pat, i))
     return conv
 
 
@@ -2470,11 +2478,11 @@ def reduce_record_pattern(string):
                 right = '(%s)' % right
             uses[left] = right
     if cons not in all_constructor_args:
-        sys.stderr.write('FAIL: trying to build case for %s\n' % cons)
-        sys.stderr.write('when reading %s\n' % filename)
-        sys.stderr.write('but constructor not seen yet\n')
-        sys.stderr.write('perhaps parse in different order?\n')
-        sys.stderr.write('hint: #INCLUDE_HASKELL_PREPARSE\n')
+        error(f'trying to build case for {cons}\n'
+              f'when reading {filename}\n'
+              f'but constructor not seen yet\n'
+              f'perhaps parse in different order?\n'
+              f'hint: #INCLUDE_HASKELL_PREPARSE')
         sys.exit(1)
     args = all_constructor_args[cons]
     args = [uses.get(name, '_') for (name, type) in args]
@@ -2513,7 +2521,7 @@ def get_supplied_transform_table():
 
     for line in lines:
         if '\t' in line:
-            sys.stderr.write('WARN: tab character in supplied')
+            warning('tab character in supplied')
 
     tree = offside_tree(lines)
 
@@ -2521,12 +2529,11 @@ def get_supplied_transform_table():
 
     for line, n, children in tree:
         if ('conv:' not in line) or len(children) != 2:
-            sys.stderr.write('WARN: supplied line %d dropped\n'
-                             % n)
+            warning(f'supplied line {n} dropped')
             if 'conv:' not in line:
-                sys.stderr.write('\t\t(token "conv:" missing)\n')
+                warning('\t\t(token "conv:" missing)')
             if len(children) != 2:
-                sys.stderr.write('\t\t(%d children != 2)\n' % len(children))
+                warning(f'\t\t({len(children)} children != 2)')
             continue
 
         children = discard_line_numbers(children)
@@ -2547,15 +2554,13 @@ def print_tree(tree, indent=0):
 
 
 supplied_transform_table = get_supplied_transform_table()
-supplied_transforms_usage = dict((
-    key, 0) for key in six.iterkeys(supplied_transform_table))
+supplied_transforms_usage = {key: 0 for key in supplied_transform_table}
 
 
 def warn_supplied_usage():
-    for (key, usage) in six.iteritems(supplied_transforms_usage):
+    for (key, usage) in supplied_transforms_usage.items():
         if not usage:
-            sys.stderr.write('WARN: supplied conv unused: %s\n'
-                             % key[0])
+            warning(f'supplied conv unused: {key[0]}')
 
 
 quotes_getter = re.compile('"[^"]+"')
@@ -2584,7 +2589,7 @@ def primrec_transform(d):
         else:
             l = "  " + l
             is_not_first = True
-        l = l.split('\<equiv>')
+        l = l.split(r'\<equiv>')
         assert len(l) == 2
         l = '= ('.join(l)
         (l, c) = remove_trailing_string('"', (l, c))
@@ -2702,16 +2707,16 @@ def get_lambda_body_lines(d):
 
     line = line[1:]
     # find \<equiv> in first or 2nd line
-    if '\<equiv>' not in line and '\<equiv>' in children[0][0]:
+    if r'\<equiv>' not in line and r'\<equiv>' in children[0][0]:
         (l, c) = children[0]
         children = c + children[1:]
         line = line + l
-    [lhs, rhs] = line.split('\<equiv>', 1)
+    [lhs, rhs] = line.split(r'\<equiv>', 1)
     bits = lhs.split()
     args = bits[1:]
     assert fn in bits[0]
 
-    line = '(\<lambda>' + ' '.join(args) + '. ' + rhs
+    line = r'(\<lambda>' + ' '.join(args) + '. ' + rhs
     # lines = ['(* body of %s *)' % fn, line] + flatten_tree (children)
     lines = [line] + flatten_tree(children)
     assert (lines[-1].endswith('"'))
@@ -2735,12 +2740,11 @@ def remove_trailing_string(s, xxx_todo_changeme9, _handled=False):
         try:
             return remove_trailing_string(s, (line, children), _handled=True)
         except:
-            sys.stderr.write('handling %s\n' % ((line, children), ))
+            error('handling %s\n' % ((line, children), ), filename)
             raise
     if children == []:
         if not line.endswith(s):
-            sys.stderr.write('ERR: expected %r\n' % line)
-            sys.stderr.write('to end with %r\n' % s)
+            error('expected %r\n to end with %r' % (line, s), filename)
             assert line.endswith(s)
         n = len(s)
         return (line[:-n], [])

@@ -1,4 +1,5 @@
 (*
+ * Copyright 2022, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
@@ -22,7 +23,7 @@ lemma get_tcb_Some_ko_at:
   "(get_tcb p s = Some t) = ko_at (TCB t) p s"
   by (auto simp: get_tcb_def obj_at_def is_tcb_def split: kernel_object.splits option.splits)
 
-context Arch begin global_naming ARM_HYP
+context Arch begin arch_global_naming
 
 lemma kernel_base_shift_cast_le: (* ARMHYP *)
   fixes x :: "11 word"
@@ -30,9 +31,8 @@ lemma kernel_base_shift_cast_le: (* ARMHYP *)
   "(kernel_base >> 21 \<le> ucast x) =
         (ucast (kernel_base >> 21) \<le> x)"
   apply (simp add: word_le_def)
-  apply (subst uint_ucast, simp,
-         simp add: kernel_base_def)
-  apply (simp add: ucast_def)
+  apply (subst uint_ucast, simp, simp add: kernel_base_def pptrBase_def)
+  apply (simp only: ucast_def)
   apply (subst word_uint.Abs_inverse)
    apply (cut_tac x=x in word_uint.Rep)
    apply (simp add: uints_num)
@@ -51,7 +51,8 @@ sublocale
                         arch_kernel_obj.splits)+
   done
 
-crunch inv [wp]: get_vcpu "P"
+crunch get_vcpu
+  for inv[wp]: "P"
 
 lemma set_vcpu_typ_at[wp]:
   "\<lbrace>\<lambda>s. P (typ_at T p s)\<rbrace> set_vcpu t vcpu \<lbrace>\<lambda>_ s. P (typ_at T p s)\<rbrace>"
@@ -73,18 +74,18 @@ sublocale
   apply (wpsimp wp: set_vcpu.vsobj_at get_vcpu.vsobj_at mapM_wp mapM_x_wp
                 simp: vcpu_update_def vgic_update_def vcpu_save_reg_def vcpu_restore_reg_def
                       vcpu_restore_reg_range_def vcpu_save_reg_range_def vgic_update_lr_def
-                      save_virt_timer_def vcpu_write_reg_def restore_virt_timer_def
+                      disable_virt_timer_def vcpu_write_reg_def restore_virt_timer_def
                       vcpu_read_reg_def is_irq_active_def get_irq_state_def
          | assumption)+
   done
 
-crunches
+crunch
   vcpu_read_reg, vcpu_write_reg, vcpu_disable, vcpu_save, vcpu_enable, vcpu_restore,
   read_vcpu_register, write_vcpu_register, vcpu_switch
   for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
   (simp: assertE_def crunch_simps wp: crunch_wps ignore: do_machine_op)
 
-crunches vcpu_read_reg
+crunch vcpu_read_reg
   for inv[wp]: P
 
 (* FIXME: move to Invariant_AI *)
@@ -103,8 +104,9 @@ declare glob_vs_refs_arch_def[simp]
 definition
   "glob_vs_refs \<equiv> arch_obj_fun_lift glob_vs_refs_arch {}"
 
-crunch_ignore (add: writeContextIDAndPD_impl addressTranslateS1CPR_impl
-           setSCTLR_impl setHCR_impl
+crunch_ignore (add: writeContextIDAndPD_impl addressTranslateS1_impl
+           setSCTLR_impl setHCR_impl setCPACR_impl setHDCR_impl
+           check_export_arch_timer_impl
            set_gic_vcpu_ctrl_vmcr_impl
            set_gic_vcpu_ctrl_apr_impl
            get_gic_vcpu_ctrl_lr_impl set_gic_vcpu_ctrl_lr_impl
@@ -112,13 +114,15 @@ crunch_ignore (add: writeContextIDAndPD_impl addressTranslateS1CPR_impl
            set_gic_vcpu_ctrl_hcr_impl
            dsb_impl)
 
-crunch pspace_in_kerbel_window[wp]: do_machine_op "pspace_in_kernel_window"
+crunch do_machine_op
+  for pspace_in_kerbel_window[wp]: "pspace_in_kernel_window"
 
 lemma pspace_in_kernel_window_set_vcpu[wp]:
   "\<lbrace>pspace_in_kernel_window\<rbrace> set_vcpu p vcpu \<lbrace>\<lambda>_.pspace_in_kernel_window\<rbrace>"
   by (rule pspace_in_kernel_window_atyp_lift, wp+)
 
-crunch pspace_in_kernel_window[wp]: vcpu_switch "pspace_in_kernel_window"
+crunch vcpu_switch
+  for pspace_in_kernel_window[wp]: "pspace_in_kernel_window"
   (simp: Metis.not_atomize crunch_simps a_type_def when_def
      wp: crunch_wps ignore: do_machine_op)
 
@@ -130,20 +134,24 @@ lemma find_free_hw_asid_pspace_in_kernel_window[wp]:
               cong: option.case_cong) wpsimp
 
 
-crunch pspace_in_kernel_window[wp]: arm_context_switch "pspace_in_kernel_window"
+crunch arm_context_switch
+  for pspace_in_kernel_window[wp]: "pspace_in_kernel_window"
   (simp: crunch_simps wp: crunch_wps ignore: do_machine_op writeContextIDAndPD_impl)
 
-crunch pspace_in_kernel_window[wp]: set_vm_root "pspace_in_kernel_window"
-  (simp: crunch_simps wp: crunch_wps ignore: set_current_pd writeContextIDAndPD do_machine_op)
+crunch set_vm_root
+  for pspace_in_kernel_window[wp]: "pspace_in_kernel_window"
+  (simp: crunch_simps wp: crunch_wps ignore: writeContextIDAndPD do_machine_op)
 
-crunch pspace_in_kernel_window[wp]: perform_page_invocation "pspace_in_kernel_window"
+crunch perform_page_invocation
+  for pspace_in_kernel_window[wp]: "pspace_in_kernel_window"
   (simp: crunch_simps wp: crunch_wps)
 
 definition
  "pd_at_uniq asid pd \<equiv> \<lambda>s. pd \<notin> ran ((option_map snd o arm_asid_map (arch_state s) |` (- {asid})))"
 
 
-crunch inv[wp]: find_pd_for_asid_assert "P"
+crunch find_pd_for_asid_assert
+  for inv[wp]: "P"
   (simp: crunch_simps)
 
 lemma asid_word_bits [simp]: "asid_bits < word_bits"
@@ -175,15 +183,7 @@ lemma asid_low_high_bits':
     asid_high_bits_of x = asid_high_bits_of y;
     x \<le> 2 ^ asid_bits - 1; y \<le> 2 ^ asid_bits - 1 \<rbrakk>
   \<Longrightarrow> x = y"
-  apply (rule asid_low_high_bits)
-     apply (rule word_eqI)
-     apply (subst (asm) bang_eq)
-     apply (simp add: nth_ucast asid_low_bits_def word_size)
-    apply (rule word_eqI)
-    apply (subst (asm) bang_eq)+
-    apply (simp add: nth_ucast asid_low_bits_def)
-   apply assumption+
-  done
+  by (rule asid_low_high_bits; (assumption|word_eqI_solve simp: asid_low_bits_def)?)
 
 lemma table_cap_ref_at_eq:
   "table_cap_ref c = Some [x] \<longleftrightarrow> vs_cap_ref c = Some [x]"
@@ -245,36 +245,88 @@ lemma pd_at_asid_uniq:
   done
 
 
-lemma find_free_hw_asid_valid_arch [wp]:
-  "\<lbrace>valid_arch_state\<rbrace> find_free_hw_asid \<lbrace>\<lambda>_. valid_arch_state\<rbrace>"
-  apply (simp add: find_free_hw_asid_def invalidate_hw_asid_entry_def
-                   invalidate_asid_def do_machine_op_def split_def
+crunch get_hw_asid, invalidate_asid_entry, invalidate_tlb_by_asid, find_free_hw_asid
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
+  and caps[wp]: "\<lambda>s. P (caps_of_state s)"
+  and pred_tcb_at[wp]: "\<lambda>s. P (pred_tcb_at proj P t)"
+  and asid_table[wp]: "\<lambda>s. P (arm_asid_table (arch_state s))"
+  and aligned[wp]: pspace_aligned
+  and distinct[wp]: pspace_distinct
+  and cur[wp]: cur_tcb
+  and valid_objs[wp]: valid_objs
+
+lemmas find_free_hw_asid_typ_ats[wp] = abs_typ_at_lifts[OF find_free_hw_asid_typ_at]
+lemmas invalidate_asid_typ_ats[wp] = abs_typ_at_lifts[OF invalidate_asid_typ_at]
+lemmas invalidate_hw_asid_entry_typ_ats[wp] = abs_typ_at_lifts[OF invalidate_hw_asid_entry_typ_at]
+lemmas invalidate_asid_entry_typ_ats[wp] = abs_typ_at_lifts[OF invalidate_asid_entry_typ_at]
+lemmas store_hw_asid_typ_ats[wp] = abs_typ_at_lifts[OF store_hw_asid_typ_at]
+lemmas get_hw_asid_typ_ats[wp] = abs_typ_at_lifts[OF get_hw_asid_typ_at]
+lemmas invalidate_tlb_by_asid_typ_ats[wp] = abs_typ_at_lifts[OF invalidate_tlb_by_asid_typ_at]
+
+lemma hw_asid_min_not_reserved[simp]:
+  "hw_asid_min \<noteq> hw_asid_reserved"
+  by (simp add: hw_asid_min_def hw_asid_reserved_def)
+
+lemma valid_next_asid_min[simp, intro!]:
+  "valid_next_asid_2 hw_asid_min"
+  by (simp add: valid_next_asid_2_def)
+
+lemma find_free_hw_asid_valid_next_asid[wp]:
+  "find_free_hw_asid \<lbrace>valid_next_asid\<rbrace>"
+  apply (simp add: find_free_hw_asid_def invalidate_hw_asid_entry_def invalidate_asid_def
               cong: option.case_cong)
-  apply (wp|wpc|simp)+
-  apply (clarsimp simp: valid_arch_state_def split: option.splits)
-   apply (frule is_inv_inj)
-   apply (drule findNoneD)
-   apply (drule_tac x="arm_next_asid (arch_state s)" in bspec)
-    apply (simp add: minBound_word)
-   apply (clarsimp simp: is_inv_def ran_upd dom_option_map
-                         dom_upd)
-   apply (drule_tac x="x" and y="arm_next_asid (arch_state s)" in inj_onD)
-      apply simp
-     apply blast
-    apply blast
-   apply simp
+  apply (wpsimp split_del: if_split)
+  apply (clarsimp simp: valid_next_asid_def hw_asid_reserved_def hw_asid_min_def maxBound_word
+                        max_word_wrap)
+  done
+
+(* Sanity check: @{const find_free_hw_asid} never returns the reserved hardware ASID. *)
+lemma find_free_hw_asid_not_reserved:
+  "\<lbrace>valid_next_asid\<rbrace> find_free_hw_asid \<lbrace>\<lambda>hw_asid _. hw_asid \<noteq> hw_asid_reserved\<rbrace>"
+  apply (simp add: find_free_hw_asid_def invalidate_hw_asid_entry_def invalidate_asid_def
+              cong: option.case_cong)
+  apply wpsimp
+  apply (fastforce dest!: findSomeD in_set_butlastD
+                    simp: valid_next_asid_def hw_asid_reserved_def hw_asid_min_def)
+  done
+
+crunch get_hw_asid, invalidate_asid_entry, invalidate_tlb_by_asid, find_free_hw_asid
+  for valid_asid_table[wp]: "\<lambda>s. valid_asid_table (arm_asid_table (arch_state s)) s"
+  and cur_vcpu[wp]: "\<lambda>s. P (arm_current_vcpu (arch_state s))"
+  and obj_at[wp]: "\<lambda>s. P (obj_at Q p s)"
+
+lemma find_free_hw_asid_is_inv[wp]:
+  "find_free_hw_asid \<lbrace>\<lambda>s. is_inv (arm_hwasid_table (arch_state s))
+                                 (option_map fst o arm_asid_map (arch_state s))\<rbrace>"
+  unfolding find_free_hw_asid_def invalidate_hw_asid_entry_def invalidate_asid_def
+  supply fun_upd_apply[simp del]
+  apply wpsimp
   apply (frule is_inv_inj)
   apply (drule findNoneD)
-  apply (drule_tac x="arm_next_asid (arch_state s)" in bspec)
-   apply (simp add: minBound_word)
-  apply (clarsimp simp: is_inv_def ran_upd dom_option_map
-                        dom_upd)
-  apply (drule_tac x="x" and y="arm_next_asid (arch_state s)" in inj_onD)
-     apply simp
-    apply blast
-   apply blast
-  apply simp
+  apply (drule_tac x="arm_next_asid (arch_state s)" in bspec, simp)
+  apply (fastforce simp: is_inv_def ran_upd[folded fun_upd_apply] dom_upd
+                         fun_upd_apply
+                   split: if_split_asm
+                   dest: inj_on_domD)
   done
+
+lemma find_free_hw_asid_cur_vcpu_obj_at[wp]:
+  "find_free_hw_asid \<lbrace>\<lambda>s. case arm_current_vcpu (arch_state s) of
+                            Some (v, b) \<Rightarrow> obj_at (is_vcpu and hyp_live) v s
+                          | _ \<Rightarrow> True\<rbrace>"
+  apply (rule hoare_lift_Pf[where f="\<lambda>s. arm_current_vcpu (arch_state s)"])
+   apply (case_tac x; wpsimp simp: split_def)
+  apply wpsimp
+  done
+
+lemma valid_global_refs_arch_update[simp]:
+  "arm_us_global_pd (f (arch_state s)) = arm_us_global_pd (arch_state s) \<Longrightarrow>
+   valid_global_refs (arch_state_update f s) = valid_global_refs s"
+  by (simp add: valid_global_refs_def global_refs_def)
+
+lemma find_free_hw_asid_valid_arch [wp]:
+  "find_free_hw_asid \<lbrace>valid_arch_state\<rbrace>"
+  unfolding valid_arch_state_def by (wpsimp | wps)+
 
 lemma valid_vs_lookupE:
   "\<lbrakk> valid_vs_lookup s; \<And>ref p. (ref \<unrhd> p) s' \<Longrightarrow> (ref \<unrhd> p) s;
@@ -326,9 +378,11 @@ lemma load_hw_asid_wp:
   done
 
 
-crunch aligned [wp]: find_free_hw_asid pspace_aligned
+crunch find_free_hw_asid
+  for aligned[wp]: pspace_aligned
 
-crunch "distinct" [wp]: find_free_hw_asid pspace_distinct
+crunch find_free_hw_asid
+  for "distinct"[wp]: pspace_distinct
 
 
 lemma invalidate_hw_asid_entry_asid_map [wp]:
@@ -365,11 +419,6 @@ lemma dmo_pd_at_asid [wp]:
   apply (simp add: vspace_at_asid_def)
   done
 
-
-crunch inv: find_pd_for_asid "P"
-  (simp: assertE_def crunch_simps wp: crunch_wps)
-
-
 lemma find_pd_for_asid_pd_at_asid [wp]:
   "\<lbrace>\<top>\<rbrace> find_pd_for_asid asid \<lbrace>\<lambda>pd. vspace_at_asid asid pd\<rbrace>, -"
   apply (simp add: find_pd_for_asid_def assertE_def split del: if_split)
@@ -387,7 +436,7 @@ lemma find_pd_for_asid_pd_at_asid [wp]:
   apply fastforce
   done
 
-crunches do_machine_op
+crunch do_machine_op
   for valid_vs_lookup2[wp]: "\<lambda>s. P (valid_vs_lookup s)"
   (ignore: get_object set_object)
 
@@ -469,22 +518,26 @@ lemma load_hw_asid_invs[wp]: "\<lbrace>invs\<rbrace> load_hw_asid asid \<lbrace>
 lemma invalidate_tlb_by_asid_invs[wp]:
   "\<lbrace>invs\<rbrace> invalidate_tlb_by_asid asid \<lbrace>\<lambda>_. invs\<rbrace>"
   apply (wpsimp simp: invalidate_tlb_by_asid_def)+
-  apply (rule_tac Q="K invs" in hoare_post_imp)
+  apply (rule_tac Q'="K invs" in hoare_post_imp)
   apply (wpsimp simp: load_hw_asid_invs)+
   done
 
-crunch typ_at [wp]: flush_space "\<lambda>s. P (typ_at T p s)"
+crunch flush_space
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
 
 
 lemmas flush_space_typ_ats [wp] = abs_typ_at_lifts [OF flush_space_typ_at]
 
 
-crunch cur_tcb [wp]: flush_space cur_tcb
+crunch flush_space
+  for cur_tcb[wp]: cur_tcb
 
 
-crunch valid_arch [wp]: flush_space valid_arch_state
+crunch flush_space
+  for valid_arch[wp]: valid_arch_state
 
-crunch valid_objs [wp]: flush_space valid_objs
+crunch flush_space
+  for valid_objs[wp]: valid_objs
 
 
 lemma invalidate_hw_asid_vspace_objs [wp]:
@@ -527,22 +580,8 @@ lemma invalidate_asid_entry_arch_state [wp]:
 lemma flush_space_asid_map[wp]:
   "\<lbrace>valid_asid_map\<rbrace> flush_space space \<lbrace>\<lambda>rv. valid_asid_map\<rbrace>"
   apply (simp add: flush_space_def)
-  apply (wp load_hw_asid_wp | wpc | simp | rule_tac Q="\<lambda>_. valid_asid_map" in hoare_strengthen_post)+
+  apply (wp load_hw_asid_wp | wpc | simp | rule_tac Q'="\<lambda>_. valid_asid_map" in hoare_strengthen_post)+
   done
-
-
-crunch typ_at [wp]: invalidate_asid_entry "\<lambda>s. P (typ_at T p s)"
-
-
-lemmas invalidate_asid_entry_typ_ats [wp] =
-  abs_typ_at_lifts [OF invalidate_asid_entry_typ_at]
-
-
-crunch cur [wp]: invalidate_asid_entry cur_tcb
-
-
-crunch valid_objs [wp]: invalidate_asid_entry valid_objs
-
 
 lemma invalidate_asid_entry_asid_map [wp]:
   "\<lbrace>valid_asid_map\<rbrace> invalidate_asid_entry asid \<lbrace>\<lambda>_. valid_asid_map\<rbrace>"
@@ -554,7 +593,8 @@ lemma invalidate_asid_entry_asid_map [wp]:
   done
 
 
-crunch obj_at [wp]: invalidate_asid_entry "\<lambda>s. P (obj_at Q p s)"
+crunch invalidate_asid_entry
+  for obj_at[wp]: "\<lambda>s. P (obj_at Q p s)"
 
 
 
@@ -583,18 +623,20 @@ lemma invalidate_asid_entry_invalidates:
   apply (erule (1) notE)
   done
 
-crunch vspace_objs [wp]: invalidate_asid_entry valid_vspace_objs
+crunch invalidate_asid_entry
+  for vspace_objs[wp]: valid_vspace_objs
   (simp: valid_vspace_objs_arch_update)
 
 
 lemma flush_space_pd_at_asid [wp]:
   "\<lbrace>vspace_at_asid a pd\<rbrace> flush_space asid \<lbrace>\<lambda>_. vspace_at_asid a pd\<rbrace>"
   apply (simp add: flush_space_def)
-  apply (wp load_hw_asid_wp|wpc|rule_tac Q="\<lambda>_. vspace_at_asid a pd" in hoare_strengthen_post|simp)+
+  apply (wp load_hw_asid_wp|wpc|rule_tac Q'="\<lambda>_. vspace_at_asid a pd" in hoare_strengthen_post|simp)+
   done
 
 
-crunch obj_at [wp]: flush_space "\<lambda>s. P (obj_at Q p s)"
+crunch flush_space
+  for obj_at[wp]: "\<lambda>s. P (obj_at Q p s)"
 
 
 lemma flush_space_arch [wp]:
@@ -605,16 +647,21 @@ lemma flush_space_arch [wp]:
   done
 
 
-crunch aligned [wp]: invalidate_asid_entry pspace_aligned
+crunch invalidate_asid_entry
+  for aligned[wp]: pspace_aligned
 
-crunch "distinct" [wp]: invalidate_asid_entry pspace_distinct
+crunch invalidate_asid_entry
+  for "distinct"[wp]: pspace_distinct
 
-crunch aligned [wp]: flush_space pspace_aligned
+crunch flush_space
+  for aligned[wp]: pspace_aligned
 
-crunch "distinct" [wp]: flush_space pspace_distinct
+crunch flush_space
+  for "distinct"[wp]: pspace_distinct
 
 
-crunch caps_of_state[wp]: invalidate_asid_entry "\<lambda>s. P (caps_of_state s)"
+crunch invalidate_asid_entry
+  for caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
 
 
 lemma pd_at_asid_arch_up':
@@ -649,7 +696,7 @@ lemma invalidate_asid_entry_invs [wp]:
    apply (rule conjI)
     apply (erule order_trans[rotated], clarsimp)
    apply (simp add: pd_at_asid_arch_up')
-  apply (clarsimp simp: comp_upd_simp None_upd_eq)
+  apply (clarsimp simp: comp_upd_simp)
    apply (clarsimp simp: comp_upd_simp is_inv_None_upd)
   apply (clarsimp simp: valid_asid_map_def valid_machine_state_def)
   apply (rule conjI)
@@ -677,10 +724,10 @@ lemma clean_D_PoU_underlying_memory[wp]:
   by (clarsimp simp: clean_D_PoU_def machine_op_lift_def
                      machine_rest_lift_def split_def | wp)+
 
-crunches dsb, invalidate_I_PoU, clean_D_PoU, cleanCaches_PoU
+crunch dsb, isb, invalidate_I_PoU, clean_D_PoU, cleanCaches_PoU
   for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
   and underlying_memory_inv[wp]: "\<lambda>ms. P (underlying_memory ms)"
-  (ignore_del: dsb invalidate_I_PoU clean_D_PoU cleanCaches_PoU)
+  (ignore_del: dsb isb invalidate_I_PoU clean_D_PoU cleanCaches_PoU)
 
 lemma dmo_cleanCaches_PoU_invs[wp]: "\<lbrace>invs\<rbrace> do_machine_op cleanCaches_PoU \<lbrace>\<lambda>y. invs\<rbrace>"
   apply (wp dmo_invs)
@@ -692,14 +739,14 @@ lemma dmo_cleanCaches_PoU_invs[wp]: "\<lbrace>invs\<rbrace> do_machine_op cleanC
 
 lemma flush_space_invs[wp]: "\<lbrace>invs\<rbrace> flush_space asid \<lbrace>\<lambda>_. invs\<rbrace>"
   apply (wpsimp simp: flush_space_def)
-  apply (rule_tac Q="K invs" in hoare_post_imp, wpsimp+)
+  apply (rule_tac Q'="K invs" in hoare_post_imp, wpsimp+)
   done
 
-crunch valid_vs_lookup[wp]: flush_space "valid_vs_lookup"
+crunch flush_space
+  for valid_vs_lookup[wp]: "valid_vs_lookup"
 
-crunch valid_arch_state[wp]: flush_space "valid_arch_state"
-
-crunch caps_of_state[wp]: flush_space "\<lambda>s. P (caps_of_state s)"
+crunch flush_space
+  for caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
 
 
 lemma ucast_ucast_low_bits:
@@ -722,9 +769,11 @@ lemma asid_high_bits_of_or:
   done
 
 
-crunch vs_lookup [wp]: invalidate_asid_entry "\<lambda>s. P (vs_lookup s)"
+crunch invalidate_asid_entry
+  for vs_lookup[wp]: "\<lambda>s. P (vs_lookup s)"
 
-crunch vs_lookup [wp]: flush_space "\<lambda>s. P (vs_lookup s)"
+crunch flush_space
+  for vs_lookup[wp]: "\<lambda>s. P (vs_lookup s)"
 
 
 lemma vs_lookup_clear_asid_table:
@@ -791,34 +840,29 @@ lemma ex_asid_high_bits_plus:
    apply (rule word_and_le1)
   apply (subst (asm) mask_def)
   apply (simp add: upper_bits_unset_is_l2p_32 [symmetric])
-  apply (subst word_plus_and_or_coroll)
-   apply (rule word_eqI)
-   apply (clarsimp simp: word_size nth_ucast nth_shiftl)
-  apply (rule word_eqI)
-  apply (clarsimp simp: word_size nth_ucast nth_shiftl nth_shiftr asid_high_bits_of_def
-                        asid_low_bits_def word_bits_def asid_bits_def)
+  apply (subst word_plus_and_or_coroll; word_eqI)
+  apply (clarsimp simp: asid_high_bits_of_def asid_low_bits_def word_bits_def asid_bits_def)
   apply (rule iffI)
    prefer 2
    apply fastforce
   apply (clarsimp simp: linorder_not_less)
-  apply (subgoal_tac "n < 17", simp)
-  apply (clarsimp simp add: linorder_not_le [symmetric])
-  done
+  by (metis add_One_commute add_diff_inverse_nat le_add1 less_diff_conv2 less_imp_diff_less
+            numeral_plus_numeral semiring_norm(10) semiring_norm(2) semiring_norm(3)
+            semiring_norm(4) semiring_norm(9))
 
 
 lemma asid_high_bits_shl:
   "\<lbrakk> is_aligned base asid_low_bits; base \<le> mask asid_bits \<rbrakk> \<Longrightarrow> ucast (asid_high_bits_of base) << asid_low_bits = base"
   apply (simp add: mask_def upper_bits_unset_is_l2p_32 [symmetric])
-  apply (rule word_eqI[rule_format])
-  apply (simp add: is_aligned_nth nth_ucast nth_shiftl nth_shiftr asid_low_bits_def
-                   asid_high_bits_of_def word_size asid_bits_def word_bits_def)
+  apply word_eqI
+  apply (simp add: asid_low_bits_def asid_high_bits_of_def word_bits_conv asid_bits_def)
   apply (rule iffI, clarsimp)
   apply (rule context_conjI)
    apply (clarsimp simp add: linorder_not_less [symmetric])
   apply simp
-  apply (subgoal_tac "n < 17", simp)
-  apply (clarsimp simp add: linorder_not_le [symmetric])
-  done
+  by (metis less_imp_le_nat linorder_neqE_nat nat_diff_less numeral_plus_numeral pl_pl_rels
+            semiring_norm(10) semiring_norm(2) semiring_norm(3) semiring_norm(8) semiring_norm(9)
+            trans_less_add1)
 
 
 lemma valid_asid_map_unmap:
@@ -925,27 +969,24 @@ lemma asid_low_bits_word_bits:
   "asid_low_bits < word_bits"
   by (simp add: asid_low_bits_def word_bits_def)
 
-crunch valid_vs_lookup[wp]: invalidate_hw_asid_entry "valid_vs_lookup"
+crunch invalidate_hw_asid_entry
+  for valid_vs_lookup[wp]: "valid_vs_lookup"
   (simp: valid_vs_lookup_def)
 
-crunch valid_vs_lookup[wp]: invalidate_asid "valid_vs_lookup"
+crunch invalidate_asid
+  for valid_vs_lookup[wp]: "valid_vs_lookup"
   (simp: valid_vs_lookup_def)
 
-crunch valid_vs_lookup[wp]: invalidate_asid_entry "valid_vs_lookup"
+crunch invalidate_asid_entry
+  for valid_vs_lookup[wp]: "valid_vs_lookup"
 
 
-crunch arm_asid_table_inv[wp]: invalidate_asid_entry
-    "\<lambda>s. P (arm_asid_table (arch_state s))"
+crunch invalidate_asid_entry
+  for arm_asid_table_inv[wp]: "\<lambda>s. P (arm_asid_table (arch_state s))"
 
 
-crunch pred_tcb_at_P [wp]: find_free_hw_asid "\<lambda>s. P (pred_tcb_at proj Q p s)"
-
-
-crunch pred_tcb_at [wp]: find_pd_for_asid "\<lambda>s. P (pred_tcb_at proj Q p s)"
-  (simp: crunch_simps)
-
-
-crunch aligned [wp]: load_hw_asid pspace_aligned
+crunch find_free_hw_asid
+  for pred_tcb_at_P[wp]: "\<lambda>s. P (pred_tcb_at proj Q p s)"
 
 
 lemma hw_asid_Some [wp]:
@@ -954,7 +995,7 @@ lemma hw_asid_Some [wp]:
   \<lbrace>\<lambda>rv s. \<exists>y. rv = Some y\<rbrace>"
   by (simp add: load_hw_asid_def, wp) (simp add: valid_asid_def)
 
-crunches set_vm_root_for_flush
+crunch set_vm_root_for_flush
   for typ_at [wp]: "\<lambda>s. P (typ_at T p s)"
   and cur [wp]: cur_tcb
   and valid_objs [wp]: valid_objs
@@ -1019,7 +1060,8 @@ lemma get_hw_asid_valid_arch:
   done
 
 
-crunch valid_arch [wp]: set_vm_root_for_flush valid_arch_state
+crunch set_vm_root_for_flush
+  for valid_arch[wp]: valid_arch_state
 
 
 lemma svmrff_asid_mapped [wp]:
@@ -1036,7 +1078,8 @@ lemma svmrff_asid_mapped [wp]:
   done
 
 
-crunch vspace_at_asid[wp]: set_vm_root_for_flush "vspace_at_asid asid pd"
+crunch set_vm_root_for_flush
+  for vspace_at_asid[wp]: "vspace_at_asid asid pd"
   (simp: pd_at_asid_arch_up)
 
 
@@ -1088,7 +1131,7 @@ lemma set_vm_root_for_flush_asid_map [wp]:
   apply (simp add: set_vm_root_for_flush_def)
   apply (wp|wpc|simp)+
    apply (rule hoare_strengthen_post [where
-               Q="\<lambda>_. valid_asid_map and K (asid \<le> mask asid_bits)"])
+               Q'="\<lambda>_. valid_asid_map and K (asid \<le> mask asid_bits)"])
     apply wp
    apply simp
   apply wp
@@ -1096,7 +1139,7 @@ lemma set_vm_root_for_flush_asid_map [wp]:
   done
 
 
-crunches set_vm_root_for_flush
+crunch set_vm_root_for_flush
   for distinct [wp]: pspace_distinct
   and caps_of_state [wp]: "\<lambda>s. P (caps_of_state s)"
 
@@ -1105,12 +1148,12 @@ lemma valid_vs_lookup_arch_update:
      \<Longrightarrow> valid_vs_lookup (arch_state_update f s) = valid_vs_lookup s"
   by (simp add: valid_vs_lookup_def vs_lookup_pages_arch_update)
 
-crunches set_vm_root_for_flush
+crunch set_vm_root_for_flush
   for valid_vs_lookup[wp]: valid_vs_lookup
   and vspace_objs [wp]: valid_vspace_objs
   (simp: valid_vs_lookup_arch_update valid_vspace_objs_arch_update)
 
-crunches set_vm_root, vcpu_switch, flush_table
+crunch set_vm_root, vcpu_switch, flush_table
   for typ_at [wp]: "\<lambda>s. P (typ_at T p s)"
   (simp: assertE_def crunch_simps wp: crunch_wps ignore: do_machine_op)
 
@@ -1126,7 +1169,7 @@ lemma set_vcpu_pspace_aligned[wp]:
   apply (clarsimp simp: obj_at_def get_object_def)
   done
 
-crunches vcpu_save, vcpu_disable, set_vm_root, flush_table
+crunch vcpu_save, vcpu_disable, set_vm_root, flush_table
   for aligned [wp]: pspace_aligned
   (simp: crunch_simps wp: crunch_wps)
 
@@ -1160,7 +1203,7 @@ lemma find_pd_for_asid_lookup_ref:
 
 lemma find_pd_for_asid_lookup[wp]:
   "\<lbrace>\<top>\<rbrace> find_pd_for_asid asid \<lbrace>\<lambda>pd. \<exists>\<rhd> pd\<rbrace>,-"
-  apply (rule hoare_post_imp_R, rule find_pd_for_asid_lookup_ref)
+  apply (rule hoare_strengthen_postE_R, rule find_pd_for_asid_lookup_ref)
   apply auto
   done
 
@@ -1174,7 +1217,7 @@ proof -
      \<lbrace>\<lambda>pd. pspace_aligned and page_directory_at pd\<rbrace>, -"
     by (rule hoare_pre) (wp, simp)
   show ?thesis
-    apply (rule hoare_post_imp_R, rule x)
+    apply (rule hoare_strengthen_postE_R, rule x)
     apply clarsimp
     apply (erule page_directory_pde_atI)
      prefer 2
@@ -1191,8 +1234,6 @@ lemma set_vcpu_valid_objs[wp]:
 
 lemma do_machine_op_valid_obj[wp]: "\<lbrace>valid_obj t obj\<rbrace> do_machine_op f \<lbrace>\<lambda>_. valid_obj t obj\<rbrace>"
   by (rule valid_obj_typ) wp
-
-crunch valid_objs [wp]: do_machine_op "valid_objs"
 
 lemma get_vcpu_valid[wp]: "\<lbrace>valid_objs\<rbrace> get_vcpu t \<lbrace>\<lambda>r. valid_obj t (ArchObj (VCPU r))\<rbrace>"
   apply (wpsimp simp: get_vcpu_def)
@@ -1230,37 +1271,17 @@ lemma valid_vcpu_typ_at:
    \<Longrightarrow> \<lbrace>valid_vcpu vcpu\<rbrace> F \<lbrace>\<lambda>r. valid_vcpu (P r vcpu )\<rbrace>"
   by (wpsimp simp: valid_vcpu_def split: option.splits)
 
-crunches vgic_update_lr, vcpu_write_reg, vcpu_save_reg, vcpu_disable, vcpu_restore,
-          save_virt_timer, restore_virt_timer, vcpu_save, vcpu_switch, vcpu_save_reg_range
+crunch vgic_update_lr, vcpu_write_reg, vcpu_save_reg, vcpu_disable, vcpu_restore,
+       disable_virt_timer, restore_virt_timer, vcpu_save, vcpu_switch, vcpu_save_reg_range
   for valid_objs[wp]: valid_objs
   (ignore: vcpu_update simp: vcpu_update_def valid_vcpu_def wp: crunch_wps)
 
-crunch valid_objs [wp]: flush_page "valid_objs"
+crunch flush_page
+  for valid_objs[wp]: "valid_objs"
   (wp: crunch_wps hoare_drop_imps simp: crunch_simps)
 
-lemma arch_thread_set_is_thread_set:
-  "arch_thread_set f t = thread_set (tcb_arch_update f) t"
-  by (simp add: thread_set_def arch_thread_set_def cong: tcb.fold_congs)
-
-lemma arch_thread_set_caps_of_state [wp]:
-  "\<lbrace>\<lambda>s. P (caps_of_state s)\<rbrace> arch_thread_set f t \<lbrace>\<lambda>_ s. P (caps_of_state s)\<rbrace>"
-  by (wpsimp wp: thread_set_caps_of_state_trivial2 simp: arch_thread_set_is_thread_set)
-
-lemma arch_thread_set_wp:
-  "\<lbrace>\<lambda>s. get_tcb p s \<noteq> None \<longrightarrow> Q (s\<lparr>kheap := kheap s(p \<mapsto> TCB (the (get_tcb p s)\<lparr>tcb_arch := f (tcb_arch (the (get_tcb p s)))\<rparr>))\<rparr>) \<rbrace>
-    arch_thread_set f p
-   \<lbrace>\<lambda>_. Q\<rbrace>"
-  apply (simp add: arch_thread_set_def)
-  apply (wp set_object_wp)
-  apply simp
-  done
-
-lemma a_type_VCPU [simp]:
-  "a_type (ArchObj (VCPU v)) = AArch AVCPU"
-  by (simp add: a_type_def)
-
 lemma set_vcpu_wp:
-  "\<lbrace>\<lambda>s. vcpu_at p s \<longrightarrow> Q (s\<lparr>kheap := kheap s(p \<mapsto> (ArchObj (VCPU vcpu))) \<rparr>) \<rbrace> set_vcpu p vcpu \<lbrace>\<lambda>_. Q\<rbrace>"
+  "\<lbrace>\<lambda>s. vcpu_at p s \<longrightarrow> Q (s\<lparr>kheap := (kheap s)(p \<mapsto> (ArchObj (VCPU vcpu))) \<rparr>) \<rbrace> set_vcpu p vcpu \<lbrace>\<lambda>_. Q\<rbrace>"
   unfolding set_vcpu_def
   apply (wp set_object_wp_strong)
   apply (clarsimp simp: obj_at_def split: kernel_object.splits arch_kernel_obj.splits)
@@ -1269,12 +1290,6 @@ lemma set_vcpu_wp:
 lemma get_vcpu_wp:
   "\<lbrace>\<lambda>s. \<forall>v. ko_at (ArchObj (VCPU v)) p s \<longrightarrow> Q v s\<rbrace> get_vcpu p \<lbrace>Q\<rbrace>"
   by (wpsimp simp: get_vcpu_def wp: get_object_wp)
-
-lemma arch_thread_get_wp:
-  "\<lbrace>\<lambda>s. \<forall>tcb. ko_at (TCB tcb) t s \<longrightarrow> Q (f (tcb_arch tcb)) s\<rbrace> arch_thread_get f t \<lbrace>Q\<rbrace>"
-  apply (wpsimp simp: arch_thread_get_def)
-  apply (auto dest!: get_tcb_ko_atD)
-  done
 
 lemma set_vcpu_valid_arch_state_hyp_live:
   "\<lbrace>valid_arch_state and K (hyp_live (ArchObj (VCPU vcpu)))\<rbrace> set_vcpu t vcpu \<lbrace>\<lambda>_. valid_arch_state\<rbrace>"
@@ -1332,22 +1347,14 @@ lemma obj_at_ko_atD:
   "\<lbrakk> obj_at P ptr s; ko_at k ptr s \<rbrakk> \<Longrightarrow> P k"
   by (erule (2) obj_at_ko_atE)
 
-lemma hyp_live_vcpu_vtimer_idem[simp]:
-  "hyp_live (ArchObj (VCPU (vcpu_vtimer_update f vcpu))) = hyp_live (ArchObj (VCPU vcpu))"
-  by (simp add: hyp_live_def arch_live_def)
-
-lemma vcpu_update_vtimer_hyp_live[wp]:
-  "vcpu_update vcpu_ptr (vcpu_vtimer_update f) \<lbrace> obj_at hyp_live p \<rbrace>"
-  by (wpsimp wp: vcpu_update_obj_at simp: crunch_simps obj_at_ko_atD)
-
-crunches vcpu_save_reg, vcpu_save_reg_range, vgic_update_lr, vcpu_disable, vcpu_save, vcpu_restore,
-          save_virt_timer, restore_virt_timer
+crunch vcpu_save_reg, vcpu_save_reg_range, vgic_update_lr, vcpu_disable, vcpu_save, vcpu_restore,
+       disable_virt_timer, restore_virt_timer
   for hyp_live[wp]: "obj_at hyp_live p"
-  (wp: vcpu_update_vtimer_hyp_live vcpu_update_obj_at hoare_vcg_imp_lift' hoare_vcg_all_lift
+  (wp: vcpu_update_obj_at hoare_vcg_imp_lift' hoare_vcg_all_lift
        crunch_wps
    simp: crunch_simps obj_at_ko_atD)
 
-crunches vcpu_disable, vcpu_restore, vcpu_save, vcpu_enable
+crunch vcpu_disable, vcpu_restore, vcpu_save, vcpu_enable
   for valid_arch_state[wp]: valid_arch_state
   (rule: valid_arch_state_lift simp: obj_at_conj_distrib)
 
@@ -1378,16 +1385,15 @@ lemma vcpu_switch_valid_arch[wp]:
   apply (auto simp: valid_arch_state_def obj_at_conj_distrib)
   done
 
-crunch valid_arch [wp]: store_pde "valid_arch_state"
-
-crunch valid_arch [wp]: vcpu_disable "valid_arch_state"
-  (wp: crunch_wps simp: crunch_simps)
+crunch store_pde
+  for valid_arch[wp]: "valid_arch_state"
 
 lemma gets_the_get_tcb_wp:
   "\<lbrace>\<lambda>s. \<forall>tcb. ko_at (TCB tcb) t s \<longrightarrow> Q tcb s\<rbrace> gets_the $ get_tcb t \<lbrace>Q\<rbrace>"
   by wpsimp (clarsimp simp: get_tcb_Some_ko_at)
 
-crunch P_obj_at[wp]: arm_context_switch "\<lambda>s. P (obj_at Q p s)"
+crunch arm_context_switch
+  for P_obj_at[wp]: "\<lambda>s. P (obj_at Q p s)"
 
 lemma sym_refs_VCPU_hyp_live:
   assumes tcb: "ko_at (TCB tcb) t s"
@@ -1407,14 +1413,15 @@ qed
 
 lemma set_vm_root_valid_arch[wp]:
   "\<lbrace>valid_arch_state and sym_refs o state_hyp_refs_of\<rbrace> set_vm_root pd \<lbrace>\<lambda>_. valid_arch_state\<rbrace>"
-  unfolding set_vm_root_def
+  unfolding set_vm_root_def set_global_pd_def
   apply (wpsimp wp: gets_the_get_tcb_wp get_hw_asid_valid_arch
-                    hoare_vcg_imp_lift hoare_vcg_all_lift hoare_whenE_wp
+                    hoare_vcg_imp_lift hoare_vcg_all_lift whenE_wp
                     hoare_drop_imps get_cap_wp
               simp: if_apply_def2)
   done
 
-crunch sym_refs_hyp[wp]: get_hw_asid "\<lambda>s. sym_refs (state_hyp_refs_of s)"
+crunch get_hw_asid
+  for sym_refs_hyp[wp]: "\<lambda>s. sym_refs (state_hyp_refs_of s)"
 
 lemma flush_page_valid_arch[wp]:
   "\<lbrace>valid_arch_state and sym_refs o state_hyp_refs_of\<rbrace>
@@ -1589,14 +1596,16 @@ lemma page_table_mapped_wp: (* ARMHYP *)
   done
 
 
-crunch typ_at [wp]: flush_page "\<lambda>s. P (typ_at T p s)"
+crunch flush_page
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
   (wp: crunch_wps hoare_drop_imps)
 
 
 lemmas flush_page_typ_ats [wp] = abs_typ_at_lifts [OF flush_page_typ_at]
 
 
-crunch aligned [wp]: flush_page "pspace_aligned"
+crunch flush_page
+  for aligned[wp]: "pspace_aligned"
   (wp: crunch_wps hoare_drop_imps)
 
 
@@ -1618,10 +1627,12 @@ lemma vcpu_switch_vs_lookup[wp]: "\<lbrace>\<lambda>s. P (vs_lookup s)\<rbrace> 
    apply (wp | wpc | rule modify_valid_lift | clarsimp simp: vs_lookup_def vs_lookup1_def)+
   done
 
-crunch vs_lookup [wp]: set_vm_root "\<lambda>s. P (vs_lookup s)"
+crunch set_vm_root
+  for vs_lookup[wp]: "\<lambda>s. P (vs_lookup s)"
   (wp: crunch_wps simp: crunch_simps vs_lookup_arch_update)
 
-crunch vs_lookup [wp]: flush_page "\<lambda>s. P (vs_lookup s)"
+crunch flush_page
+  for vs_lookup[wp]: "\<lambda>s. P (vs_lookup s)"
   (wp: crunch_wps simp: crunch_simps vs_lookup_arch_update)
 
 lemma vcpu_switch_vs_lookup_pages[wp]: "\<lbrace>\<lambda>s. P (vs_lookup_pages s)\<rbrace> vcpu_switch vcpu \<lbrace>\<lambda>_ s. P (vs_lookup_pages s)\<rbrace>"
@@ -1630,10 +1641,12 @@ lemma vcpu_switch_vs_lookup_pages[wp]: "\<lbrace>\<lambda>s. P (vs_lookup_pages 
    apply (wp | wpc | rule modify_valid_lift | clarsimp simp: vs_lookup_pages_def vs_lookup_pages1_def)+
   done
 
-crunch vs_lookup_pages [wp]: set_vm_root "\<lambda>s. P (vs_lookup_pages s)"
+crunch set_vm_root
+  for vs_lookup_pages[wp]: "\<lambda>s. P (vs_lookup_pages s)"
   (wp: crunch_wps simp: crunch_simps vs_lookup_pages_arch_update)
 
-crunch vs_lookup_pages [wp]: flush_page "\<lambda>s. P (vs_lookup_pages s)"
+crunch flush_page
+  for vs_lookup_pages[wp]: "\<lambda>s. P (vs_lookup_pages s)"
   (wp: crunch_wps simp: crunch_simps vs_lookup_pages_arch_update)
 
 lemma store_pde_pd_at_asid:
@@ -1666,9 +1679,8 @@ lemma flush_page_pd_at_asid [wp]:
   apply wp
   done
 
-crunch "distinct" [wp]: store_pde pspace_distinct
-
-crunch "distinct" [wp]: get_vcpu pspace_distinct (simp: crunch_simps)
+crunch store_pde
+  for "distinct"[wp]: pspace_distinct
 
 lemma set_vcpu_pspace_distinct[wp]: "\<lbrace>pspace_distinct\<rbrace>set_vcpu p vcpu\<lbrace>\<lambda>_. pspace_distinct\<rbrace>"
   apply (simp add: set_vcpu_def)
@@ -1676,7 +1688,7 @@ lemma set_vcpu_pspace_distinct[wp]: "\<lbrace>pspace_distinct\<rbrace>set_vcpu p
   apply (clarsimp simp: get_object_def obj_at_def)
   done
 
-crunches vcpu_update,vgic_update,vgic_update_lr,vcpu_disable,vcpu_restore,vcpu_save_reg_range,
+crunch vcpu_update,vgic_update,vgic_update_lr,vcpu_disable,vcpu_restore,vcpu_save_reg_range,
           vcpu_save, vcpu_switch
   for distinct[wp]: pspace_distinct
   (wp: mapM_x_wp mapM_wp subset_refl)
@@ -1685,10 +1697,12 @@ lemmas arm_context_switch_distinct_aux =
   hoare_drop_imp[of pspace_distinct "arm_context_switch _ _" "\<lambda>_ s. pspace_distinct s"
                 , OF arm_context_switch_distinct]
 
-crunch "distinct" [wp]: set_vm_root pspace_distinct
+crunch set_vm_root
+  for "distinct"[wp]: pspace_distinct
   (simp: crunch_simps ignore: vcpu_switch wp: arm_context_switch_distinct_aux)
 
-crunch "distinct" [wp]: flush_page pspace_distinct (simp: crunch_simps)
+crunch flush_page
+  for "distinct"[wp]: pspace_distinct (simp: crunch_simps)
 
 definition "pg_entry_align pgsz \<equiv> case pgsz of
     ARMSmallPage \<Rightarrow> 3
@@ -1696,17 +1710,11 @@ definition "pg_entry_align pgsz \<equiv> case pgsz of
   | ARMSection \<Rightarrow> 3
   | ARMSuperSection \<Rightarrow> 7"  (* ARMHYP  change 6 to 7? *)
 
-crunch "distinct" [wp]: flush_page pspace_distinct (simp: crunch_simps)
 
+crunch check_mapping_pptr
+  for inv[wp]: "P"
 
-crunch inv[wp]: check_mapping_pptr "P"
-
-lemma lookup_pd_slot_pd:
-  "is_aligned pd pd_bits \<Longrightarrow> (lookup_pd_slot pd vptr && ~~ mask pd_bits) = pd"
-  apply (simp add: lookup_pd_slot_def Let_def)
-  apply (rule pd_shifting)
-  apply (simp add: vspace_bits_defs)
-  done
+lemmas lookup_pd_slot_pd = lookup_pd_slot_eq
 
 lemma vcpu_switch_valid_vspace_objs[wp]:
   "\<lbrace>valid_vspace_objs\<rbrace> vcpu_switch vcpu \<lbrace>\<lambda>_. valid_vspace_objs\<rbrace>"
@@ -1722,11 +1730,9 @@ lemmas arm_context_switch_valid_vspace_objs_aux =
   hoare_drop_imp[of valid_vspace_objs "arm_context_switch _ _" "\<lambda>_ s. valid_vspace_objs s"
                 , OF arm_context_switch_vspace_objs]
 
-crunch vspace_objs [wp]: set_vm_root valid_vspace_objs
+crunch set_vm_root
+  for vspace_objs[wp]: valid_vspace_objs
   (simp: crunch_simps valid_vspace_objs_arch_update wp: arm_context_switch_valid_vspace_objs_aux)
-
-crunch vspace_objs [wp]: flush_page valid_vspace_objs
-  (simp: crunch_simps valid_vspace_objs_arch_update)
 
 lemma vcpu_switch_equal__mappings[wp]: "\<lbrace>equal_kernel_mappings\<rbrace> vcpu_switch vcpu \<lbrace>\<lambda>_. equal_kernel_mappings\<rbrace>"
   apply (simp add: vcpu_switch_def)
@@ -1734,17 +1740,20 @@ lemma vcpu_switch_equal__mappings[wp]: "\<lbrace>equal_kernel_mappings\<rbrace> 
   apply (wp | wpc | rule modify_valid_lift | clarsimp simp: equal_kernel_mappings_def)+
   done
 
-crunch equal_mappings [wp]: arm_context_switch equal_kernel_mappings
+crunch arm_context_switch
+  for equal_mappings[wp]: equal_kernel_mappings
   (simp: crunch_simps)
 
 lemmas arm_context_switch_equal_mappings_aux =
   hoare_drop_imp[of equal_kernel_mappings "arm_context_switch _ _" "\<lambda>_ s. equal_kernel_mappings s"
                 , OF arm_context_switch_equal_mappings]
 
-crunch equal_mappings [wp]: set_vm_root equal_kernel_mappings
+crunch set_vm_root
+  for equal_mappings[wp]: equal_kernel_mappings
   (simp: crunch_simps wp: arm_context_switch_equal_mappings_aux)
 
-crunch equal_mappings [wp]: flush_page equal_kernel_mappings
+crunch flush_page
+  for equal_mappings[wp]: equal_kernel_mappings
   (simp: crunch_simps)
 
 lemma lookup_pt_slot_is_aligned: (* ARMHYP *)
@@ -1794,7 +1803,8 @@ lemma page_directory_at_aligned_pd_bits:
   apply (simp add:pd_bits_def pageBits_def)
   done
 
-crunch vspace_objs [wp]: flush_page valid_vspace_objs
+crunch flush_page
+  for vspace_objs[wp]: valid_vspace_objs
   (simp: crunch_simps valid_vspace_objs_arch_update)
 
 definition
@@ -1846,24 +1856,31 @@ definition
          s \<turnstile> (cap.ArchObjectCap cap)
   | PageFlush typ start end pstart pd asid \<Rightarrow>
       vspace_at_asid asid pd and K (asid \<le> mask asid_bits \<and> asid \<noteq> 0)
+      \<comment> \<open>the flushed physical range is inside the kernel window\<close>
+      and K (paddrBase \<le> pstart \<and> pstart < paddrTop \<and> end - start < paddrTop - pstart)
   | PageGetAddr ptr \<Rightarrow> \<top>"
 
 definition
   "valid_pdi pdi \<equiv> case pdi of
     PageDirectoryFlush typ start end pstart pd asid \<Rightarrow>
       vspace_at_asid asid pd and K (asid \<le> mask asid_bits \<and> asid \<noteq> 0)
+      \<comment> \<open>the flushed physical range is inside the kernel window\<close>
+      and K (paddrBase \<le> pstart \<and> pstart < paddrTop \<and> end - start < paddrTop - pstart)
   | PageDirectoryNothing \<Rightarrow> \<top>"
 
 
-crunch aligned [wp]: unmap_page pspace_aligned
+crunch unmap_page
+  for aligned[wp]: pspace_aligned
   (wp: crunch_wps)
 
 
-crunch "distinct" [wp]: unmap_page pspace_distinct
+crunch unmap_page
+  for "distinct"[wp]: pspace_distinct
   (wp: crunch_wps simp: crunch_simps)
 
 
-crunch valid_objs[wp]: unmap_page "valid_objs"
+crunch unmap_page
+  for valid_objs[wp]: "valid_objs"
   (wp: crunch_wps)
 
 (* this is weird *)
@@ -1874,10 +1891,12 @@ lemma vcpu_switch_caps_of_state[wp]:
   apply (wp | wpc | clarsimp)+
   done
 
-crunch caps_of_state [wp]: set_vm_root "\<lambda>s. P (caps_of_state s)"
+crunch set_vm_root
+  for caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
   (wp: crunch_wps simp: crunch_simps)
 
-crunch caps_of_state [wp]: unmap_page "\<lambda>s. P (caps_of_state s)"
+crunch unmap_page
+  for caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemma set_cap_valid_slots[wp]:
@@ -1923,23 +1942,28 @@ definition
        and is_final_cap' cap
        and K (is_pt_cap cap)"
 
-crunch aligned [wp]: unmap_page_table pspace_aligned
+crunch unmap_page_table
+  for aligned[wp]: pspace_aligned
   (wp: crunch_wps)
 
 
-crunch valid_objs [wp]: unmap_page_table valid_objs
+crunch unmap_page_table
+  for valid_objs[wp]: valid_objs
   (wp: crunch_wps simp: crunch_simps)
 
 
-crunch "distinct" [wp]: unmap_page_table pspace_distinct
+crunch unmap_page_table
+  for "distinct"[wp]: pspace_distinct
   (wp: crunch_wps simp: crunch_simps)
 
 
-crunch caps_of_state [wp]: unmap_page_table "\<lambda>s. P (caps_of_state s)"
+crunch unmap_page_table
+  for caps_of_state[wp]: "\<lambda>s. P (caps_of_state s)"
   (wp: crunch_wps simp: crunch_simps)
 
 
-crunch typ_at [wp]: unmap_page_table "\<lambda>s. P (typ_at T p s)"
+crunch unmap_page_table
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
   (wp: crunch_wps hoare_drop_imps)
 
 
@@ -1982,38 +2006,118 @@ lemma invalidateLocalTLB_ASID_valid_irq_states:
   apply(simp add: valid_irq_states_def | wp no_irq | simp add: no_irq_invalidateLocalTLB_ASID)+
   done
 
+crunch find_free_hw_asid, store_hw_asid
+  for if_live[wp]: if_live_then_nonz_cap
+  and zombies_final[wp]: zombies_final
+  and state_refs[wp]: "\<lambda>s. P (state_refs_of s)"
+  and hyp_refs[wp]: "\<lambda>s. P (state_hyp_refs_of s)"
+  and valid_mdb[wp]: valid_mdb
+  and valid_ioc[wp]: valid_ioc
+  and valid_idle[wp]: valid_idle
+  and only_idle[wp]: only_idle
+  and if_unsafe[wp]: if_unsafe_then_cap
+  and valid_reply_caps[wp]: valid_reply_caps
+  and valid_reply_masters[wp]: valid_reply_masters
+  and valid_global_refs[wp]: valid_global_refs
+  and irq_states[wp]: "\<lambda>s. P (interrupt_states s)"
+  and irq_node[wp]: "\<lambda>s. P (interrupt_irq_node s)"
+  and kernel_vspace[wp]: "\<lambda>s. P (arm_kernel_vspace (arch_state s))"
+  and valid_global_objs[wp]: valid_global_objs
+  and cap_refs_in_kernel_window[wp]: cap_refs_in_kernel_window
+  (simp: valid_global_objs_def)
+
+crunch invalidateLocalTLB_ASID
+  for underlying_memory_inv[wp]: "\<lambda>s. P (underlying_memory s)"
+  (ignore_del: invalidateLocalTLB_ASID)
+
+crunch invalidate_asid, find_free_hw_asid, store_hw_asid
+  for valid_machine_state[wp]: valid_machine_state
+  and pspace_respects_device_region[wp]: pspace_respects_device_region
+  and cap_refs_respects_device_region[wp]: cap_refs_respects_device_region
+  and valid_irq_states[wp]: valid_irq_states
+  (ignore: do_machine_op
+   wp: pspace_respects_device_region_dmo cap_refs_respects_device_region_dmo
+       dmo_valid_machine_state dmo_valid_irq_states invalidateLocalTLB_ASID_irq_masks)
+
+crunch invalidate_asid
+  for machine_state[wp]: "\<lambda>s. P (machine_state s)"
+  and valid_global_objs[wp]: valid_global_objs
+  and equal_kernel_mappings[wp]: equal_kernel_mappings
+  and pspace_in_kernel_window[wp]: pspace_in_kernel_window
+  and cap_refs_in_kernel_window[wp]: cap_refs_in_kernel_window
+  and cur_tcb[wp]: cur_tcb
+  (simp: valid_global_objs_def equal_kernel_mappings_def)
+
+lemma valid_arch_caps_arch_update[simp]:
+  "arm_asid_table (f (arch_state s)) = arm_asid_table (arch_state s) \<Longrightarrow>
+   valid_arch_caps (arch_state_update f s) = valid_arch_caps s"
+  by (simp add: valid_arch_caps_def valid_vs_lookup_arch_update valid_table_caps_def)
+
+lemma valid_asid_map_arch_update[simp]:
+  "\<lbrakk> arm_asid_table (f (arch_state s)) = arm_asid_table (arch_state s);
+     arm_asid_map (f (arch_state s)) = arm_asid_map (arch_state s) \<rbrakk> \<Longrightarrow>
+   valid_asid_map (arch_state_update f s) = valid_asid_map s"
+  by (simp add: valid_asid_map_def pd_at_asid_arch_up')
+
+lemma valid_next_asid_2_update[simp]:
+  "valid_next_asid_2 (if next_asid = maxBound then hw_asid_min else next_asid + 1)"
+  by (clarsimp simp: valid_next_asid_2_def hw_asid_reserved_def maxBound_word hw_asid_min_def
+                     word_wrap_eq_max_word)
+
+crunch do_machine_op, invalidate_asid
+  for second_level_tables[wp]: "\<lambda>s. P (second_level_tables (arch_state s))"
+  and valid_kernel_mappings[wp]: valid_kernel_mappings
+  and valid_global_vspace_mappings[wp]: valid_global_vspace_mappings
+  (simp: second_level_tables_def valid_global_vspace_mappings_def valid_kernel_mappings_def)
+
+lemma invalidate_asid_asid_map_update:
+  "\<lbrace>\<lambda>s. P (arm_hwasid_table (arch_state s)) ((arm_asid_map (arch_state s)) (asid := None))\<rbrace>
+   invalidate_asid asid
+   \<lbrace>\<lambda>_ s. P (arm_hwasid_table (arch_state s)) (arm_asid_map (arch_state s))\<rbrace>"
+  unfolding invalidate_asid_def
+  by (wpsimp simp: fun_upd_def)
+
+lemma dmo_cur_vcpu_obj_at[wp]:
+  "do_machine_op f \<lbrace>\<lambda>s. case arm_current_vcpu (arch_state s) of
+                          Some (v, b) \<Rightarrow> obj_at P v s
+                        | _ \<Rightarrow> True\<rbrace>"
+  apply (rule hoare_lift_Pf[where f="\<lambda>s. arm_current_vcpu (arch_state s)"])
+   apply (case_tac x; wpsimp simp: split_def)
+  apply wpsimp
+  done
+
+lemma invalidate_asid_cur_vcpu_obj_at[wp]:
+  "invalidate_asid asid \<lbrace>\<lambda>s. case arm_current_vcpu (arch_state s) of
+                               Some (v, b) \<Rightarrow> obj_at P v s
+                             | _ \<Rightarrow> True\<rbrace>"
+  apply (rule hoare_lift_Pf[where f="\<lambda>s. arm_current_vcpu (arch_state s)"])
+   apply (case_tac x; wpsimp simp: split_def)
+  apply wpsimp
+  done
+
 lemma find_free_hw_asid_invs [wp]:
-  "\<lbrace>invs\<rbrace> find_free_hw_asid \<lbrace>\<lambda>asid. invs\<rbrace>"
-  apply (rule hoare_add_post)
-    apply (rule find_free_hw_asid_valid_arch)
-   apply fastforce
-  apply (simp add: find_free_hw_asid_def invalidate_hw_asid_entry_def invalidate_asid_def
-                   do_machine_op_def split_def
-              cong: option.case_cong)
-  apply (wp|wpc)+
-  apply (clarsimp simp: invs_def valid_state_def split del: if_split)
-  apply (simp add: valid_global_refs_def global_refs_def cur_tcb_def
-                   valid_irq_node_def valid_vspace_objs_arch_update
-                   valid_arch_caps_def valid_global_objs_def
-                   valid_global_vspace_mappings_def
-                   valid_table_caps_def valid_kernel_mappings_def
-                   valid_machine_state_def valid_vs_lookup_arch_update)
-  apply (elim conjE)
-  apply (rule conjI)
-   apply(erule use_valid[OF _ invalidateLocalTLB_ASID_valid_irq_states])
-   apply fastforce
-  apply(rule conjI)
-   apply clarsimp
-   apply (drule use_valid)
-     apply (rule_tac p=p in invalidateLocalTLB_ASID_underlying_memory, simp, fastforce)
-  apply (clarsimp simp: valid_asid_map_def fun_upd_def[symmetric]
-                        pd_at_asid_arch_up')
-  apply (rule conjI, blast)
-  apply (clarsimp simp: vspace_at_asid_def)
-  apply (drule_tac P1 = "(=) (device_state (machine_state s))" in
-    use_valid[OF _ invalidateLocalTLB_ASID_device_state_inv])
-   apply simp
-  apply clarsimp
+  "find_free_hw_asid \<lbrace>invs\<rbrace>"
+  unfolding find_free_hw_asid_def invs_def valid_state_def valid_pspace_def
+  supply if_split[split del] fun_upd_apply[simp del]
+  apply (wpsimp simp: valid_arch_state_def invalidate_hw_asid_entry_def
+                      valid_global_vspace_mappings_def valid_global_objs_def
+                      valid_kernel_mappings_def valid_vspace_objs_arch_update
+                wp: dmo_valid_machine_state dmo_valid_irq_states
+                    invalidateLocalTLB_ASID_irq_masks
+                    pspace_respects_device_region_dmo cap_refs_respects_device_region_dmo
+                    invalidate_asid_asid_map_update valid_irq_node_typ valid_irq_handlers_lift
+                    valid_arch_caps_lift
+                cong: option.case_cong prod.case_cong)
+  apply (frule is_inv_inj)
+  apply (drule findNoneD)
+  apply (drule_tac x="arm_next_asid (arch_state s)" in bspec, simp)
+  apply (clarsimp simp: is_inv_def map_option_fun_upd_None ran_upd[folded fun_upd_apply]
+                        fun_upd_apply
+                  split: if_splits)
+  apply (intro conjI)
+    apply (fastforce simp: pred_conj_def split: option.splits)
+   apply (fastforce simp: dom_def split: if_splits)
+  apply (fastforce dest: inj_on_domD)
   done
 
 lemma get_hw_asid_invs [wp]:
@@ -2034,23 +2138,25 @@ lemma arm_context_switch_invs [wp]:
           in use_valid)
      apply ((clarsimp | wp)+)[3]
   apply(erule use_valid)
-  apply(wp no_irq | simp add: no_irq_setHardwareASID no_irq_set_current_pd)+
+  apply(wp no_irq | simp add: no_irq_setHardwareASID)+
   done
 
-lemmas set_current_pd_irq_masks = no_irq[OF no_irq_set_current_pd]
 lemmas setHardwareASID_irq_masks = no_irq[OF no_irq_setHardwareASID]
+lemmas machine_op_lift_irq_masks = no_irq[OF no_irq_machine_op_lift]
 
-lemma dmo_set_current_pd_invs[wp]: "\<lbrace>invs\<rbrace> do_machine_op (set_current_pd addr) \<lbrace>\<lambda>y. invs\<rbrace>"
+lemma set_global_pd_invs[wp]:
+  "set_global_pd \<lbrace>invs\<rbrace>"
+  apply (simp add: set_global_pd_def writeContextIDAndPD_def)
   apply (wp dmo_invs)
   apply safe
    apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p = underlying_memory m p"
           in use_valid)
-     apply ((clarsimp simp: set_current_pd_def writeTTBR0_def dsb_def isb_def machine_op_lift_def
-                           machine_rest_lift_def split_def setCurrentPDPL2_def | wp)+)[3]
-  apply(erule (1) use_valid[OF _ set_current_pd_irq_masks])
+     apply ((clarsimp simp: machine_op_lift_def machine_rest_lift_def split_def | wp)+)[3]
+  apply (erule (1) use_valid[OF _ machine_op_lift_irq_masks])
   done
 
-crunch device_state_inv[wp]: ackInterrupt "\<lambda>ms. P (device_state ms)"
+crunch ackInterrupt
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
 lemma dmo_ackInterrupt[wp]: "\<lbrace>invs\<rbrace> do_machine_op (ackInterrupt irq) \<lbrace>\<lambda>y. invs\<rbrace>"
   apply (wp dmo_invs)
   apply safe
@@ -2065,192 +2171,71 @@ lemma dmo_ackInterrupt[wp]: "\<lbrace>invs\<rbrace> do_machine_op (ackInterrupt 
 
 (* FIXME move to Machine_AI? *)
 
-crunch device_state_inv[wp]: writeContextIDAndPD "\<lambda>ms. P (device_state ms)"
-crunch device_state_inv[wp]: addressTranslateS1CPR "\<lambda>ms. P (device_state ms)"
-crunch device_state_inv[wp]: getSCTLR,get_gic_vcpu_ctrl_hcr,set_gic_vcpu_ctrl_hcr "\<lambda>ms. P (device_state ms)"
-crunch device_state_inv[wp]: writeVCPUHardwareReg, readVCPUHardwareReg "\<lambda>ms. P (device_state ms)"
-crunch device_state_inv[wp]: setSCTLR,setHCR,getSCTLR,get_gic_vcpu_ctrl_vmcr,set_gic_vcpu_ctrl_vmcr "\<lambda>ms. P (device_state ms)"
-crunch device_state_inv[wp]:
-  get_gic_vcpu_ctrl_hcr,set_gic_vcpu_ctrl_hcr,dsb,isb "\<lambda>ms. P (device_state ms)"
-crunch device_state_inv[wp]:
+crunch writeContextIDAndPD
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch addressTranslateS1
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch getSCTLR,get_gic_vcpu_ctrl_hcr,set_gic_vcpu_ctrl_hcr
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch writeVCPUHardwareReg, readVCPUHardwareReg
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch setSCTLR,setHCR,setCPACR,getSCTLR,get_gic_vcpu_ctrl_vmcr,set_gic_vcpu_ctrl_vmcr
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch getHDCR, setHDCR, trapDebugExceptions
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch
   get_gic_vcpu_ctrl_apr,set_gic_vcpu_ctrl_apr,get_gic_vcpu_ctrl_lr,set_gic_vcpu_ctrl_lr
-   "\<lambda>ms. P (device_state ms)"
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
+crunch check_export_arch_timer
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
 
-crunch underlying_memory: setSCTLR,getSCTLR,setHCR "\<lambda>m'. underlying_memory m' p = um"
-crunch underlying_memory: dsb,isb,writeContextIDAndPD,addressTranslateS1CPR "\<lambda>m'. underlying_memory m' p = um"
-crunch underlying_memory: get_gic_vcpu_ctrl_vmcr,set_gic_vcpu_ctrl_vmcr "\<lambda>m'. underlying_memory m' p = um"
-crunch underlying_memory: get_gic_vcpu_ctrl_apr,set_gic_vcpu_ctrl_apr "\<lambda>m'. underlying_memory m' p = um"
-crunch underlying_memory: get_gic_vcpu_ctrl_lr,set_gic_vcpu_ctrl_lr "\<lambda>m'. underlying_memory m' p = um"
-crunch underlying_memory: get_gic_vcpu_ctrl_hcr,set_gic_vcpu_ctrl_hcr "\<lambda>m'. underlying_memory m' p = um"
-crunch underlying_memory: writeVCPUHardwareReg, readVCPUHardwareReg "\<lambda>m'. underlying_memory m' p = um"
+crunch dsb,isb,writeContextIDAndPD,addressTranslateS1
+  for underlying_memory: "\<lambda>m'. underlying_memory m' p = um"
+crunch writeVCPUHardwareReg, check_export_arch_timer
+  for underlying_memory: "\<lambda>m'. underlying_memory m' p = um"
 
-crunches writeVCPUHardwareReg, readVCPUHardwareReg
-  for underlying_memory_pred: "\<lambda>m'. P (underlying_memory m')"
-
-lemmas isb_irq_masks = no_irq[OF no_irq_isb]
-lemmas dsb_irq_masks = no_irq[OF no_irq_dsb]
-lemmas setHCR_irq_masks = no_irq[OF no_irq_setHCR]
-lemmas setSCTLR_irq_masks = no_irq[OF no_irq_setSCTLR]
-lemmas getSCTLR_irq_masks = no_irq[OF no_irq_getSCTLR]
-lemmas get_gic_vcpu_ctrl_vmcr_irq_masks = no_irq[OF no_irq_get_gic_vcpu_ctrl_vmcr]
-lemmas set_gic_vcpu_ctrl_vmcr_irq_masks = no_irq[OF no_irq_set_gic_vcpu_ctrl_vmcr]
-lemmas get_gic_vcpu_ctrl_apr_irq_masks = no_irq[OF no_irq_get_gic_vcpu_ctrl_apr]
-lemmas set_gic_vcpu_ctrl_apr_irq_masks = no_irq[OF no_irq_set_gic_vcpu_ctrl_apr]
-lemmas get_gic_vcpu_ctrl_lr_irq_masks = no_irq[OF no_irq_get_gic_vcpu_ctrl_lr]
-lemmas set_gic_vcpu_ctrl_lr_irq_masks = no_irq[OF no_irq_set_gic_vcpu_ctrl_lr]
-lemmas get_gic_vcpu_ctrl_hcr_irq_masks = no_irq[OF no_irq_get_gic_vcpu_ctrl_hcr]
-lemmas set_gic_vcpu_ctrl_hcr_irq_masks = no_irq[OF no_irq_set_gic_vcpu_ctrl_hcr]
+crunch isb, dsb, setSCTLR, getSCTLR, setHCR, setCPACR,
+       get_gic_vcpu_ctrl_vmcr, set_gic_vcpu_ctrl_vmcr, get_gic_vcpu_ctrl_apr, set_gic_vcpu_ctrl_apr,
+       get_gic_vcpu_ctrl_lr, set_gic_vcpu_ctrl_lr, get_gic_vcpu_ctrl_hcr, set_gic_vcpu_ctrl_hcr,
+       writeVCPUHardwareReg, readVCPUHardwareReg, check_export_arch_timer, getHDCR, setHDCR,
+       trapDebugExceptions
+  for underlying_memory_pred[wp]: "\<lambda>m'. P (underlying_memory m')"
+  and irq_masks[wp]: "\<lambda>s. P (irq_masks s)"
+  (ignore_del: isb dsb)
 (* end of move to Machine_AI *)
 
-(* FIXME this whole next chunk of do_machine_op and invs lemmas looks like a candidate for a
-   lifting rule *)
-lemma dmo_isb_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op isb \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule isb_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ isb_irq_masks])
-  done
+lemma dmo_invs_lift:
+  assumes dev: "\<And>P. f \<lbrace>\<lambda>ms. P (device_state ms)\<rbrace>"
+  assumes mem: "\<And>P. f \<lbrace>\<lambda>ms. P (underlying_memory ms)\<rbrace>"
+  assumes irq: "\<And>P. f \<lbrace>\<lambda>ms. P (irq_masks ms)\<rbrace>"
+  shows "do_machine_op f \<lbrace>invs\<rbrace>"
+  unfolding invs_def valid_state_def valid_pspace_def valid_irq_states_def valid_machine_state_def
+  by (wpsimp wp: dev hoare_vcg_all_lift hoare_vcg_disj_lift
+                 dmo_inv_prop_lift[where g=underlying_memory, OF mem]
+                 pspace_respects_device_region_dmo
+                 cap_refs_respects_device_region_dmo
+     | wps dmo_inv_prop_lift[where g=irq_masks, OF irq])+
 
-lemma dmo_dsb_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op dsb \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule dsb_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ dsb_irq_masks])
-  done
-
-lemma dmo_setHCR_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (setHCR w) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule setHCR_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ setHCR_irq_masks])
-  done
-
-lemma dmo_setSCTLR_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (setSCTLR x) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule setSCTLR_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ setSCTLR_irq_masks])
-  done
-
-lemma dmo_getSCTLR_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (getSCTLR) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule getSCTLR_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ getSCTLR_irq_masks])
-  done
-
-lemma dmo_get_gic_vcpu_ctrl_vmcr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (get_gic_vcpu_ctrl_vmcr) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule get_gic_vcpu_ctrl_vmcr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ get_gic_vcpu_ctrl_vmcr_irq_masks])
-  done
-
-lemma dmo_set_gic_vcpu_ctrl_vmcr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (set_gic_vcpu_ctrl_vmcr x) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule set_gic_vcpu_ctrl_vmcr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ set_gic_vcpu_ctrl_vmcr_irq_masks])
-  done
-
-lemma dmo_get_gic_vcpu_ctrl_apr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (get_gic_vcpu_ctrl_apr) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule get_gic_vcpu_ctrl_apr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ get_gic_vcpu_ctrl_apr_irq_masks])
-  done
-
-lemma dmo_set_gic_vcpu_ctrl_apr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (set_gic_vcpu_ctrl_apr x) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule set_gic_vcpu_ctrl_apr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ set_gic_vcpu_ctrl_apr_irq_masks])
-  done
-
-lemma dmo_get_gic_vcpu_ctrl_lr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (get_gic_vcpu_ctrl_lr n) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule get_gic_vcpu_ctrl_lr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ get_gic_vcpu_ctrl_lr_irq_masks])
-  done
-
-lemma dmo_set_gic_vcpu_ctrl_lr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (set_gic_vcpu_ctrl_lr n x) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule set_gic_vcpu_ctrl_lr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ set_gic_vcpu_ctrl_lr_irq_masks])
-  done
-
-lemma dmo_get_gic_vcpu_ctrl_hcr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (get_gic_vcpu_ctrl_hcr) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule get_gic_vcpu_ctrl_hcr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ get_gic_vcpu_ctrl_hcr_irq_masks])
-  done
-
-lemma dmo_set_gic_vcpu_ctrl_hcr_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (set_gic_vcpu_ctrl_hcr x) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (rule set_gic_vcpu_ctrl_hcr_underlying_memory)
-    apply fastforce+
-  apply(erule (1) use_valid[OF _ set_gic_vcpu_ctrl_hcr_irq_masks])
-  done
-
-lemma dmo_writeVCPUHardwareReg_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (writeVCPUHardwareReg r v) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (fastforce intro: writeVCPUHardwareReg_underlying_memory)+
-  apply (erule (1) use_valid[OF _ no_irq[OF no_irq_writeVCPUHardwareReg]])
-  done
-
-lemma dmo_readVCPUHardwareReg_invs[wp]:
-  "\<lbrace>invs\<rbrace> do_machine_op (readVCPUHardwareReg r) \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (wp dmo_invs)
-  apply safe
-   apply (drule use_valid)
-     apply (fastforce intro: readVCPUHardwareReg_underlying_memory)+
-  apply (erule (1) use_valid[OF _ no_irq[OF no_irq_readVCPUHardwareReg]])
-  done
+lemma
+  shows dmo_isb_invs[wp]: "do_machine_op isb \<lbrace>invs\<rbrace>"
+  and dmo_dsb_invs[wp]: "do_machine_op dsb \<lbrace>invs\<rbrace>"
+  and dmo_setHCR_invs[wp]: "do_machine_op (setHCR w) \<lbrace>invs\<rbrace>"
+  and dmo_setSCTLR_invs[wp]: "do_machine_op (setSCTLR x) \<lbrace>invs\<rbrace>"
+  and dmo_setCPACR_invs[wp]: "do_machine_op (setCPACR x) \<lbrace>invs\<rbrace>"
+  and dmo_trapDebugExceptions_invs[wp]: "do_machine_op (trapDebugExceptions trap) \<lbrace>invs\<rbrace>"
+  and dmo_getSCTLR_invs[wp]: "do_machine_op getSCTLR \<lbrace>invs\<rbrace>"
+  and dmo_get_gic_vcpu_ctrl_vmcr_invs[wp]: "do_machine_op get_gic_vcpu_ctrl_vmcr \<lbrace>invs\<rbrace>"
+  and dmo_set_gic_vcpu_ctrl_vmcr_invs[wp]: "do_machine_op (set_gic_vcpu_ctrl_vmcr x) \<lbrace>invs\<rbrace>"
+  and dmo_get_gic_vcpu_ctrl_apr_invs[wp]: "do_machine_op get_gic_vcpu_ctrl_apr \<lbrace>invs\<rbrace>"
+  and dmo_set_gic_vcpu_ctrl_apr_invs[wp]: "do_machine_op (set_gic_vcpu_ctrl_apr x) \<lbrace>invs\<rbrace>"
+  and dmo_get_gic_vcpu_ctrl_lr_invs[wp]: "do_machine_op (get_gic_vcpu_ctrl_lr n) \<lbrace>invs\<rbrace>"
+  and dmo_set_gic_vcpu_ctrl_lr_invs[wp]: "do_machine_op (set_gic_vcpu_ctrl_lr n x) \<lbrace>invs\<rbrace>"
+  and dmo_get_gic_vcpu_ctrl_hcr_invs[wp]: "do_machine_op get_gic_vcpu_ctrl_hcr \<lbrace>invs\<rbrace>"
+  and dmo_set_gic_vcpu_ctrl_hcr_invs[wp]: "do_machine_op (set_gic_vcpu_ctrl_hcr x) \<lbrace>invs\<rbrace>"
+  and dmo_writeVCPUHardwareReg_invs[wp]: "do_machine_op (writeVCPUHardwareReg r v) \<lbrace>invs\<rbrace>"
+  and dmo_readVCPUHardwareReg_invs[wp]: "do_machine_op (readVCPUHardwareReg r) \<lbrace>invs\<rbrace>"
+  and dmo_check_export_arch_timer_invs[wp]: "do_machine_op check_export_arch_timer \<lbrace>invs\<rbrace>"
+  by (all \<open>wp dmo_invs_lift\<close>)
 
 (* set_vcpu invariants *)
 lemma set_vcpu_cur_tcb[wp]: "\<lbrace>cur_tcb\<rbrace> set_vcpu p v \<lbrace>\<lambda>_. cur_tcb\<rbrace>"
@@ -2290,20 +2275,24 @@ lemma set_vcpu_cap_refs_in_kernel_window[wp]:
   apply wp+
   done
 
-crunch valid_irq_states[wp]: set_vcpu valid_irq_states
+crunch set_vcpu
+  for valid_irq_states[wp]: valid_irq_states
   (wp: crunch_wps simp: crunch_simps)
 
-crunch interrupt_state[wp]: set_vcpu "\<lambda>s. P (interrupt_states s)"
+crunch set_vcpu
+  for interrupt_state[wp]: "\<lambda>s. P (interrupt_states s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemmas set_vcpu_valid_irq_handlers[wp] = valid_irq_handlers_lift[OF set_vcpu.caps set_vcpu_interrupt_state]
 
-crunch interrupt_irq_node[wp]: set_vcpu "\<lambda>s. P (interrupt_irq_node s)"
+crunch set_vcpu
+  for interrupt_irq_node[wp]: "\<lambda>s. P (interrupt_irq_node s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemmas set_vcpu_valid_irq_node[wp] = valid_irq_node_typ[OF set_vcpu_typ_at set_vcpu_interrupt_irq_node]
 
-crunch idle_thread[wp]: set_vcpu "\<lambda>s. P (idle_thread s)"
+crunch set_vcpu
+  for idle_thread[wp]: "\<lambda>s. P (idle_thread s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemma set_vcpu_valid_global_refs[wp]:
@@ -2315,7 +2304,7 @@ lemma set_vcpu_valid_reply_masters[wp]:
   by (rule valid_reply_masters_cte_lift) wp
 
 lemma set_vcpu_pred_tcb_at[wp]:
-  "\<lbrace>pred_tcb_at proj P t\<rbrace> set_vcpu p v \<lbrace>\<lambda>rv. pred_tcb_at proj P t\<rbrace>"
+  "set_vcpu p v \<lbrace>\<lambda>s. Q (pred_tcb_at proj P t s)\<rbrace>"
   apply (simp add: set_vcpu_def set_object_def)
   including no_pre apply wp
   apply (rule hoare_strengthen_post [OF get_object_sp])
@@ -2383,7 +2372,7 @@ lemma set_vcpu_if_live_then_nonz_cap_Some[wp]:
 
 (* FIXME: kind of ugly but hey! it works!! *)
 
-lemma state_refs_of_simp: "\<lbrakk> a \<noteq> p \<rbrakk> \<Longrightarrow> state_refs_of (s\<lparr>kheap := kheap s(p \<mapsto> v) \<rparr>) a = state_refs_of s a "
+lemma state_refs_of_simp: "\<lbrakk> a \<noteq> p \<rbrakk> \<Longrightarrow> state_refs_of (s\<lparr>kheap := (kheap s)(p \<mapsto> v) \<rparr>) a = state_refs_of s a "
   by (simp add: state_refs_of_def)
 
 lemma state_refs_of_vcpu_simp: "typ_at (AArch AVCPU) p s \<Longrightarrow> state_refs_of s p = {}"
@@ -2409,35 +2398,34 @@ lemma set_vcpu_sym_refs[wp]:
   apply (clarsimp simp: obj_at_def)
   done
 
-lemma state_hyp_refs_of_simp_neq: "\<lbrakk> a \<noteq> p \<rbrakk> \<Longrightarrow> state_hyp_refs_of (s\<lparr>kheap := kheap s(p \<mapsto> v) \<rparr>) a = state_hyp_refs_of s a "
+lemma state_hyp_refs_of_simp_neq: "\<lbrakk> a \<noteq> p \<rbrakk> \<Longrightarrow> state_hyp_refs_of (s\<lparr>kheap := (kheap s)(p \<mapsto> v) \<rparr>) a = state_hyp_refs_of s a "
   by (simp add: state_hyp_refs_of_def)
 
 lemma state_hyp_refs_of_simp_eq:
   "obj_at (\<lambda>ko'. hyp_refs_of ko' = hyp_refs_of v) p s
-   \<Longrightarrow> state_hyp_refs_of (s\<lparr>kheap := kheap s(p \<mapsto> v) \<rparr>) p = state_hyp_refs_of s p"
+   \<Longrightarrow> state_hyp_refs_of (s\<lparr>kheap := (kheap s)(p \<mapsto> v) \<rparr>) p = state_hyp_refs_of s p"
   by (clarsimp simp: state_hyp_refs_of_def obj_at_def)
 
-lemma set_object_vcpu_sym_refs_hyp:
+lemma set_object_vcpu_hyp_refs_of:
   "\<lbrace>\<lambda>s. obj_at (\<lambda>ko'. hyp_refs_of ko' = hyp_refs_of ko) p s
-      \<and> sym_refs (state_hyp_refs_of s)\<rbrace>
+      \<and> P (state_hyp_refs_of s)\<rbrace>
      set_object p ko
-   \<lbrace>\<lambda>rv s. sym_refs (state_hyp_refs_of s)\<rbrace>"
+   \<lbrace>\<lambda>rv s. P (state_hyp_refs_of s)\<rbrace>"
    apply (wpsimp wp: set_object_wp)
-   apply (erule rsubst[where P = sym_refs])
+   apply (erule rsubst[where P = P])
    apply (rule ext)
    by (clarsimp simp: state_hyp_refs_of_def obj_at_def
                   split: option.splits if_splits)
 
-lemma set_vcpu_sym_refs_refs_hyp:
+lemma set_vcpu_hyp_refs_of:
   "\<lbrace>\<lambda>s. obj_at (\<lambda>ko'. hyp_refs_of ko' = hyp_refs_of (ArchObj (VCPU v))) p s
-      \<and> sym_refs (state_hyp_refs_of s)\<rbrace>
+      \<and> P (state_hyp_refs_of s)\<rbrace>
      set_vcpu p v
-   \<lbrace>\<lambda>rv s. sym_refs (state_hyp_refs_of s)\<rbrace>"
+   \<lbrace>\<lambda>rv s. P (state_hyp_refs_of s)\<rbrace>"
   apply (simp add: set_vcpu_def)
-  apply (wp set_object_vcpu_sym_refs_hyp hoare_drop_imp)
+  apply (wp set_object_vcpu_hyp_refs_of hoare_drop_imp)
   apply (clarsimp simp: hyp_refs_of_def)
   done
-
 
 lemma set_vcpu_valid_pspace:
   "\<lbrace>valid_obj p (ArchObj (VCPU v))
@@ -2446,10 +2434,10 @@ lemma set_vcpu_valid_pspace:
      set_vcpu p v
    \<lbrace>\<lambda>rv. valid_pspace\<rbrace>"
   apply (wpsimp simp: valid_pspace_def pred_conj_def
-                  wp: set_vcpu_if_live_then_nonz_cap_full set_vcpu_sym_refs_refs_hyp)
+                  wp: set_vcpu_if_live_then_nonz_cap_full set_vcpu_hyp_refs_of)
   apply (clarsimp simp: obj_at_def live_def)
-  apply (clarsimp simp: arch_live_def hyp_refs_of_def refs_of_a_def vcpu_tcb_refs_def hyp_live_def
-                 split: kernel_object.splits arch_kernel_obj.splits option.splits)
+  apply (auto simp: arch_live_def hyp_refs_of_def vcpu_tcb_refs_def hyp_live_def
+              split: kernel_object.splits arch_kernel_obj.splits option.splits)
   done
 
 
@@ -2526,7 +2514,6 @@ lemma vcpu_update_trivial_invs:
   done
 
 lemmas vcpu_update_invs[wp] =
-  vcpu_update_trivial_invs[where upd="vcpu_vtimer_update", simplified]
   vcpu_update_trivial_invs[where upd="vcpu_regs_update", simplified]
   vcpu_update_trivial_invs[where upd="vcpu_vppi_masked_update", simplified]
   vcpu_update_trivial_invs[where upd="vcpu_vgic_update", simplified]
@@ -2544,7 +2531,7 @@ lemma dmo_machine_op_lift_invs[wp]:
   apply (wp dmo_invs)
   by (auto simp add: machine_op_lift_def machine_rest_lift_def in_monad select_f_def)
 
-crunches vcpu_restore_reg_range, vcpu_save_reg_range, vgic_update_lr, vcpu_read_reg
+crunch vcpu_restore_reg_range, vcpu_save_reg_range, vgic_update_lr, vcpu_read_reg
   for invs[wp]: invs
   (wp: mapM_x_wp)
 
@@ -2553,9 +2540,10 @@ lemma vcpu_write_reg_invs[wp]:
   unfolding vcpu_write_reg_def
   by (wpsimp cong: vcpu.fold_congs) (* crunch can't do cong yet *)
 
-lemma save_virt_timer_invs[wp]:
-  "\<lbrace>\<lambda> s. invs s\<rbrace> save_virt_timer vcpu_ptr \<lbrace>\<lambda>_ . invs\<rbrace>"
-  unfolding save_virt_timer_def read_cntpct_def get_cntv_off_64_def get_cntv_cval_64_def
+lemma disable_virt_timer_invs[wp]:
+  "disable_virt_timer vcpu_ptr_opt \<lbrace>invs\<rbrace>"
+  unfolding disable_virt_timer_def check_export_arch_timer_def
+            get_cntv_off_64_def get_cntv_cval_64_def
   by (wpsimp wp: set_vcpu_invs_eq_hyp get_vcpu_wp hoare_vcg_all_lift hoare_vcg_imp_lift')
 
 (* migrated from ArchInterrupt_AI, which is not visible from here *)
@@ -2567,9 +2555,12 @@ lemma maskInterrupt_invs:
       (clarsimp simp: in_monad invs_def valid_state_def valid_machine_state_def cur_tcb_def
                       valid_irq_states_def valid_irq_masks_def)
 
+crunch vcpu_restore_reg
+  for obj_at[wp]: "\<lambda>s. P (obj_at Q p s)"
+
 lemma restore_virt_timer_invs[wp]:
   "\<lbrace>\<lambda> s. invs s\<rbrace> restore_virt_timer vcpu_ptr \<lbrace>\<lambda>_ . invs\<rbrace>"
-  unfolding restore_virt_timer_def read_cntpct_def set_cntv_off_64_def set_cntv_cval_64_def
+  unfolding restore_virt_timer_def set_cntv_off_64_def set_cntv_cval_64_def
              is_irq_active_def get_irq_state_def
   by (wpsimp wp: set_vcpu_invs_eq_hyp get_vcpu_wp hoare_vcg_all_lift hoare_vcg_imp_lift'
                  maskInterrupt_invs)
@@ -2584,7 +2575,7 @@ lemma vcpu_enable_invs[wp]:
 
 lemma vcpu_restore_invs[wp]:
   "\<lbrace>\<lambda>s. invs s\<rbrace> vcpu_restore v \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (simp add: vcpu_restore_def do_machine_op_bind dom_mapM)
+  apply (simp add: vcpu_restore_def do_machine_op_bind dom_mapM empty_fail_cond)
   apply (wpsimp wp: mapM_wp_inv)
   done
 
@@ -2617,7 +2608,7 @@ lemma vcpu_save_invs[wp]:
 lemma vcpu_disable_invs[wp]:
   "\<lbrace>\<lambda> s. invs s\<rbrace> vcpu_disable v \<lbrace>\<lambda>_ s . invs s\<rbrace>"
   apply (simp add: vcpu_disable_def)
-  apply (wpsimp simp: do_machine_op_bind empty_fail_isb
+  apply (wpsimp simp: do_machine_op_bind empty_fail_isb empty_fail_cond
                   wp: set_vcpu_invs_eq_hyp get_vcpu_wp maskInterrupt_invs
         | wp hoare_vcg_all_lift hoare_vcg_imp_lift')+
   done
@@ -2667,19 +2658,43 @@ definition "cur_vcpu_at v s \<equiv> case v of None \<Rightarrow> True | Some (v
 
 lemma invs_current_vcpu_update:
   "\<lbrakk>cur_vcpu_at v s; valid_arch_state s\<rbrakk> \<Longrightarrow>
-      invs (s\<lparr>arch_state := arch_state s
-               \<lparr>arm_current_vcpu := v\<rparr>\<rparr>) = invs s"
+     invs (s\<lparr>arch_state := arch_state s \<lparr>arm_current_vcpu := v\<rparr>\<rparr>) = invs s"
   by (auto simp: invs_def valid_state_def cur_tcb_def cur_vcpu_at_def obj_at_conj_distrib
                     valid_global_refs_def valid_asid_map_def valid_arch_state_def
                     valid_global_objs_def valid_global_vspace_mappings_def
           split: option.split)
 
-lemma invs_current_vcpu_update': "\<lbrakk> cur_vcpu_at v s \<and> invs s \<rbrakk>
-  \<Longrightarrow> invs (s\<lparr>arch_state := arch_state s\<lparr>arm_current_vcpu := v\<rparr>\<rparr>)"
-  by (auto simp add: invs_def valid_state_def cur_tcb_def cur_vcpu_at_def obj_at_conj_distrib
-            valid_global_refs_def valid_asid_map_def valid_arch_state_def
-            valid_global_objs_def valid_global_vspace_mappings_def
-           split: option.split)
+lemma invs_current_vcpu_update':
+  "\<lbrakk> cur_vcpu_at v s; invs s \<rbrakk> \<Longrightarrow> invs (s\<lparr>arch_state := arch_state s\<lparr>arm_current_vcpu := v\<rparr>\<rparr>)"
+  apply (prop_tac "valid_arch_state s", simp add: invs_def valid_state_def)
+  apply (simp add: invs_current_vcpu_update)
+  done
+
+lemma vgic_update_hyp_refs_of[wp]:
+  "vgic_update vcpuptr f \<lbrace>\<lambda>s. P (state_hyp_refs_of s)\<rbrace>"
+  unfolding vgic_update_def vcpu_update_def
+  by (wpsimp wp: set_vcpu_hyp_refs_of get_vcpu_wp simp: obj_at_def in_omonad)
+
+lemma vcpu_save_reg_hyp_refs_of[wp]:
+  "vcpu_save_reg vcpuptr r \<lbrace>\<lambda>s. P (state_hyp_refs_of s)\<rbrace>"
+  unfolding vcpu_save_reg_def vcpu_update_def
+  by (wpsimp wp: set_vcpu_hyp_refs_of get_vcpu_wp hoare_vcg_all_lift hoare_vcg_imp_lift)
+     (simp add: obj_at_def in_omonad)
+
+lemma vcpu_update_regs_hyp_refs_of[wp]:
+  "vcpu_update vcpu_ptr (vcpu_regs_update f) \<lbrace>\<lambda>s. P (state_hyp_refs_of s)\<rbrace>"
+  unfolding vcpu_update_def
+  by (wpsimp wp: set_vcpu_hyp_refs_of get_vcpu_wp)
+     (simp add: obj_at_def in_omonad)
+
+lemma vcpu_write_reg_hyp_refs_of[wp]:
+  "vcpu_write_reg vcpu_ptr reg val \<lbrace>\<lambda>s. P (state_hyp_refs_of s)\<rbrace>"
+  unfolding vcpu_write_reg_def by (wpsimp cong: vcpu.fold_congs)
+
+crunch disable_virt_timer, vcpu_disable, vcpu_invalidate_active, vcpu_restore, vcpu_save,
+       vcpu_switch
+  for hyp_refs_of[wp]: "\<lambda>s. P (state_hyp_refs_of s)"
+  (ignore: vcpu_update wp: crunch_wps)
 
 lemma vcpu_switch_invs[wp]:
 "\<lbrace>invs and (\<lambda>s. v \<noteq> None \<longrightarrow> obj_at hyp_live (the v) s)\<rbrace> vcpu_switch v \<lbrace> \<lambda>_ . invs \<rbrace>"
@@ -2690,7 +2705,8 @@ lemma vcpu_switch_invs[wp]:
   apply (wpsimp simp: cur_vcpu_at_def | strengthen invs_current_vcpu_update')+
   done
 
-crunch device_state_inv[wp]: setIRQTrigger "\<lambda>ms. P (device_state ms)"
+crunch setIRQTrigger
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
 
 lemma dmo_setIRQTrigger_invs[wp]: "\<lbrace>invs\<rbrace> do_machine_op (setIRQTrigger irq b) \<lbrace>\<lambda>y. invs\<rbrace>"
   apply (wp dmo_invs)
@@ -2705,7 +2721,7 @@ lemma dmo_setIRQTrigger_invs[wp]: "\<lbrace>invs\<rbrace> do_machine_op (setIRQT
 lemma svr_invs [wp]:
   "\<lbrace>invs\<rbrace> set_vm_root t' \<lbrace>\<lambda>_. invs\<rbrace>"
   unfolding set_vm_root_def
-  apply (wpsimp wp: gets_the_get_tcb_wp hoare_vcg_all_lift hoare_vcg_imp_lift hoare_whenE_wp
+  apply (wpsimp wp: gets_the_get_tcb_wp hoare_vcg_all_lift hoare_vcg_imp_lift whenE_wp
                     hoare_vcg_disj_lift hoare_drop_imps get_cap_wp
               simp: if_apply_def2)
   apply (thin_tac "cte_wp_at ((=) x) t s" for t)
@@ -2713,10 +2729,10 @@ lemma svr_invs [wp]:
   apply (clarsimp simp: valid_cap_def mask_def)
   done
 
-crunches
+crunch
   arm_context_switch, vcpu_update, vgic_update, vcpu_disable, vcpu_enable,
-  vcpu_restore, vcpu_switch, set_vm_root
-  for pred_tcb_at[wp]: "pred_tcb_at proj P t"
+  vcpu_restore, vcpu_switch, set_vm_root, vcpu_flush
+  for pred_tcb_at[wp]: "\<lambda>s. Q (pred_tcb_at proj P t s)"
   (simp: crunch_simps wp: crunch_wps mapM_x_wp)
 
 lemmas set_vm_root_typ_ats [wp] = abs_typ_at_lifts [OF set_vm_root_typ_at]
@@ -2744,7 +2760,7 @@ end
 
 locale vs_lookup_map_some_pdes = Arch +
   fixes pd pdp s s' S T pd'
-  defines "s' \<equiv> s\<lparr>kheap := kheap s(pdp \<mapsto> ArchObj (PageDirectory pd'))\<rparr>"
+  defines "s' \<equiv> s\<lparr>kheap := (kheap s)(pdp \<mapsto> ArchObj (PageDirectory pd'))\<rparr>"
   assumes refs: "vs_refs (ArchObj (PageDirectory pd')) =
                  (vs_refs (ArchObj (PageDirectory pd)) - T) \<union> S"
   assumes old: "kheap s pdp = Some (ArchObj (PageDirectory pd))"
@@ -2815,7 +2831,7 @@ lemma vs_lookup2:
 
 end
 
-context Arch begin global_naming ARM_HYP
+context Arch begin arch_global_naming
 
 lemma set_pd_vspace_objs_map: (* ARMHYP *)
   notes valid_vspace_obj.simps[simp del] and a_type_elims[rule del]
@@ -2858,7 +2874,7 @@ lemma set_pd_vspace_objs_map: (* ARMHYP *)
 lemma simpler_set_pd_def:
   "set_pd p pd =
    (\<lambda>s. if \<exists>pd. kheap s p = Some (ArchObj (PageDirectory pd))
-        then ({((), s\<lparr>kheap := kheap s(p \<mapsto> ArchObj (PageDirectory pd))\<rparr>)},
+        then ({((), s\<lparr>kheap := (kheap s)(p \<mapsto> ArchObj (PageDirectory pd))\<rparr>)},
               False)
         else ({}, True))"
   apply (rule ext)
@@ -2914,7 +2930,7 @@ lemma set_pd_valid_vs_lookup_map: (* ARMHYP *)
     apply (drule vs_lookup_pages_apI)
       apply (simp split: if_split_asm)
      apply (simp+)[2]
-   apply (frule_tac s="s\<lparr>kheap := kheap s(p \<mapsto> ArchObj (PageDirectory pd))\<rparr>"
+   apply (frule_tac s="s\<lparr>kheap := (kheap s)(p \<mapsto> ArchObj (PageDirectory pd))\<rparr>"
                  in vs_lookup_pages_pdI[rotated -1])
         apply (simp del: fun_upd_apply)+
    apply (frule vs_lookup_pages_apI)
@@ -3280,7 +3296,7 @@ lemma ref_is_unique: (* ARMHYP *)
 lemma mask_shift_mask_helper:
   "(p && mask pd_bits >> pde_bits) && mask 11 = (p && mask pd_bits >> pde_bits)"
   apply (rule word_eqI)
-  apply (simp add: word_size pd_bits_def vspace_bits_defs nth_shiftr conj_comms)
+  apply (simp add: word_size vspace_bits_defs nth_shiftr conj_comms)
   done
 
 lemma ucast_ucast_mask_shift_helper:
@@ -3565,7 +3581,8 @@ by (fastforce simp: vspace_bits_defs cte_wp_at_caps_of_state is_pt_cap_def cap_a
 lemmas store_pde_cte_wp_at1[wp]
     = hoare_cte_wp_caps_of_state_lift [OF store_pde_caps_of_state]
 
-crunch global_refs_inv[wp]: store_pde "\<lambda>s. P (global_refs s)"
+crunch store_pde
+  for global_refs_inv[wp]: "\<lambda>s. P (global_refs s)"
     (wp: get_object_wp) (* added by sjw, something dropped out of some set :( *)
 
 lemma mapM_swp_store_pde_invs_unmap:
@@ -3706,12 +3723,11 @@ lemma store_pde_invs_unmap':
    apply (clarsimp simp: vs_refs_def graph_of_def vspace_bits_defs split: if_split_asm)
    apply (rule_tac x="(ac, bc)" in image_eqI)
     apply clarsimp
-   apply (clarsimp simp: ucast_ucast_mask_shift_helper[simplified vspace_bits_defs, simplified] ucast_id)
+   apply (clarsimp simp: ucast_ucast_mask_shift_helper[simplified vspace_bits_defs, simplified])
   apply (rule conjI)
    apply safe[1]
       apply (clarsimp simp: vs_refs_pages_def graph_of_def vspace_bits_defs
                             ucast_ucast_mask_shift_helper[simplified vspace_bits_defs, simplified]
-                            ucast_id
                       split: if_split_asm)
       apply (rule_tac x="(ac, bc)" in image_eqI)
        apply clarsimp
@@ -3723,7 +3739,7 @@ lemma store_pde_invs_unmap':
     apply (rule_tac x="(ac,bc)" in image_eqI)
      apply clarsimp
     apply (clarsimp simp: ucast_ucast_mask_shift_helper[simplified vspace_bits_defs, simplified]
-                          vspace_bits_defs ucast_id)
+                          vspace_bits_defs)
    apply (clarsimp simp: vs_refs_pages_def graph_of_def)
    apply (rule_tac x="(ucast (p && mask pd_bits >> 3), x)" in image_eqI)
     apply (clarsimp simp: ucast_ucast_mask_shift_helper[simplified pde_bits_def])
@@ -3776,18 +3792,17 @@ lemma pd_slots_helper:
   apply (drule imageI[where f="\<lambda>x. x && ~~ mask pd_bits"])
   apply (simp add: obj_refs_def vspace_bits_defs)
   apply (rename_tac cap)
-  apply (case_tac cap, simp+)
-  apply (rename_tac arch_cap)
-  apply (case_tac arch_cap, simp+)
-     apply (drule (1) set_rev_mp)
-     apply (drule (1) set_rev_mp)
-     apply force
+  apply (case_tac cap; simp)
+    apply (rename_tac arch_cap)
+    apply (case_tac arch_cap; simp)
     apply (drule (1) set_rev_mp)
     apply (drule (1) set_rev_mp)
     apply force
    apply (drule (1) set_rev_mp)
    apply (drule (1) set_rev_mp)
    apply force
+  apply (drule (1) set_rev_mp)
+  apply (drule (1) set_rev_mp)
   apply force
   done
 
@@ -3796,19 +3811,18 @@ lemma simpler_store_pde_def:
   "store_pde p pde s =
     (case kheap s (p && ~~ mask pd_bits) of
           Some (ArchObj (PageDirectory pd)) =>
-            ({((), s\<lparr>kheap := (kheap s((p && ~~ mask pd_bits) \<mapsto>
-                                       (ArchObj (PageDirectory (pd(ucast (p && mask pd_bits >> 3) := pde))))))\<rparr>)}, False)
+            ({((), s\<lparr>kheap := (kheap s)(p && ~~ mask pd_bits \<mapsto>
+                                       (ArchObj (PageDirectory (pd(ucast (p && mask pd_bits >> 3) := pde)))))\<rparr>)}, False)
         | _ => ({}, True))"
-  apply     (auto simp: store_pde_def simpler_set_pd_def get_object_def simpler_gets_def assert_def
-                        return_def fail_def set_object_def get_def put_def bind_def get_pd_def vspace_bits_defs
-                  split: Structures_A.kernel_object.splits option.splits arch_kernel_obj.splits if_split_asm)
-  done
+  by (auto simp: store_pde_def simpler_set_pd_def get_object_def simpler_gets_def assert_def
+                 return_def fail_def set_object_def get_def put_def bind_def get_pd_def vspace_bits_defs
+           split: Structures_A.kernel_object.splits option.splits arch_kernel_obj.splits if_split_asm)
 
 lemma pde_update_valid_vspace_objs:
   "[|valid_vspace_objs s; valid_pde pde s; pde_ref pde = None;
     kheap s (p && ~~ mask pd_bits) = Some (ArchObj (PageDirectory pd))|]
    ==> valid_vspace_objs
-         (s\<lparr>kheap := kheap s(p && ~~ mask pd_bits \<mapsto> ArchObj (PageDirectory (pd(ucast (p && mask pd_bits >> 3) := pde))))\<rparr>)"
+         (s\<lparr>kheap := (kheap s)(p && ~~ mask pd_bits \<mapsto> ArchObj (PageDirectory (pd(ucast (p && mask pd_bits >> 3) := pde))))\<rparr>)"
   apply (cut_tac pde=pde and p=p in store_pde_arch_objs_unmap)
   apply (clarsimp simp: valid_def)
   apply (erule allE[where x=s])
@@ -4053,7 +4067,8 @@ lemma flush_table_invs[wp]:
             | wp set_vm_root_for_flush_invs)+
   done
 
-crunch vs_lookup[wp]: flush_table "\<lambda>s. P (vs_lookup s)"
+crunch flush_table
+  for vs_lookup[wp]: "\<lambda>s. P (vs_lookup s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemma set_vcpu_cte_wp_at[wp]:
@@ -4064,7 +4079,8 @@ lemma set_vcpu_cte_wp_at[wp]:
   by (clarsimp elim!: rsubst[where P=P]
              simp: cte_wp_at_after_update)
 
-crunch cte_wp_at[wp]: vcpu_disable, vcpu_enable, vcpu_save, vcpu_restore "\<lambda>s. P (cte_wp_at P' p s)"
+crunch vcpu_disable, vcpu_enable, vcpu_save, vcpu_restore
+  for cte_wp_at[wp]: "\<lambda>s. P (cte_wp_at P' p s)"
   (wp: crunch_wps simp: crunch_simps)
 
 (* this is again, weird *)
@@ -4075,14 +4091,13 @@ lemma vcpu_switch_cte_wp_at[wp]:
   apply (wp | wpc | clarsimp)+
   done
 
-crunch cte_wp_at[wp]: vcpu_switch "\<lambda>s. P (cte_wp_at P' p s)"
+crunch flush_table
+  for cte_wp_at[wp]: "\<lambda>s. P (cte_wp_at P' p s)"
   (wp: crunch_wps simp: crunch_simps)
 
-crunch cte_wp_at[wp]: flush_table "\<lambda>s. P (cte_wp_at P' p s)"
-  (wp: crunch_wps simp: crunch_simps)
 
-
-crunch global_refs_inv[wp]: vcpu_enable, vcpu_disable, vcpu_restore, vcpu_save "\<lambda>s. P (global_refs s)"
+crunch vcpu_enable, vcpu_disable, vcpu_restore, vcpu_save
+  for global_refs_inv[wp]: "\<lambda>s. P (global_refs s)"
   (wp: crunch_wps simp: crunch_simps global_refs_arch_update_eq)
 
 lemma vcpu_switch_global_refs_inv[wp]:
@@ -4092,17 +4107,9 @@ lemma vcpu_switch_global_refs_inv[wp]:
   apply (wp | wpc | rule modify_valid_lift | clarsimp simp: global_refs_def)+
   done
 
-crunch global_refs_inv[wp]: vcpu_switch "\<lambda>s. P (global_refs s)"
+crunch flush_table
+  for global_refs_inv[wp]: "\<lambda>s. P (global_refs s)"
   (wp: crunch_wps simp: crunch_simps global_refs_arch_update_eq)
-
-crunch global_refs_inv[wp]: flush_table "\<lambda>s. P (global_refs s)"
-  (wp: crunch_wps simp: crunch_simps global_refs_arch_update_eq)
-(*
-lemma lookup_pd_slot_kernel_mappings_strg:
-  "is_aligned pd pd_bits \<and> vptr < kernel_base
-     \<and> vmsz_aligned vptr ARMSection
-     \<longrightarrow> ucast (lookup_pd_slot pd vptr && mask pd_bits >> 2) \<notin> kernel_mapping_slots"
-  by (simp add: less_kernel_base_mapping_slots) *)
 
 lemma not_in_global_refs_vs_lookup:
   "(\<exists>\<rhd> p) s \<and> valid_vs_lookup s \<and> valid_global_refs s
@@ -4127,7 +4134,7 @@ lemma unmap_page_table_invs[wp]:
   apply (simp add: unmap_page_table_def)
   apply (rule hoare_pre)
    apply (wp dmo_invs | wpc | simp)+
-      apply (rule_tac Q="\<lambda>_. invs and K (asid \<le> mask asid_bits)" in hoare_post_imp)
+      apply (rule_tac Q'="\<lambda>_. invs and K (asid \<le> mask asid_bits)" in hoare_post_imp)
        apply safe
         apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p =
                                    underlying_memory m p" in use_valid)
@@ -4159,7 +4166,7 @@ lemma mapM_x_swp_store_empty_table':
   apply (induct slots, simp_all add: mapM_x_Nil mapM_x_Cons)
    apply wp
    apply (clarsimp simp: obj_at_def empty_table_def fun_eq_iff)
-  apply (rule hoare_seq_ext, assumption)
+  apply (rule bind_wp, assumption)
   apply (thin_tac "\<lbrace>P\<rbrace> f \<lbrace>Q\<rbrace>" for P f Q)
   apply (simp add: store_pte_def set_pt_def set_object_def)
   apply (wp get_object_wp)
@@ -4356,11 +4363,6 @@ lemma store_pde_unmap_page:
   apply (simp add: up_ucast_inj_eq)
 done
 
-(* FIXME: move to Invariants_A *)
-lemma pte_ref_pages_invalid_None[simp]:
-  "pte_ref_pages InvalidPTE = None"
-  by (simp add: pte_ref_pages_def)
-
 lemma store_pte_no_lookup_pages:
   "\<lbrace>\<lambda>s. \<not> (r \<unrhd> q) s\<rbrace>
    store_pte p InvalidPTE
@@ -4377,10 +4379,6 @@ lemma store_pte_no_lookup_pages:
                      graph_of_def image_def
               split: if_split_asm)
 
-(* FIXME: move to Invariants_A *)
-lemma pde_ref_pages_invalid_None[simp]:
-  "pde_ref_pages InvalidPDE = None"
-  by (simp add: pde_ref_pages_def)
 
 lemma store_pde_no_lookup_pages:
   "\<lbrace>\<lambda>s. \<not> (r \<unrhd> q) s\<rbrace> store_pde p InvalidPDE \<lbrace>\<lambda>_ s. \<not> (r \<unrhd> q) s\<rbrace>"
@@ -4396,9 +4394,6 @@ lemma store_pde_no_lookup_pages:
                      graph_of_def image_def
               split: if_split_asm)
 
-crunch vs_lookup_pages[wp]:
-  get_hw_asid,find_pd_for_asid,set_vm_root_for_flush "\<lambda>s. P (vs_lookup_pages s)"
-
 lemma flush_table_vs_lookup_pages[wp]:
   "\<lbrace>\<lambda>s. P (vs_lookup_pages s)\<rbrace>
    flush_table a b c d
@@ -4406,7 +4401,8 @@ lemma flush_table_vs_lookup_pages[wp]:
   by (simp add: flush_table_def | wp mapM_UNIV_wp hoare_drop_imps | wpc
      | intro conjI impI)+
 
-crunch vs_lookup_pages[wp]: page_table_mapped "\<lambda>s. P (vs_lookup_pages s)"
+crunch page_table_mapped
+  for vs_lookup_pages[wp]: "\<lambda>s. P (vs_lookup_pages s)"
 
 lemma unmap_page_table_unmapped[wp]:
   "\<lbrace>pspace_aligned and valid_vspace_objs\<rbrace>
@@ -4437,16 +4433,12 @@ lemma unmap_page_table_unmapped2:
 lemma cacheRangeOp_lift[wp]:
   assumes o: "\<And>a b. \<lbrace>P\<rbrace> oper a b \<lbrace>\<lambda>_. P\<rbrace>"
   shows "\<lbrace>P\<rbrace> cacheRangeOp oper x y z \<lbrace>\<lambda>_. P\<rbrace>"
-  apply (clarsimp simp: cacheRangeOp_def lineStart_def cacheLineBits_def cacheLine_def)
-  apply (rule hoare_pre)
-  apply (wp mapM_x_wp_inv o)
-   apply (case_tac x, simp, wp o, simp)
-  done
+  unfolding cacheRangeOp_def
+  by (wpsimp wp: mapM_x_wp_inv o)
 
 lemma cleanCacheRange_PoU_underlying_memory[wp]:
-  "\<lbrace>\<lambda>m'. underlying_memory m' p = um\<rbrace> cleanCacheRange_PoU a b c \<lbrace>\<lambda>_ m'. underlying_memory m' p = um\<rbrace>"
+  "cleanCacheRange_PoU a b c \<lbrace>\<lambda>m'. underlying_memory m' p = um\<rbrace>"
   by (clarsimp simp: cleanCacheRange_PoU_def, wp)
-
 
 lemma unmap_page_table_unmapped3:
   "\<lbrace>pspace_aligned and valid_vspace_objs and page_table_at pt and
@@ -4507,15 +4499,15 @@ lemma empty_table_pt_capI:
     apply (erule impE, simp add: is_cap_simps)+
     by assumption
 
-crunch underlying_memory[wp]: cleanCacheRange_PoC, cleanL2Range, invalidateL2Range, invalidateByVA,
+crunch cleanCacheRange_PoC, cleanL2Range, invalidateL2Range, invalidateByVA,
                               cleanInvalidateL2Range, cleanInvalByVA, invalidateCacheRange_I,
                               branchFlushRange, ackInterrupt
-                           "\<lambda>m'. underlying_memory m' p = um"
+  for underlying_memory[wp]: "\<lambda>m'. underlying_memory m' p = um"
   (simp: cache_machine_op_defs)
 
-crunch underlying_memory[wp]: cleanCacheRange_RAM, invalidateCacheRange_RAM,
+crunch cleanCacheRange_RAM, invalidateCacheRange_RAM,
                               cleanInvalidateCacheRange_RAM, do_flush
-                "\<lambda>m'. underlying_memory m' p = um"
+  for underlying_memory[wp]: "\<lambda>m'. underlying_memory m' p = um"
   (simp: crunch_simps)
 
 
@@ -4540,8 +4532,8 @@ lemma cacheRangeOp_respects_device_region[wp]:
   shows "\<lbrace>\<lambda>ms. P (device_state ms)\<rbrace> cacheRangeOp f a b c\<lbrace>\<lambda>_ ms. P (device_state ms)\<rbrace>"
   by (wpsimp simp: do_flush_def cacheRangeOp_def wp: mapM_x_wp valid_f)+
 
-crunches cleanByVA, cleanCacheRange_PoC, cleanCacheRange_RAM,
-  cleanInvalByVA, invalidateByVA, invalidateL2Range,
+crunch cleanByVA, cleanCacheRange_PoC, cleanCacheRange_RAM,
+  cleanInvalByVA, invalidateByVA, invalidateL2Range, check_export_arch_timer,
   invalidateCacheRange_RAM, branchFlush, branchFlushRange,
   invalidateByVA_I, cleanInvalidateL2Range, do_flush, storeWord
   for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
@@ -4549,29 +4541,35 @@ crunches cleanByVA, cleanCacheRange_PoC, cleanCacheRange_RAM,
    ignore_del: cleanByVA cleanInvalByVA invalidateByVA invalidateL2Range
                branchFlush invalidateByVA_I cleanInvalidateL2Range storeWord)
 
-crunch pspace_in_kernel_window[wp]: perform_page_invocation "pspace_in_kernel_window"
-  (simp: crunch_simps wp: crunch_wps)
-
 lemma dmo_maskInterrupt_pspace_respects_device_region[wp]:
   "do_machine_op (maskInterrupt b irq) \<lbrace>pspace_respects_device_region\<rbrace>"
   unfolding maskInterrupt_def
   by (wpsimp wp: pspace_respects_device_region_dmo)
 
-crunches vcpu_enable, vcpu_write_reg, vcpu_update, vcpu_restore, vcpu_enable, vcpu_disable
+crunch vcpu_enable, vcpu_write_reg, vcpu_update, vcpu_restore, vcpu_enable, vcpu_disable
   for pspace_respects_device_region[wp]: "pspace_respects_device_region"
   (wp: crunch_wps dmo_maskInterrupt_pspace_respects_device_region
        pspace_respects_device_region_dmo
-   simp: crunch_simps set_cntv_off_64_def read_cntpct_def get_cntv_off_64_def get_cntv_cval_64_def
+   simp: crunch_simps set_cntv_off_64_def get_cntv_off_64_def get_cntv_cval_64_def
          set_cntv_cval_64_def)
 
-crunch pspace_respects_device_region[wp]: perform_page_invocation "pspace_respects_device_region"
+crunch perform_page_invocation
+  for pspace_respects_device_region[wp]: "pspace_respects_device_region"
   (simp: crunch_simps when_def
      wp: crunch_wps set_object_pspace_respects_device_region pspace_respects_device_region_dmo)
 
-(* FIXME move to WordLemma *)
-lemma word_shift_by_3:
-  "x * 8 = (x::'a::len word) << 3"
-  by (simp add: shiftl_t2n)
+crunch do_machine_op
+  for cap_refs_in_kernel_window[wp]: cap_refs_in_kernel_window
+  (simp: valid_kernel_mappings_def)
+
+crunch do_flush
+  for underlying_memory_inv[wp]: "\<lambda>ms. P (underlying_memory ms)"
+  and irq_masks[wp]: "\<lambda>ms. P (irq_masks ms)"
+  (simp: cleanByVA_def cleanByVA_PoU_def invalidateByVA_I_def cleanInvalByVA_def
+         cleanInvalidateL2Range_def cleanL2Range_def invalidateByVA_def invalidateL2Range_def
+         branchFlush_def isb_def dsb_def
+         crunch_simps
+   wp: no_irq)
 
 lemma perform_page_directory_invocation_invs[wp]:
   "\<lbrace>invs and valid_pdi pdi\<rbrace>
@@ -4579,19 +4577,9 @@ lemma perform_page_directory_invocation_invs[wp]:
    \<lbrace>\<lambda>_. invs\<rbrace>"
   apply (cases pdi)
    apply (clarsimp simp: perform_page_directory_invocation_def)
-   apply (wp dmo_invs set_vm_root_for_flush_invs
-             hoare_vcg_const_imp_lift hoare_vcg_all_lift
-          | simp)+
-    apply (rule hoare_pre_imp[of _ \<top>], assumption)
-    apply (clarsimp simp: valid_def)
-    apply (thin_tac "p \<in> fst (set_vm_root_for_flush a b s)" for p a b)
-    apply safe[1]
-     apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p = underlying_memory m p"
-            in use_valid)
-       apply ((clarsimp | wp)+)[3]
-    apply(erule use_valid, wp no_irq_do_flush no_irq, assumption)
-   apply(wp set_vm_root_for_flush_invs | simp add: valid_pdi_def)+
+   apply (wpsimp wp: dmo_invs_lift set_vm_root_for_flush_invs simp: valid_pdi_def)
   apply (clarsimp simp: perform_page_directory_invocation_def)
+  apply wpsimp
   done
 
 lemma perform_page_table_invocation_invs[wp]:
@@ -4603,7 +4591,7 @@ lemma perform_page_table_invocation_invs[wp]:
   apply (cases pti)
    apply (clarsimp simp: valid_pti_def perform_page_table_invocation_def)
    apply (wp dmo_invs)
-    apply (rule_tac Q="\<lambda>_. invs" in hoare_post_imp)
+    apply (rule_tac Q'="\<lambda>_. invs" in hoare_post_imp)
      apply safe
      apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p =
                                 underlying_memory m p" in use_valid)
@@ -4644,31 +4632,15 @@ lemma perform_page_table_invocation_invs[wp]:
    apply (simp add: cte_wp_at_caps_of_state)
    apply (wpc, wp, wpc)
    apply (rule hoare_lift_Pf2[where f=caps_of_state])
-    apply (wp hoare_vcg_all_lift hoare_vcg_const_imp_lift)
-        apply (rule hoare_vcg_conj_lift)
-         apply (wp dmo_invs)
-        apply (wp hoare_vcg_all_lift hoare_vcg_const_imp_lift
-                  valid_cap_typ[OF do_machine_op_obj_at]
-                  mapM_x_swp_store_pte_invs[unfolded cte_wp_at_caps_of_state]
-                  mapM_x_swp_store_empty_table
-                  valid_cap_typ[OF unmap_page_table_typ_at]
-                  unmap_page_table_unmapped3)+
-        apply (rule hoare_pre_imp[of _ \<top>], assumption)
-        apply (clarsimp simp: valid_def split_def)
-        apply safe[1]
-         apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p =
-                                    underlying_memory m p" in use_valid)
-         apply ((clarsimp | wp)+)[3]
-               apply(erule use_valid, wp no_irq_cleanCacheRange_PoU, assumption)
-       apply (wp hoare_vcg_all_lift hoare_vcg_const_imp_lift
-                 valid_cap_typ[OF do_machine_op_obj_at]
-                 mapM_x_swp_store_pte_invs[unfolded cte_wp_at_caps_of_state]
-                 mapM_x_swp_store_empty_table
-                 valid_cap_typ[OF unmap_page_table_typ_at]
-                 unmap_page_table_unmapped3 store_pte_no_lookup_pages
-              | wp (once) hoare_vcg_conj_lift
-              | wp (once) mapM_x_wp'
-              | simp)+
+    apply (wp hoare_vcg_all_lift hoare_vcg_const_imp_lift dmo_invs_lift
+              valid_cap_typ[OF do_machine_op_obj_at]
+              mapM_x_swp_store_pte_invs[unfolded cte_wp_at_caps_of_state]
+              mapM_x_swp_store_empty_table
+              valid_cap_typ[OF unmap_page_table_typ_at]
+              unmap_page_table_unmapped3 store_pte_no_lookup_pages
+           | wp (once) hoare_vcg_conj_lift
+           | wp (once) mapM_x_wp'
+           | simp)+
   apply (clarsimp simp: valid_pti_def cte_wp_at_caps_of_state is_cap_simps
                         is_arch_update_def cap_rights_update_def
                         acap_rights_update_def cap_master_cap_simps
@@ -4713,42 +4685,32 @@ lemma perform_page_table_invocation_invs[wp]:
     apply (simp add: vspace_bits_defs)+
   done
 
-crunch cte_wp_at [wp]: unmap_page "\<lambda>s. P (cte_wp_at P' p s)"
+crunch unmap_page
+  for cte_wp_at[wp]: "\<lambda>s. P (cte_wp_at P' p s)"
   (wp: crunch_wps simp: crunch_simps)
 
-crunch typ_at [wp]: unmap_page "\<lambda>s. P (typ_at T p s)"
+crunch unmap_page
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemmas unmap_page_typ_ats [wp] = abs_typ_at_lifts [OF unmap_page_typ_at]
 
 lemma invalidateLocalTLB_VAASID_underlying_memory[wp]:
-  "\<lbrace>\<lambda>m'. underlying_memory m' p = um\<rbrace> invalidateLocalTLB_VAASID v \<lbrace>\<lambda>_ m'. underlying_memory m' p = um\<rbrace>"
-  by (clarsimp simp: invalidateLocalTLB_VAASID_def machine_rest_lift_def machine_op_lift_def split_def | wp)+
+  "invalidateLocalTLB_VAASID v \<lbrace>\<lambda>ms. P (underlying_memory ms)\<rbrace>"
+  by (wpsimp simp: invalidateLocalTLB_VAASID_def)
 
 lemma flush_page_invs:
   "\<lbrace>invs and K (asid \<le> mask asid_bits)\<rbrace>
   flush_page sz pd asid vptr \<lbrace>\<lambda>rv. invs\<rbrace>"
-  apply (simp add: flush_page_def)
-  apply (wp dmo_invs hoare_vcg_all_lift load_hw_asid_wp
-            set_vm_root_for_flush_invs hoare_drop_imps
-         | simp add: split_def)+
-     apply (rule hoare_pre_imp[of _ \<top>], assumption)
-     apply (clarsimp simp: valid_def)
-     apply (thin_tac "x : fst (set_vm_root_for_flush a b c)" for x a b c)
-     apply safe
-      apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p = underlying_memory m p"
-             in use_valid)
-        apply ((clarsimp | wp)+)[3]
-       apply(erule use_valid, wp no_irq_invalidateLocalTLB_VAASID no_irq, assumption)
-      apply (wpsimp wp: set_vm_root_for_flush_invs hoare_drop_imps)+
-  done
+  unfolding flush_page_def
+  by (wpsimp wp: dmo_invs_lift no_irq no_irq_invalidateLocalTLB_VAASID set_vm_root_for_flush_invs)
 
 lemma find_pd_for_asid_lookup_slot [wp]:
   "\<lbrace>pspace_aligned and valid_vspace_objs\<rbrace> find_pd_for_asid asid
   \<lbrace>\<lambda>rv. \<exists>\<rhd> (lookup_pd_slot rv vptr && ~~ mask pd_bits)\<rbrace>, -"
   apply (rule hoare_pre)
-   apply (rule hoare_post_imp_R)
-    apply (rule hoare_vcg_R_conj)
+   apply (rule hoare_strengthen_postE_R)
+    apply (rule hoare_vcg_conj_liftE_R)
      apply (rule find_pd_for_asid_lookup)
     apply (rule find_pd_for_asid_aligned_pd)
    apply (simp add: pd_shifting lookup_pd_slot_def Let_def)
@@ -4760,9 +4722,9 @@ lemma find_pd_for_asid_lookup_slot_large_page [wp]:
   find_pd_for_asid asid
   \<lbrace>\<lambda>rv. \<exists>\<rhd> (x + lookup_pd_slot rv vptr && ~~ mask pd_bits)\<rbrace>, -"
   apply (rule hoare_pre)
-   apply (rule hoare_post_imp_R)
-    apply (rule hoare_vcg_R_conj)
-      apply (rule hoare_vcg_R_conj)
+   apply (rule hoare_strengthen_postE_R)
+    apply (rule hoare_vcg_conj_liftE_R)
+      apply (rule hoare_vcg_conj_liftE_R)
        apply (rule find_pd_for_asid_inv [where P="K (x \<in> set [0, 8 .e. 0x78] \<and> is_aligned vptr 25)", THEN valid_validE_R])
      apply (rule find_pd_for_asid_lookup)
     apply (rule find_pd_for_asid_aligned_pd)
@@ -4774,8 +4736,8 @@ lemma find_pd_for_asid_pde_at_add [wp]:
  "\<lbrace>K (x \<in> set [0,8 .e. 0x78] \<and> is_aligned vptr 25) and pspace_aligned and valid_vspace_objs\<rbrace>
   find_pd_for_asid asid \<lbrace>\<lambda>rv. pde_at (x + lookup_pd_slot rv vptr)\<rbrace>, -"
   apply (rule hoare_pre)
-   apply (rule hoare_post_imp_R)
-    apply (rule hoare_vcg_R_conj)
+   apply (rule hoare_strengthen_postE_R)
+    apply (rule hoare_vcg_conj_liftE_R)
      apply (rule find_pd_for_asid_inv [where P=
                  "K (x \<in> set [0, 8 .e. 0x78] \<and> is_aligned vptr 25) and pspace_aligned", THEN valid_validE_R])
     apply (rule find_pd_for_asid_page_directory)
@@ -4838,7 +4800,7 @@ lemma lookup_pt_slot_cap_to1[wp]:
   "\<lbrace>invs and \<exists>\<rhd>pd and K (is_aligned pd pd_bits)
                   and K (vptr < kernel_base)\<rbrace> lookup_pt_slot pd vptr
    \<lbrace>\<lambda>rv s.  \<exists>a b cap. caps_of_state s (a, b) = Some cap \<and> is_pt_cap cap \<and> rv && ~~ mask pt_bits \<in> obj_refs cap\<rbrace>,-"
-  apply (rule hoare_post_imp_R)
+  apply (rule hoare_strengthen_postE_R)
    apply (rule lookup_pt_slot_cap_to)
   apply auto
   done
@@ -4852,7 +4814,7 @@ lemma lookup_pt_slot_cap_to_multiple1:
              (\<exists>a b. cte_wp_at (\<lambda>c. is_pt_cap c \<and> cap_asid c \<noteq> None
                                   \<and> (\<lambda>x. x && ~~ mask pt_bits) ` set [rv , rv + 8 .e. rv + 0x78] \<subseteq> obj_refs c) (a, b) s)\<rbrace>, -"
   apply (rule hoare_gen_asmE)
-  apply (rule hoare_post_imp_R)
+  apply (rule hoare_strengthen_postE_R)
    apply (rule lookup_pt_slot_cap_to)
   apply (rule conjI, clarsimp)
   apply (elim exEI)
@@ -4880,7 +4842,7 @@ lemma lookup_pt_slot_cap_to_multiple[wp]:
                   and K (is_aligned vptr 16)\<rbrace>
      lookup_pt_slot pd vptr
    \<lbrace>\<lambda>rv s. \<exists>a b. cte_wp_at (\<lambda>c. (\<lambda>x. x && ~~ mask pt_bits) ` (\<lambda>x. x + rv) ` set [0 , 8 .e. 0x78] \<subseteq> obj_refs c) (a, b) s\<rbrace>, -"
-  apply (rule hoare_post_imp_R, rule lookup_pt_slot_cap_to_multiple1)
+  apply (rule hoare_strengthen_postE_R, rule lookup_pt_slot_cap_to_multiple1)
   apply (elim conjE exEI cte_wp_at_weakenE)
   apply (simp add: subset_eq p_0x3C_shift add.commute)
   done
@@ -4915,7 +4877,7 @@ lemma find_pd_for_asid_cap_to:
 lemma find_pd_for_asid_cap_to1[wp]:
   "\<lbrace>invs\<rbrace> find_pd_for_asid asid
    \<lbrace>\<lambda>rv s. \<exists>a b cap. caps_of_state s (a, b) = Some cap \<and> lookup_pd_slot rv vptr && ~~ mask pd_bits \<in> obj_refs cap\<rbrace>, -"
-  apply (rule hoare_post_imp_R, rule find_pd_for_asid_cap_to)
+  apply (rule hoare_strengthen_postE_R, rule find_pd_for_asid_cap_to)
   apply (clarsimp simp: lookup_pd_slot_pd)
   apply auto
   done
@@ -4925,7 +4887,7 @@ lemma find_pd_for_asid_cap_to2[wp]:
    \<lbrace>\<lambda>rv s. \<exists>a b. cte_wp_at
             (\<lambda>cp. lookup_pd_slot rv vptr && ~~ mask pd_bits \<in> obj_refs cp \<and> is_pd_cap cp)
                   (a, b) s\<rbrace>, -"
-  apply (rule hoare_post_imp_R, rule find_pd_for_asid_cap_to)
+  apply (rule hoare_strengthen_postE_R, rule find_pd_for_asid_cap_to)
   apply (clarsimp simp: lookup_pd_slot_pd cte_wp_at_caps_of_state)
   apply auto
   done
@@ -4933,7 +4895,7 @@ lemma find_pd_for_asid_cap_to2[wp]:
 lemma find_pd_for_asid_cap_to_multiple[wp]:
   "\<lbrace>invs and K (is_aligned vptr 25)\<rbrace> find_pd_for_asid asid
    \<lbrace>\<lambda>rv s. \<exists>x xa. cte_wp_at (\<lambda>a. (\<lambda>x. x && ~~ mask pd_bits) ` (\<lambda>x. x + lookup_pd_slot rv vptr) ` set [0 , 8 .e. 0x78] \<subseteq> obj_refs a) (x, xa) s\<rbrace>, -"
-  apply (rule hoare_gen_asmE, rule hoare_post_imp_R, rule find_pd_for_asid_cap_to)
+  apply (rule hoare_gen_asmE, rule hoare_strengthen_postE_R, rule find_pd_for_asid_cap_to)
   apply (elim exEI, clarsimp simp: cte_wp_at_caps_of_state)
   apply (simp add: lookup_pd_slot_add_eq)
   done
@@ -4944,7 +4906,7 @@ lemma find_pd_for_asid_cap_to_multiple2[wp]:
    \<lbrace>\<lambda>rv s. \<forall>x\<in>set [0 , 8 .e. 0x78]. \<exists>a b.
              cte_wp_at (\<lambda>cp. x + lookup_pd_slot rv vptr && ~~ mask pd_bits
                              \<in> obj_refs cp \<and> is_pd_cap cp) (a, b) s\<rbrace>, -"
-  apply (rule hoare_gen_asmE, rule hoare_post_imp_R,
+  apply (rule hoare_gen_asmE, rule hoare_strengthen_postE_R,
          rule find_pd_for_asid_cap_to)
   apply (intro ballI, elim exEI,
          clarsimp simp: cte_wp_at_caps_of_state)
@@ -4954,14 +4916,14 @@ lemma find_pd_for_asid_cap_to_multiple2[wp]:
 lemma unat_ucast_kernel_base_rshift:
   "unat (ucast (kernel_base >> 21) :: 11 word)
      = unat (kernel_base >> 21)"
-  by (simp add: kernel_base_def)
+  by (simp add: kernel_base_def pptrBase_def)
 
 lemma lookup_pt_slot_cap_to2:
   "\<lbrace>invs and \<exists>\<rhd> pd and K (is_aligned pd pd_bits) and K (vptr < kernel_base)\<rbrace>
      lookup_pt_slot pd vptr
    \<lbrace>\<lambda>rv s. \<exists>oref cref cap. caps_of_state s (oref, cref) = Some cap
          \<and> rv && ~~ mask pt_bits \<in> obj_refs cap \<and> is_pt_cap cap\<rbrace>, -"
-  apply (rule hoare_post_imp_R, rule lookup_pt_slot_cap_to)
+  apply (rule hoare_strengthen_postE_R, rule lookup_pt_slot_cap_to)
   apply fastforce
   done
 
@@ -4971,7 +4933,7 @@ lemma lookup_pt_slot_cap_to_multiple2:
    \<lbrace>\<lambda>rv s. \<exists>oref cref. cte_wp_at
               (\<lambda>c. (\<lambda>x. x && ~~ mask pt_bits) ` (\<lambda>x. x + rv) ` set [0 , 8 .e. 0x78] \<subseteq> obj_refs c \<and> is_pt_cap c)
                   (oref, cref) s\<rbrace>, -"
-  apply (rule hoare_post_imp_R, rule lookup_pt_slot_cap_to_multiple1)
+  apply (rule hoare_strengthen_postE_R, rule lookup_pt_slot_cap_to_multiple1)
   apply (clarsimp simp: upto_enum_step_def image_image field_simps
                         linorder_not_le[symmetric]
                  split: if_split_asm)
@@ -4980,7 +4942,8 @@ lemma lookup_pt_slot_cap_to_multiple2:
   apply (fastforce simp: cte_wp_at_caps_of_state)
   done
 
-crunch global_refs[wp]: flush_page "\<lambda>s. P (global_refs s)"
+crunch flush_page
+  for global_refs[wp]: "\<lambda>s. P (global_refs s)"
   (simp: global_refs_arch_update_eq crunch_simps)
 
 lemma page_directory_at_lookup_mask_aligned_strg:
@@ -5016,10 +4979,6 @@ lemma dmo_ccr_invs[wp]:
   apply(erule use_valid, wp no_irq_cleanCacheRange_PoU no_irq, assumption)
   done
 
-(* FIXME: move to Invariants_A *)
-lemmas pte_ref_pages_simps[simp] =
-       pte_ref_pages_def[split_simps pte.split]
-
 lemma ex_pt_cap_eq:
   "(\<exists>ref cap. caps_of_state s ref = Some cap \<and>
               p \<in> obj_refs cap \<and> is_pt_cap cap) =
@@ -5047,7 +5006,7 @@ lemma unmap_page_invs:
   apply (rule hoare_pre)
    apply (wp flush_page_invs hoare_vcg_const_imp_lift)
     apply (wp hoare_drop_imp[where f="check_mapping_pptr a b c" for a b c]
-              hoare_drop_impE_R[where R="\<lambda>x y. x && mask b = c" for b c]
+              hoare_drop_impE_R[where Q'="\<lambda>x y. x && mask b = c" for b c]
               store_pde_invs_unmap lookup_pt_slot_inv lookup_pt_slot_cap_to2'
               lookup_pt_slot_cap_to_multiple2
               store_pde_invs_unmap mapM_swp_store_pde_invs_unmap
@@ -5057,13 +5016,10 @@ lemma unmap_page_invs:
                      page_directory_at_lookup_mask_aligned_strg
                      page_directory_at_lookup_mask_add_aligned_strg)+
    apply (wp find_pd_for_asid_page_directory
-             hoare_vcg_const_imp_lift_R hoare_vcg_const_Ball_lift_R
+             hoare_vcg_const_imp_liftE_R hoare_vcg_const_Ball_liftE_R
           | wp (once) hoare_drop_imps)+
   apply (auto simp: vmsz_aligned_def)
   done
-
-crunch cte_wp_at [wp]: unmap_page "\<lambda>s. P (cte_wp_at P' p s)"
-  (wp: crunch_wps simp: crunch_simps)
 
 lemma "\<lbrace>\<lambda>s. P (vs_lookup s) (valid_pte pte s)\<rbrace> set_cap cap cptr \<lbrace>\<lambda>_ s. P (vs_lookup s) (valid_pte pte s)\<rbrace>"
   apply (rule hoare_lift_Pf[where f=vs_lookup])
@@ -5117,13 +5073,12 @@ lemma store_pte_unmap_page: (* ARMHYP write with xxx_bits? *)
                    shiftr_less_t2n'[where m=9 and n=3, simplified]
                    word_bits_def shiftl_shiftr_id)+
   including unfold_objects
-  apply (clarsimp simp: pde_ref_def pte_ref_pages_def pde_ref_pages_def data_at_def
-                        is_aligned_add_helper less_le_trans[OF ucast_less]
-                        shiftl_less_t2n'[where m=9 and n=3, simplified]
-                 dest!: graph_ofD ucast_up_inj[where 'a=10 and 'b=32, simplified]
-                        ucast_up_inj[where 'a=7 and 'b=32, simplified]
-                 split: if_split_asm  pde.splits pte.splits if_splits) (* slow *)
-  done
+  by (clarsimp simp: pde_ref_def pte_ref_pages_def pde_ref_pages_def data_at_def
+                     is_aligned_add_helper less_le_trans[OF ucast_less]
+                     shiftl_less_t2n'[where m=9 and n=3, simplified]
+               dest!: graph_ofD ucast_up_inj[where 'a=10 and 'b=32, simplified]
+                      ucast_up_inj[where 'a=7 and 'b=32, simplified]
+               split: if_split_asm  pde.splits pte.splits if_splits) (* slow *)
 
 lemma set_vcpu_nonvcpu_at: (* generalise? this holds except when the ko is a vcpu *)
   "\<lbrace>\<lambda>s. P (ko_at ko x s) \<and> a_type ko \<noteq> AArch AVCPU\<rbrace>
@@ -5145,7 +5100,7 @@ lemma set_vcpu_pt_at:
         \<lbrace>\<lambda>_ s. P (ko_at (ArchObj (PageTable pt)) x s)\<rbrace>"
   by (wp set_vcpu_nonvcpu_at; auto)
 
-crunches vcpu_switch, flush_page
+crunch vcpu_switch, flush_page
   for pd_at: "\<lambda>s. P (ko_at (ArchObj (PageDirectory pd)) x s)"
   and pt_at: "\<lambda>s. P (ko_at (ArchObj (PageTable pt)) x s)"
   (wp: crunch_wps simp: crunch_simps when_def)
@@ -5235,59 +5190,23 @@ apply (clarsimp simp: vs_lookup_def vs_asid_refs_def
                    mask_asid_low_bits_ucast_ucast pde_ref_pages_def pte_ref_pages_def
             split: if_split_asm)
   done
-(*
-lemma kernel_slot_impossible_vs_lookup_pages:
-  "(ucast (vaddr >> 21)) \<in> kernel_mapping_slots \<Longrightarrow>
-   \<not> ([VSRef ((vaddr >> 12) && mask 9) (Some APageTable),
-       VSRef (vaddr >> 21) (Some APageDirectory),
-       VSRef (asid && mask asid_low_bits) (Some AASIDPool),
-       VSRef (ucast (asid_high_bits_of asid)) None] \<unrhd> pptr) s"
-  apply (clarsimp simp: vs_lookup_pages_def vs_asid_refs_def
-                 dest!: vs_lookup_pages1_rtrancl_iterations)
-  apply (clarsimp simp: vs_lookup_pages1_def obj_at_def vs_refs_pages_def)
-  apply (clarsimp simp: ucast_ucast_id
-                 dest!: graph_ofD
-                 split: Structures_A.kernel_object.split_asm arch_kernel_obj.splits
-                        if_split_asm)
-  done
 
-lemma kernel_slot_impossible_vs_lookup_pages2:
-  "(ucast (vaddr >> 21)) \<in> kernel_mapping_slots \<Longrightarrow>
-   \<not> ([VSRef (vaddr >> 21) (Some APageDirectory),
-       VSRef (asid && mask asid_low_bits) (Some AASIDPool),
-       VSRef (ucast (asid_high_bits_of asid)) None] \<unrhd> pptr) s"
-  apply (clarsimp simp: vs_lookup_pages_def vs_asid_refs_def
-                 dest!: vs_lookup_pages1_rtrancl_iterations)
-  apply (clarsimp simp: vs_lookup_pages1_def obj_at_def vs_refs_pages_def)
-  apply (clarsimp simp: ucast_ucast_id
-                 dest!: graph_ofD
-                 split: Structures_A.kernel_object.split_asm arch_kernel_obj.splits
-                        if_split_asm)
-  done
-*)
 lemma pt_aligned:
-  "\<lbrakk>page_table_at pt s; pspace_aligned s\<rbrakk>
-   \<Longrightarrow> is_aligned pt 12"
+  "\<lbrakk>page_table_at pt s; pspace_aligned s\<rbrakk> \<Longrightarrow> is_aligned pt 12"
   by (auto simp: obj_at_def pspace_aligned_def vspace_bits_defs dom_def)
 
 lemma vaddr_segment_nonsense:
-  "is_aligned (p :: word32) 14 \<Longrightarrow>
-   p + (vaddr >> 21 << 3) && ~~ mask pd_bits = p"
-  by (simp add: mask_32_max_word
-    shiftl_less_t2n'[where m=11 and n=3, simplified]
-    shiftr_less_t2n'[where m=11 and n=21, simplified]
-    vspace_bits_defs
-    is_aligned_add_helper[THEN conjunct2])
+  "is_aligned (p :: word32) 14 \<Longrightarrow> p + (vaddr >> 21 << 3) && ~~ mask pd_bits = p"
+  by (simp add:  shiftl_less_t2n'[where m=11 and n=3, simplified]
+                 shiftr_less_t2n'[where m=11 and n=21, simplified]
+                 vspace_bits_defs is_aligned_add_helper[THEN conjunct2])
 
 lemma vaddr_segment_nonsense2:
   "is_aligned (p :: word32) 14 \<Longrightarrow>
    p + (vaddr >> 21 << 3) && mask pd_bits >> 3 = vaddr >> 21"
-  by (simp add: mask_32_max_word
-    shiftl_less_t2n'[where m=11 and n=3, simplified]
-    shiftr_less_t2n'[where m=11 and n=21, simplified]
-    vspace_bits_defs
-    is_aligned_add_helper[THEN conjunct1]
-    triple_shift_fun)
+  by (simp add: shiftl_less_t2n'[where m=11 and n=3, simplified]
+                shiftr_less_t2n'[where m=11 and n=21, simplified] vspace_bits_defs
+                is_aligned_add_helper[THEN conjunct1] triple_shift_fun)
 
 lemma vaddr_segment_nonsense3:
   "is_aligned (p :: word32) 12 \<Longrightarrow>
@@ -5371,7 +5290,7 @@ lemma unmap_page_unmapped:
     (* Establish that pptr reachable, otherwise trivial *)
   apply (rule hoare_name_pre_state2)
   apply (case_tac "\<not> (ref \<unrhd> p) s")
-   apply (rule hoare_pre(1)[OF unmap_page_no_lookup_pages])
+   apply (rule hoare_weaken_pre[OF unmap_page_no_lookup_pages])
    apply clarsimp+
 
      (* This should be somewhere else but isn't *)
@@ -5559,13 +5478,14 @@ lemma unmap_page_section_unmapped:
                VSRef (ucast (asid_high_bits_of asid)) None] \<unrhd> p) s\<rbrace>"
   by (rule hoare_pre_imp[OF _ unmap_page_unmapped]) auto
 
-crunch global_refs: store_pde "\<lambda>s. P (global_refs s)"
+crunch pte_check_if_mapped, pde_check_if_mapped
+  for invs[wp]: "invs"
 
-crunch invs[wp]: pte_check_if_mapped, pde_check_if_mapped "invs"
+crunch pte_check_if_mapped, pde_check_if_mapped
+  for vs_lookup[wp]: "\<lambda>s. P (vs_lookup s)"
 
-crunch vs_lookup[wp]: pte_check_if_mapped, pde_check_if_mapped "\<lambda>s. P (vs_lookup s)"
-
-crunch valid_pte[wp]: pte_check_if_mapped "\<lambda>s. P (valid_pte p s)"
+crunch pte_check_if_mapped
+  for valid_pte[wp]: "\<lambda>s. P (valid_pte p s)"
 
 lemma set_mi_invs[wp]: "\<lbrace>invs\<rbrace> set_message_info t a \<lbrace>\<lambda>x. invs\<rbrace>"
   by (simp add: set_message_info_def, wp)
@@ -5583,8 +5503,7 @@ lemma data_at_orth_vcpu:
 lemma data_at_pg_cap:
   "\<lbrakk>data_at sz p s;valid_cap cap s; p \<in> obj_refs cap\<rbrakk> \<Longrightarrow> is_pg_cap cap"
   apply (case_tac cap)
-   apply (clarsimp simp: is_pg_cap_def obj_refs.simps valid_cap_def
-                         data_at_orth_vcpu split option.split)+
+   apply (clarsimp simp: is_pg_cap_def valid_cap_def data_at_orth_vcpu option.split)+
   apply (clarsimp split: arch_cap.split_asm simp: data_at_orth_vcpu)
 done
 
@@ -5680,7 +5599,7 @@ lemma perform_page_invs [wp]:
    apply (rule hoare_pre)
     apply (wp dmo_invs arch_update_cap_invs_unmap_page get_cap_wp
               hoare_vcg_const_imp_lift | wpc | simp)+
-      apply (rule_tac Q="\<lambda>_ s. invs s \<and>
+      apply (rule_tac Q'="\<lambda>_ s. invs s \<and>
                                cte_wp_at (\<lambda>c. is_pg_cap c \<and>
                                  (\<forall>ref. vs_cap_ref c = Some ref \<longrightarrow>
                                         \<not> (ref \<unrhd> obj_ref_of c) s)) cslot_ptr s"
@@ -5702,20 +5621,9 @@ lemma perform_page_invs [wp]:
    using valid_validate_vm_rights[simplified valid_vm_rights_def]
    apply (auto simp: valid_cap_def cap_aligned_def mask_def vs_cap_ref_def vspace_bits_defs data_at_def
                    split: vmpage_size.splits option.splits if_splits)[1]
-  \<comment> \<open>PageFlush\<close>
-  apply (rule hoare_pre)
-   apply (wp dmo_invs set_vm_root_for_flush_invs
-             hoare_vcg_const_imp_lift hoare_vcg_all_lift
-          | simp)+
-    apply (rule hoare_pre_imp[of _ \<top>], assumption)
-    apply (clarsimp simp: valid_def)
-    apply (thin_tac "p \<in> fst (set_vm_root_for_flush a b s)" for p a b)
-    apply(safe)
-     apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p = underlying_memory m p"
-            in use_valid)
-       apply ((clarsimp | wp)+)[3]
-    apply(erule use_valid, wp no_irq_do_flush no_irq, assumption)
-   apply(wp set_vm_root_for_flush_invs | simp add: valid_page_inv_def tcb_at_invs)+
+   \<comment> \<open>PageFlush\<close>
+   apply (wpsimp wp: dmo_invs_lift set_vm_root_for_flush_invs simp: valid_page_inv_def)
+  apply wpsimp
   done
 
 end
@@ -5723,8 +5631,7 @@ end
 locale asid_pool_map = Arch +
   fixes s ap pool asid pdp pd s'
   defines "(s' :: ('a::state_ext) state) \<equiv>
-           s\<lparr>kheap := kheap s(ap \<mapsto> ArchObj (ASIDPool
-                                               (pool(asid \<mapsto> pdp))))\<rparr>"
+           s\<lparr>kheap := (kheap s)(ap \<mapsto> ArchObj (ASIDPool (pool(asid \<mapsto> pdp))))\<rparr>"
   assumes ap:  "kheap s ap = Some (ArchObj (ASIDPool pool))"
   assumes new: "pool asid = None"
   assumes pd:  "kheap s pdp = Some (ArchObj (PageDirectory pd))"
@@ -5827,7 +5734,7 @@ lemma vs_lookup_pages2:
 
 end
 
-context Arch begin global_naming ARM_HYP
+context Arch begin arch_global_naming
 
 lemma not_kernel_slot_not_global_pt: (* ARMHYP? remove? *)
   "\<lbrakk>pde_ref (pd x) = Some p;
@@ -6024,7 +5931,7 @@ lemma perform_asid_pool_invs [wp]:
     apply (rule_tac x=a in exI)
     apply (rule_tac x=b in exI)
     apply (clarsimp simp: vs_cap_ref_def mask_asid_low_bits_ucast_ucast)
-   apply (clarsimp simp: asid_low_bits_def[symmetric] ucast_ucast_mask
+   apply (clarsimp simp: asid_low_bits_def[simplified, symmetric] ucast_ucast_mask
                          word_neq_0_conv[symmetric])
    apply (erule notE, rule asid_low_high_bits, simp_all)[1]
    apply (simp add: asid_high_bits_of_def)
@@ -6040,7 +5947,7 @@ lemma perform_asid_pool_invs [wp]:
 
 lemma valid_vspace_obj_default:
   assumes tyunt: "ty \<noteq> Structures_A.apiobject_type.Untyped"
-  shows "ArchObj ao = default_object ty dev us \<Longrightarrow> valid_vspace_obj ao s'"
+  shows "ArchObj ao = default_object ty dev us d \<Longrightarrow> valid_vspace_obj ao s'"
   apply (cases ty, simp_all add: default_object_def tyunt)
   apply (simp add: valid_vspace_obj_default')
   done

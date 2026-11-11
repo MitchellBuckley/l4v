@@ -8,21 +8,22 @@ theory ArchIpcCancel_AI
 imports IpcCancel_AI
 begin
 
-context Arch begin global_naming ARM
+context Arch begin arch_global_naming
 
-named_theorems IpcCancel_AI_asms
+clear_named_theorems Arch_assms (* accumulate assumptions for IpcCancel_AI locale *)
 
-crunches arch_post_cap_deletion
-  for typ_at[wp, IpcCancel_AI_asms]: "\<lambda>s. P (typ_at T p s)"
-  and idle_thread[wp, IpcCancel_AI_asms]: "\<lambda>s. P (idle_thread s)"
+crunch arch_post_cap_deletion
+  for typ_at[wp, Arch_assms]: "\<lambda>s. P (typ_at T p s)"
+  and idle_thread[wp, Arch_assms]: "\<lambda>s. P (idle_thread s)"
+
+lemmas IpcCancel_AI_assms = Arch_assms (* extract accumulated assumptions *)
 
 end
 
 interpretation IpcCancel_AI?: IpcCancel_AI
   proof goal_cases
-  interpret Arch .
   case 1 show ?case
-  by (intro_locales; (unfold_locales; fact IpcCancel_AI_asms)?)
+  by (intro_locales; (unfold_locales; fact ARM.IpcCancel_AI_assms)?)
   qed
 
 

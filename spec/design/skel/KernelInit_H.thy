@@ -15,14 +15,10 @@ imports
   Thread_H
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts
   getMemoryRegions
   addrFromPPtr
   init_machine_state
-
-end
 
 requalify_consts (in Arch)
   newKernelState
@@ -47,10 +43,10 @@ where "syncBIFrame \<equiv> returnOk ()"
 #INCLUDE_HASKELL SEL4/Kernel/Init.lhs bodies_only NOT isAligned funArray newKernelState distinct rangesBy InitData doKernelOp runInit noInitFailure coverOf foldME
 
 consts
-  newKSDomSchedule :: "(domain \<times> machine_word) list"
+  newKSDomSchedule :: "(domain \<times> ticks) list"
   newKSDomScheduleIdx :: nat
   newKSCurDomain :: domain
-  newKSDomainTime :: machine_word
+  newKSDomainTime :: ticks
   newKernelState :: "machine_word \<Rightarrow> kernel_state"
 
 defs
@@ -62,10 +58,11 @@ newKernelState_def:
         gsUntypedZeroRanges = {},
         gsMaxObjectSize = card (UNIV :: machine_word set),
         ksDomScheduleIdx = newKSDomScheduleIdx,
+        ksDomScheduleStart = 0,
         ksDomSchedule = newKSDomSchedule,
         ksCurDomain = newKSCurDomain,
         ksDomainTime = newKSDomainTime,
-        ksReadyQueues = const [],
+        ksReadyQueues = const emptyQueue,
         ksReadyQueuesL1Bitmap = const 0,
         ksReadyQueuesL2Bitmap = const 0,
         ksCurThread = error [],
@@ -77,11 +74,19 @@ newKernelState_def:
         ksMachineState = init_machine_state
 \<rparr>"
 
+(* disambiguate name clash between Arch and non-arch consts with same names *)
 context Arch begin
-requalify_facts
+requalify_facts (aliasing)
+   newKernelState_def
+requalify_consts (aliasing)
+   newKernelState
+
+context begin global_naming global
+requalify_facts (aliasing)
    KernelInit_H.newKernelState_def
-requalify_consts
+requalify_consts (aliasing)
    KernelInit_H.newKernelState
+end
 end
 
 end

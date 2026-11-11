@@ -8,9 +8,9 @@ theory ArchAInvsPre
 imports AInvsPre
 begin
 
-context Arch begin
+unbundle l4v_word_context
 
-global_naming RISCV64
+context Arch begin arch_global_naming
 
 lemma canonical_not_kernel_is_user:
   "\<lbrakk> v \<notin> kernel_mappings; canonical_address v \<rbrakk> \<Longrightarrow> v \<in> user_region "
@@ -81,7 +81,7 @@ lemma pte_rights_of_kernel:
    apply (cases "level = max_pt_level")
     apply (drule pt_walk_level)
     apply (clarsimp simp flip: kernel_mappings_slots_eq)
-    apply (clarsimp simp: ptes_of_def table_index_offset_max_pt_level)
+    apply (clarsimp simp: ptes_of_def table_index_offset_pt_bits_left)
     apply (drule (2) equal_kernel_mappingsD)
     apply (drule (3) has_kernel_mappingsD)
     apply clarsimp
@@ -128,14 +128,14 @@ lemma global_pt_not_invalid_kernel:
      pte \<noteq> InvalidPTE; canonical_address p; valid_global_tables s;
      is_aligned (riscv_global_pt (arch_state s)) pt_bits\<rbrakk>
    \<Longrightarrow> p \<in> kernel_mappings"
-  apply (clarsimp simp: pte_of_def table_index_offset_max_pt_level)
+  apply (clarsimp simp: pte_of_def table_index_offset_pt_bits_left)
   apply (fastforce simp flip: kernel_mappings_slots_eq dest: valid_global_tables_toplevel_pt)
   done
 
 lemma get_page_info_gpd_kmaps:
-  "\<lbrakk>valid_global_vspace_mappings s; valid_arch_state s; canonical_address p;
-    get_page_info (aobjs_of s) (riscv_global_pt (arch_state s)) p = Some (b, a, attr, r)\<rbrakk>
-   \<Longrightarrow> p \<in> kernel_mappings"
+  "\<lbrakk> valid_global_vspace_mappings s; valid_arch_state s;
+     get_page_info (aobjs_of s) (riscv_global_pt (arch_state s)) p = Some (b, a, attr, r) \<rbrakk>
+     \<Longrightarrow> p \<in> kernel_mappings"
   apply (clarsimp simp: get_page_info_def in_omonad pt_lookup_slot_def pt_lookup_slot_from_level_def)
   apply (subst (asm) pt_walk.simps)
   apply (fastforce dest: pte_info_not_InvalidPTE global_pt_not_invalid_kernel
@@ -184,7 +184,7 @@ lemma some_get_page_info_umapsD:
    apply (rename_tac ppn pt)
    apply (frule pspace_aligned_pts_ofD, fastforce)
    apply (drule_tac x="table_index (pt_slot_offset level pt_ptr' p)" in bspec)
-   apply (clarsimp simp: table_index_offset_max_pt_level simp: kernel_mappings_slots_eq)
+   apply (clarsimp simp: table_index_offset_pt_bits_left simp: kernel_mappings_slots_eq)
    apply (erule (1) no_user_region_kernel_mappings)
   apply (clarsimp simp: pte_of_def)
   apply (subgoal_tac "valid_pte level (PagePTE ppn attr r) s")
@@ -211,8 +211,7 @@ lemma device_frame_in_device_region:
   \<Longrightarrow> device_state (machine_state s) p \<noteq> None"
   by (auto simp add: pspace_respects_device_region_def dom_def device_mem_def)
 
-global_naming Arch
-named_theorems AInvsPre_asms
+clear_named_theorems Arch_assms (* accumulate assumptions for AInvsPre locale *)
 
 lemma get_vspace_of_thread_asid_or_global_pt:
   "(\<exists>asid. vspace_for_asid asid s = Some (get_vspace_of_thread (kheap s) (arch_state s) t))
@@ -220,7 +219,7 @@ lemma get_vspace_of_thread_asid_or_global_pt:
   by (auto simp: get_vspace_of_thread_def
            split: option.split kernel_object.split cap.split arch_cap.split)
 
-lemma ptable_rights_imp_frame[AInvsPre_asms]:
+lemma ptable_rights_imp_frame[Arch_assms]:
   assumes "valid_state s"
   shows "\<lbrakk> ptable_rights t s x \<noteq> {}; ptable_lift t s x = Some (addrFromPPtr y) \<rbrakk> \<Longrightarrow>
          in_user_frame y s \<or> in_device_frame y s"
@@ -232,11 +231,11 @@ lemma ptable_rights_imp_frame[AInvsPre_asms]:
    apply (frule (2) some_get_page_info_kmapsD;
             fastforce simp: valid_state_def valid_arch_state_def valid_pspace_def)
   apply (frule some_get_page_info_umapsD)
-          apply (rule get_vspace_of_thread_reachable)
-           apply clarsimp
-           apply (frule get_page_info_gpd_kmaps[rotated 2])
-              apply (simp_all add: valid_state_def valid_pspace_def valid_arch_state_def)
-     apply ((clarsimp simp: data_at_def canonical_not_kernel_is_user)+)[3]
+         apply (rule get_vspace_of_thread_reachable)
+          apply clarsimp
+          apply (frule get_page_info_gpd_kmaps[rotated 2])
+            apply (simp_all add: valid_state_def valid_pspace_def valid_arch_state_def)
+   apply (clarsimp simp: data_at_def canonical_not_kernel_is_user)
   apply clarsimp
   apply (drule_tac x=sz in spec)+
   apply (rename_tac p_addr attr rghts sz)
@@ -257,17 +256,13 @@ lemma ptable_rights_imp_frame[AInvsPre_asms]:
   apply simp
   done
 
+lemmas AInvsPre_assms = Arch_assms (* extract accumulated assumptions *)
+
 end
 
 interpretation AInvsPre?: AInvsPre
   proof goal_cases
-  interpret Arch .
-  case 1 show ?case by (intro_locales; (unfold_locales; fact AInvsPre_asms)?)
+  case 1 show ?case by (intro_locales; (unfold_locales; fact RISCV64.AInvsPre_assms)?)
   qed
-
-requalify_facts
-  RISCV64.user_mem_dom_cong
-  RISCV64.device_mem_dom_cong
-  RISCV64.device_frame_in_device_region
 
 end

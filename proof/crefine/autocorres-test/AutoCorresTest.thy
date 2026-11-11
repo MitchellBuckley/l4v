@@ -77,7 +77,7 @@ lemma reorder_gets:
    (do g;
        x \<leftarrow> gets f;
        h x od)"
-  by (fastforce simp: bind_def' NonDetMonad.valid_def gets_def get_def return_def)
+  by (fastforce simp: bind_def' Nondet_VCG.valid_def gets_def get_def return_def)
 
 thm
   (* no arguments, no precondition, dc return *)
@@ -100,11 +100,11 @@ lemma (* handleYield_ccorres: *)
    (* Show that current thread is unmodified.
     * FIXME: proper way to do this? *)
    apply (subst reorder_gets[symmetric, unfolded K_bind_def])
-    using tcbSchedDequeue'_modifies apply (fastforce simp: NonDetMonad.valid_def)
+    using tcbSchedDequeue'_modifies apply (fastforce simp: Nondet_VCG.valid_def)
    apply (subst double_gets_drop_regets)
    apply (rule corres_pre_getCurThread_wrapper)
-   apply (rule corres_split_deprecated[OF _ tcbSchedDequeue_ccorres[ac]])
-      apply (rule corres_split_deprecated[OF _ tcbSchedAppend_ccorres[ac]])
+   apply (rule corres_split[OF tcbSchedDequeue_ccorres[ac]])
+      apply (rule corres_split[OF tcbSchedAppend_ccorres[ac]])
          apply (rule rescheduleRequired_ccorres[ac])
           apply (solves \<open>wp tcbSchedAppend_valid_objs' weak_sch_act_wf_lift
                             tcbSchedDequeue_valid_queues
@@ -132,11 +132,6 @@ local_setup \<open>AutoCorresModifiesProofs.new_modifies_rules "../c/build/$L4V_
 
 text \<open>Extra corres_underlying rules.\<close>
 
-lemma corres_add_noop_rhs2:
-  "corres_underlying sr nf nf' r P P' f (do _ \<leftarrow> g; return () od)
-      \<Longrightarrow> corres_underlying sr nf nf' r P P' f g"
-  by simp
-
 (* Use termination (nf=True) to avoid exs_valid *)
 lemma corres_noop2_no_exs:
   assumes x: "\<And>s. P s  \<Longrightarrow> \<lbrace>(=) s\<rbrace> f \<lbrace>\<lambda>r. (=) s\<rbrace> \<and> empty_fail f"
@@ -146,7 +141,7 @@ lemma corres_noop2_no_exs:
   apply (clarsimp simp: corres_underlying_def)
   apply (rule conjI)
    apply (drule x, drule y)
-   apply (clarsimp simp: NonDetMonad.valid_def empty_fail_def Ball_def Bex_def)
+   apply (clarsimp simp: Nondet_VCG.valid_def empty_fail_def Ball_def Bex_def)
    apply fast
   apply (insert z)
   apply (clarsimp simp: no_fail_def)
@@ -159,13 +154,13 @@ lemma corres_symb_exec_l_no_exs:
   assumes nf: "nf' \<Longrightarrow> no_fail P m"
   shows      "corres_underlying sr True nf' r P P' (m >>= (\<lambda>rv. x rv)) y"
   apply (rule corres_guard_imp)
-    apply (subst gets_bind_ign[symmetric], rule corres_split_deprecated)
-       apply (rule z)
-      apply (rule corres_noop2_no_exs)
-         apply (erule x)
-        apply (rule gets_wp)
-       apply (erule nf)
-      apply (rule non_fail_gets)
+    apply (subst gets_bind_ign[symmetric], rule corres_split)
+       apply (rule corres_noop2_no_exs)
+          apply (erule x)
+         apply (rule gets_wp)
+        apply (erule nf)
+       apply (rule no_fail_gets)
+      apply (rule z)
      apply (rule y)
     apply (rule gets_wp)
    apply simp+
@@ -204,7 +199,7 @@ lemma (* handleDoubleFault_ccorres: *)
     prefer 3 apply simp
    apply (unfold handleDoubleFault_def handleDoubleFault'_def K_bind_def)
    apply (rule corres_add_noop_rhs2) \<comment> \<open>split out extra haskell code\<close>
-   apply (rule corres_split_deprecated[OF _ setThreadState_ccorres[ac]])
+   apply (rule corres_split[OF setThreadState_ccorres[ac]])
        apply (rule corres_symb_exec_l_no_exs)
           apply simp
          apply (rule conjI)

@@ -14,7 +14,7 @@ theory Arch_A
 imports TcbAcc_A VCPU_A
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 definition "page_bits \<equiv> pageBits"
 
@@ -22,10 +22,13 @@ fun
   arch_invoke_irq_control :: "arch_irq_control_invocation \<Rightarrow> (unit,'z::state_ext) p_monad"
 where
   "arch_invoke_irq_control (ArchIRQControlIssue irq handler_slot control_slot trigger) = without_preemption (do
-    do_machine_op $ setIRQTrigger irq trigger;
-    set_irq_state IRQSignal (irq);
-    cap_insert (IRQHandlerCap (irq)) control_slot handler_slot
+    when haveSetTrigger $ do_machine_op $ setIRQTrigger irq trigger;
+    set_irq_state IRQSignal irq;
+    cap_insert (IRQHandlerCap irq) control_slot handler_slot
   od)"
+| "arch_invoke_irq_control (IssueSGISignal irq target control_slot sgi_slot) =
+     without_preemption
+       (cap_insert (ArchObjectCap (SGISignalCap irq target)) control_slot sgi_slot)"
 
 text \<open>Switch to a thread's virtual address space context. Clear the load-exclusive monitor.\<close>
 definition
@@ -45,6 +48,9 @@ definition
      t \<leftarrow> gets idle_thread;
      set_vm_root t
    od"
+
+definition arch_prepare_next_domain :: "(unit,'z::state_ext) s_monad" where
+  "arch_prepare_next_domain \<equiv> vcpu_flush"
 
 definition
   arch_activate_idle_thread :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad" where
@@ -122,7 +128,7 @@ where
 text \<open>The Page capability confers the authority to map, unmap and flush the
   memory page.\<close>
 definition
-perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s_monad" where
+perform_page_invocation :: "page_invocation \<Rightarrow> (data list,'z::state_ext) s_monad" where
 "perform_page_invocation iv \<equiv> case iv of
   PageMap asid cap ct_slot entries \<Rightarrow> do
     set_cap cap ct_slot;
@@ -142,8 +148,9 @@ perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s
             do_machine_op $ cleanCacheRange_PoU (hd slots) (last_byte_pde (last slots))
                                                 (addrFromPPtr (hd slots));
             if flush then (invalidate_tlb_by_asid asid) else return ()
-        od
-    od
+          od;
+    return []
+  od
 | PageUnmap cap ct_slot \<Rightarrow>
     (case cap of
       PageCap dev p R vp_size vp_mapped_addr \<Rightarrow> do
@@ -151,10 +158,11 @@ perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s
             Some (asid, vaddr) \<Rightarrow> unmap_page vp_size asid vaddr p
           | None \<Rightarrow> return ();
         cap \<leftarrow> liftM the_arch_cap $ get_cap ct_slot;
-        set_cap (ArchObjectCap $ update_map_data cap None) ct_slot
+        set_cap (ArchObjectCap $ update_map_data cap None) ct_slot;
+        return []
       od
     | _ \<Rightarrow> fail)
-| PageFlush typ start end pstart pd asid \<Rightarrow>
+| PageFlush typ start end pstart pd asid \<Rightarrow> do
     when (start < end) $ do
       root_switched \<leftarrow> set_vm_root_for_flush pd asid;
       do_machine_op $ do_flush typ start end pstart;
@@ -162,12 +170,12 @@ perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s
         tcb \<leftarrow> gets cur_thread;
         set_vm_root tcb
       od
-   od
-| PageGetAddr ptr \<Rightarrow> do
-    ct \<leftarrow> gets cur_thread;
-    n_msg \<leftarrow> set_mrs ct None [addrFromPPtr ptr];
-    set_message_info ct $ MI n_msg 0 0 0
-  od"
+    od;
+    return []
+  od
+| PageGetAddr ptr \<Rightarrow>
+    return [addrFromPPtr ptr]
+  "
 
 text \<open>PageTable capabilities confer the authority to map and unmap page
 tables.\<close>
@@ -193,6 +201,10 @@ case iv of PageTableMap cap ct_slot pde pd_slot \<Rightarrow> do
   | _ \<Rightarrow> fail"
 
 
+definition perform_sgi_invocation :: "sgi_signal_invocation \<Rightarrow> (unit,'z::state_ext) s_monad" where
+  "perform_sgi_invocation iv \<equiv> case iv of
+     SGISignalGenerate irq target \<Rightarrow> do_machine_op $ sendSGI (ucast irq) (ucast target)"
+
 text \<open>Top level system call despatcher for all ARM-specific system calls.\<close>
 definition
   arch_perform_invocation :: "arch_invocation \<Rightarrow> (data list,'z::state_ext) p_monad" where
@@ -200,10 +212,11 @@ definition
     case i of
           InvokePageTable oper \<Rightarrow> do perform_page_table_invocation oper; return [] od
         | InvokePageDirectory oper \<Rightarrow> do perform_page_directory_invocation oper; return [] od
-        | InvokePage oper \<Rightarrow> do perform_page_invocation oper; return [] od
+        | InvokePage oper \<Rightarrow> perform_page_invocation oper
         | InvokeASIDControl oper \<Rightarrow> do perform_asid_control_invocation oper; return [] od
         | InvokeASIDPool oper \<Rightarrow> do perform_asid_pool_invocation oper; return [] od
-        | InvokeVCPU oper \<Rightarrow> perform_vcpu_invocation oper"
+        | InvokeVCPU oper \<Rightarrow> perform_vcpu_invocation oper
+        | InvokeSGISignal oper \<Rightarrow> do perform_sgi_invocation oper; return [] od"
 
 end
 

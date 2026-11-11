@@ -5,10 +5,12 @@
  *)
 
 theory ArchTCB_H
-imports TCBDecls_H
+imports
+  TCBDecls_H
+  FPU_H
 begin
 
-context Arch begin global_naming X64_H
+context Arch begin arch_global_naming (H)
 
 #INCLUDE_HASKELL SEL4/Object/TCB/X64.lhs RegisterSet= CONTEXT X64_H
 

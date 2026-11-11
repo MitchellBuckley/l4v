@@ -66,10 +66,10 @@ Depending on the architecture, real physical addresses may be the same as the ad
 
 An interrupt request from an external device, or from the CPU's timer, is represented by the type "IRQ".
 
-> newtype IRQ = IRQ Arch.IRQ
+> newtype IRQ = IRQ { theIRQ :: Arch.IRQ }
 >     deriving (Enum, Bounded, Ord, Ix, Eq, Show)
 
-The maximum and minimum IRQ are given explicit constant names here. In Haskell, these are extracted from instantiation of IRQ into the Bounded class. In the formalisation, these constants are specified directly.
+The maximum and minimum IRQ are given explicit constant names here. In Haskell, these are extracted from instantiation of IRQ into the Bounded class. In the formalisation, these constants are generated and defined in Kernel_Config.thy.
 
 > minIRQ :: IRQ
 > minIRQ = minBound
@@ -143,11 +143,6 @@ This function is called to free a region of user-memory after use.
 > freeMemory :: PPtr Word -> Int -> MachineMonad ()
 > freeMemory = Arch.freeMemory
 
-The following constant is used to determine the correct page colouring when allocating the initial task's IPC buffer; it is the number of bits of the virtual page number that are significant in determining the page colour. It is zero if there are no page colouring restrictions.
-
-> pageColourBits :: Int
-> pageColourBits = Arch.pageColourBits
-
 \subsubsection{Interrupts}
 
 After receiving an Interrupt event, or at preemption points, the kernel calls this function to check for any pending interrupts which might preempt the kernel. If there are any, it returns the one with highest priority. In a real kernel, this would be implemented by briefly enabling interrupts.
@@ -216,3 +211,9 @@ The constant "nullPointer" is a physical pointer guaranteed to be invalid.
 > nullPointer :: PPtr a
 > nullPointer = PPtr 0
 
+\subsection{Config parameters}
+
+Whether the FPU is enabled or not.
+
+> config_HAVE_FPU :: Bool
+> config_HAVE_FPU = isabelleOp

@@ -307,13 +307,13 @@ let
 
     (* Apply a conversion to the abstract/concrete side of the given "abstract_val" term. *)
     fun wa_conc_body_conv conv =
-      Conv.params_conv (~1) (K (Conv.concl_conv (~1) ((Conv.arg_conv (Utils.nth_arg_conv 4 conv)))))
+      Conv.params_conv (~1) (fn ctxt => (Conv.concl_conv (~1) ((Conv.arg_conv (Utils.nth_arg_conv 4 (conv ctxt))))))
 
     (* Tactics and conversions for converting goals into first-order format. *)
     fun to_fo_tac ctxt =
-        CONVERSION (Drule.beta_eta_conversion then_conv wa_conc_body_conv (HeapLift.mk_first_order ctxt) ctxt)
+        CONVERSION (Drule.beta_eta_conversion then_conv wa_conc_body_conv HeapLift.mk_first_order ctxt)
     fun from_fo_tac ctxt =
-        CONVERSION (wa_conc_body_conv (HeapLift.dest_first_order ctxt then_conv Drule.beta_eta_conversion) ctxt)
+        CONVERSION (wa_conc_body_conv (fn ctxt => HeapLift.dest_first_order ctxt then_conv Drule.beta_eta_conversion) ctxt)
     fun make_fo_tac tac ctxt = ((to_fo_tac ctxt THEN' tac) THEN_ALL_NEW from_fo_tac ctxt)
 
 
@@ -354,7 +354,7 @@ let
             fn thm =>
             (if Config.get lthy ML_Options.exception_trace then
               warning ("Could not solve subgoal: " ^
-                (Goal_Display.string_of_goal lthy thm))
+                (Goal_Display.pretty_goal lthy thm |> Pretty.string_of))
             else (); no_tac thm))]
 
     (* Solve the goal. *)

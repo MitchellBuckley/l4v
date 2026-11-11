@@ -13,7 +13,7 @@ imports CSpaceInvPre_AI
 begin
 
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 lemma aobj_ref_acap_rights_update[simp]:
   "aobj_ref (acap_rights_update f x) = aobj_ref x"
@@ -54,6 +54,12 @@ definition
   "reachable_target \<equiv> \<lambda>(asid, vref) p s.
      \<exists>level. vs_lookup_target level asid vref s = Some (level, p) \<or>
              pool_for_asid asid s = Some p"
+
+(* No badges on arch capabilities on this architecture *)
+definition arch_cap_badge :: "arch_cap \<Rightarrow> machine_word option" where
+  "arch_cap_badge acap \<equiv> None"
+
+lemmas arch_cap_badge_simps[simp] = arch_cap_badge_def
 
 definition
   "reachable_frame_cap cap \<equiv> \<lambda>s.
@@ -368,7 +374,7 @@ lemma cap_master_arch_cap_rights [simp]:
   by (simp add: cap_master_arch_cap_def acap_rights_update_def
            split: arch_cap.splits)
 
-lemma acap_rights_update_id [intro!, simp]:
+lemma valid_acap_rights_update_id [intro!, simp]:
   "valid_arch_cap ac s \<Longrightarrow> acap_rights_update (acap_rights ac) ac = ac"
   unfolding acap_rights_update_def acap_rights_def valid_arch_cap_def
   by (cases ac; simp)
@@ -389,9 +395,7 @@ lemma set_cap_hyp_refs_of [wp]:
             simp: state_hyp_refs_of_def obj_at_def
             split: if_split_asm)
 
-lemma state_hyp_refs_of_revokable[simp]:
-  "state_hyp_refs_of (s \<lparr> is_original_cap := m \<rparr>) = state_hyp_refs_of s"
-  by (rule revokable_update.state_hyp_refs_update)
+lemmas state_hyp_refs_of_revokable = state_hyp_refs_update
 
 lemma is_valid_vtable_root_is_arch_cap:
   "is_valid_vtable_root cap \<Longrightarrow> is_arch_cap cap"

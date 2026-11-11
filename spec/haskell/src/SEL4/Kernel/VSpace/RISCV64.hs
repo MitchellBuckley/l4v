@@ -93,15 +93,6 @@ findVSpaceForASID asid = do
             return ptr
         Nothing -> throw InvalidRoot
 
-findVSpaceForASIDAssert :: ASID -> Kernel (PPtr PTE)
-findVSpaceForASIDAssert asid = do
-    pm <- findVSpaceForASID asid `catchFailure`
-        const (fail "findVSpaceForASIDAssert: pt not found")
-    assert (pm .&. mask ptBits == 0)
-        "findVSpaceForASIDAssert: pt pointer alignment check"
-    checkPTAt pm
-    return pm
-
 maybeVSpaceForASID :: ASID -> Kernel (Maybe (PPtr PTE))
 maybeVSpaceForASID asid =
     liftM Just (findVSpaceForASID asid) `catchFailure` const (return Nothing)
@@ -404,8 +395,7 @@ decodeRISCVPageTableInvocationMap cte cap vptr attr vspaceCap = do
     when (bitsLeft == pageBits || oldPTE /= InvalidPTE) $ throw DeleteFirst
     let pte = PageTablePTE {
             ptePPN = addrFromPPtr (capPTBasePtr cap) `shiftR` pageBits,
-            pteGlobal = False,
-            pteUser = False }
+            pteGlobal = False }
     let vptr = vptr .&. complement (mask bitsLeft)
     return $ InvokePageTable $ PageTableMap {
         ptMapCap = ArchObjectCap $ cap { capPTMappedAddress = Just (asid, vptr) },
@@ -534,11 +524,12 @@ performPageTableInvocation (PageTableUnmap cap slot) = do
     updateCap slot (ArchObjectCap $ cap { capPTMappedAddress = Nothing })
 
 
-performPageInvocation :: PageInvocation -> Kernel ()
+performPageInvocation :: PageInvocation -> Kernel [Word]
 performPageInvocation (PageMap cap ctSlot (pte,slot)) = do
     updateCap ctSlot cap
     storePTE slot pte
     doMachineOp sfence
+    return []
 
 performPageInvocation (PageUnmap cap ctSlot) = do
     case capFMappedAddress cap of
@@ -546,17 +537,10 @@ performPageInvocation (PageUnmap cap ctSlot) = do
         _ -> return ()
     ArchObjectCap cap <- getSlotCap ctSlot
     updateCap ctSlot (ArchObjectCap $ cap { capFMappedAddress = Nothing })
+    return []
 
-performPageInvocation (PageGetAddr ptr) = do
-    let paddr = fromPAddr $ addrFromPPtr ptr
-    ct <- getCurThread
-    msgTransferred <- setMRs ct Nothing [paddr]
-    msgInfo <- return $ MI {
-            msgLength = msgTransferred,
-            msgExtraCaps = 0,
-            msgCapsUnwrapped = 0,
-            msgLabel = 0 }
-    setMessageInfo ct msgInfo
+performPageInvocation (PageGetAddr ptr) =
+    return [fromPAddr $ addrFromPPtr ptr]
 
 
 performASIDControlInvocation :: ASIDControlInvocation -> Kernel ()
@@ -588,11 +572,16 @@ performASIDPoolInvocation (Assign asid poolPtr ctSlot) = do
 performRISCVMMUInvocation :: ArchInv.Invocation -> KernelP [Word]
 performRISCVMMUInvocation i = withoutPreemption $ do
     case i of
-        InvokePageTable oper -> performPageTableInvocation oper
+        InvokePageTable oper -> do
+            performPageTableInvocation oper
+            return []
         InvokePage oper -> performPageInvocation oper
-        InvokeASIDControl oper -> performASIDControlInvocation oper
-        InvokeASIDPool oper -> performASIDPoolInvocation oper
-    return $ []
+        InvokeASIDControl oper -> do
+            performASIDControlInvocation oper
+            return []
+        InvokeASIDPool oper -> do
+            performASIDPoolInvocation oper
+            return []
 
 {- Simulator Support -}
 
@@ -607,34 +596,34 @@ storePTE slot pte = do
 {- Unimplemented Boot Code Stubs -}
 
 mapKernelWindow  :: Kernel ()
-mapKernelWindow = error "boot code unimplemented"
+mapKernelWindow = error "unimplemented init code"
 
 activateGlobalVSpace :: Kernel ()
-activateGlobalVSpace = error "boot code unimplemented"
+activateGlobalVSpace = error "unimplemented init code"
 
 createIPCBufferFrame :: Capability -> VPtr -> KernelInit Capability
-createIPCBufferFrame = error "boot code unimplemented"
+createIPCBufferFrame = error "unimplemented init code"
 
 createBIFrame :: Capability -> VPtr -> Word32 -> Word32 -> KernelInit Capability
-createBIFrame = error "boot code unimplemented"
+createBIFrame = error "unimplemented init code"
 
 createFramesOfRegion :: Capability -> Region -> Bool -> KernelInit ()
-createFramesOfRegion = error "boot code unimplemented"
+createFramesOfRegion = error "unimplemented init code"
 
 createITPDPTs :: Capability -> VPtr -> VPtr -> KernelInit Capability
-createITPDPTs  = error "boot code unimplemented"
+createITPDPTs  = error "unimplemented init code"
 
 writeITPDPTs :: Capability -> Capability -> KernelInit ()
-writeITPDPTs  = error "boot code unimplemented"
+writeITPDPTs  = error "unimplemented init code"
 
 createITASIDPool :: Capability -> KernelInit Capability
-createITASIDPool  = error "boot code unimplemented"
+createITASIDPool  = error "unimplemented init code"
 
 writeITASIDPool :: Capability -> Capability -> Kernel ()
-writeITASIDPool  = error "boot code unimplemented"
+writeITASIDPool  = error "unimplemented init code"
 
 createDeviceFrames :: Capability -> KernelInit ()
-createDeviceFrames  = error "boot code unimplemented"
+createDeviceFrames  = error "unimplemented init code"
 
 vptrFromPPtr :: PPtr a -> KernelInit VPtr
-vptrFromPPtr  = error "boot code unimplemented"
+vptrFromPPtr  = error "unimplemented init code"

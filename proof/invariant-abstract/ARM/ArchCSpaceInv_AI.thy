@@ -12,25 +12,7 @@ theory ArchCSpaceInv_AI
 imports CSpaceInv_AI
 begin
 
-context Arch begin global_naming ARM
-
-definition
-   safe_ioport_insert :: "cap \<Rightarrow> cap \<Rightarrow> 'a::state_ext state \<Rightarrow> bool"
-where
-  "safe_ioport_insert newcap oldcap s \<equiv> True"
-
-declare safe_ioport_insert_def[simp]
-
-lemma safe_ioport_insert_triv:
-  "\<not>is_arch_cap newcap \<Longrightarrow> safe_ioport_insert newcap oldcap s"
-  by (clarsimp simp: safe_ioport_insert_def)
-
-lemma set_cap_ioports':
- "\<lbrace>\<lambda>s. valid_ioports s
-      \<and> cte_wp_at (\<lambda>cap'. safe_ioport_insert cap cap' s) ptr s\<rbrace>
-    set_cap cap ptr
-  \<lbrace>\<lambda>rv. valid_ioports\<rbrace>"
-  by wpsimp
+context Arch begin arch_global_naming
 
 lemma unique_table_refs_no_cap_asidE:
   "\<lbrakk>caps_of_state s p = Some cap;
@@ -47,6 +29,10 @@ lemma unique_table_refs_no_cap_asidE:
 
 lemmas unique_table_refs_no_cap_asidD
      = unique_table_refs_no_cap_asidE[where S="{}"]
+
+lemma set_cap_valid_arch_state[wp]:
+  "set_cap cap ptr \<lbrace> valid_arch_state \<rbrace>"
+  by (wpsimp wp: valid_arch_state_lift_aobj_at_no_caps set_cap_tcb set_cap.aobj_at)
 
 lemma replace_cap_invs:
   "\<lbrace>\<lambda>s. invs s \<and> cte_wp_at (replaceable s p cap) p s
@@ -79,7 +65,7 @@ lemma replace_cap_invs:
    apply (erule allEI, erule allEI)
    apply (drule_tac x="fst p" in spec, drule_tac x="snd p" in spec)
    apply (clarsimp simp: gen_obj_refs_subset)
-   apply (drule(1) disjoint_subset, simp)
+   apply (drule(1) disjoint_subset, erule (1) notE)
   apply (rule conjI)
    apply (erule descendants_inc_minor)
     apply simp
@@ -209,17 +195,18 @@ lemma is_derived_cap_arch_asid:
 definition
   safe_parent_for_arch :: "cap \<Rightarrow> cap \<Rightarrow> bool"
 where
-  "safe_parent_for_arch cap parent \<equiv> False"
+  "safe_parent_for_arch cap parent \<equiv>
+     parent = IRQControlCap \<and> is_ArchObjectCap cap \<and> is_SGISignalCap (the_arch_cap cap)"
 
 declare safe_parent_for_arch_def[simp]
 
 lemma safe_parent_for_arch_not_arch:
   "\<not>is_arch_cap cap \<Longrightarrow> \<not>safe_parent_for_arch cap p"
-  by (clarsimp simp: safe_parent_for_arch_def is_cap_simps)
+  by (clarsimp simp: is_cap_simps)
 
 lemma safe_parent_cap_range_arch:
-  "\<And>cap pcap. safe_parent_for_arch cap pcap \<Longrightarrow> cap_range cap \<subseteq> cap_range pcap"
-  by (clarsimp simp: safe_parent_for_arch_def cap_range_def)
+  "safe_parent_for_arch cap pcap \<Longrightarrow> cap_range cap \<subseteq> cap_range pcap"
+  by (clarsimp simp: is_cap_simps cap_range_def)
 
 definition
   "cap_asid_base_arch cap \<equiv> case cap of
@@ -248,9 +235,6 @@ declare cap_vptr_arch_def[abs_def, simp]
 lemmas cap_vptr_simps [simp] =
   cap_vptr_def [simplified, split_simps cap.split arch_cap.split option.split prod.split]
 
-end
-context begin interpretation Arch .
-requalify_facts replace_cap_invs
 end
 
 end

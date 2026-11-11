@@ -8,6 +8,12 @@ theory KHeapPre_AI
 imports Machine_AI
 begin
 
+arch_requalify_facts
+  det_getRegister
+  det_setRegister
+  det_getRestartPC
+  det_setNextPC
+
 primrec
   same_caps :: "Structures_A.kernel_object \<Rightarrow> Structures_A.kernel_object \<Rightarrow> bool"
 where
@@ -27,6 +33,10 @@ lemma same_caps_more_simps[simp]:
  "same_caps (Notification ntfn) val = is_ntfn val"
  "same_caps (ArchObj ao) val        = (\<exists>ao'. val = ArchObj ao')"
  by (cases val, (fastforce simp: is_obj_defs)+)+
+
+lemma same_caps_tcb_arch_update[simp]:
+  "same_caps (TCB (tcb_arch_update f tcb)) = same_caps (TCB tcb)"
+  by (rule ext) (clarsimp simp: tcb_cap_cases_def)
 
 lemma dmo_return [simp]:
   "do_machine_op (return x) = return x"
@@ -134,9 +144,17 @@ lemma get_tcb_SomeD: "get_tcb t s = Some v \<Longrightarrow> kheap s t = Some (T
 lemma get_tcb_at: "tcb_at t s \<Longrightarrow> (\<exists>tcb. get_tcb t s = Some tcb)"
   by (simp add: tcb_at_def)
 
+lemma get_tcb_None_tcb_at:
+  "(get_tcb p s = None) = (\<not>tcb_at p s)"
+  by (auto simp: get_tcb_def obj_at_def is_tcb_def split: kernel_object.splits option.splits)
+
+lemma get_tcb_Some_ko_at:
+  "(get_tcb p s = Some t) = ko_at (TCB t) p s"
+  by (auto simp: get_tcb_def obj_at_def is_tcb_def split: kernel_object.splits option.splits)
+
 lemma typ_at_same_type:
   assumes "typ_at T p s" "a_type k = a_type ko" "kheap s p' = Some ko"
-  shows "typ_at T p (s\<lparr>kheap := kheap s(p' \<mapsto> k)\<rparr>)"
+  shows "typ_at T p (s\<lparr>kheap := (kheap s)(p' \<mapsto> k)\<rparr>)"
   using assms
   by (clarsimp simp: obj_at_def)
 
@@ -148,12 +166,12 @@ lemma hoare_to_pure_kheap_upd:
   assumes typ_eq: "a_type k = a_type ko"
   assumes valid: "P (s :: ('z :: state_ext) state)"
   assumes at: "ko_at ko p s"
-  shows "P (s\<lparr>kheap := kheap s(p \<mapsto> k)\<rparr>)"
+  shows "P (s\<lparr>kheap := (kheap s)(p \<mapsto> k)\<rparr>)"
   apply (rule use_valid[where f="
       do
         s' <- get;
         assert (s' = s);
-        (modify (\<lambda>s. s\<lparr>kheap := kheap s(p \<mapsto> k)\<rparr>));
+        (modify (\<lambda>s. s\<lparr>kheap := (kheap s)(p \<mapsto> k)\<rparr>));
         return undefined
       od", OF _ hoare valid])
   apply (fastforce simp add: simpler_modify_def get_def bind_def
@@ -165,7 +183,7 @@ lemma hoare_to_pure_kheap_upd:
   by (auto simp add: obj_at_def a_type_def split: kernel_object.splits if_splits)
 
 lemma set_object_wp:
-  "\<lbrace>\<lambda>s. Q (s\<lparr> kheap := kheap s (p \<mapsto> v)\<rparr>) \<rbrace> set_object p v \<lbrace>\<lambda>_. Q\<rbrace>"
+  "\<lbrace>\<lambda>s. Q (s\<lparr> kheap := (kheap s) (p \<mapsto> v)\<rparr>) \<rbrace> set_object p v \<lbrace>\<lambda>_. Q\<rbrace>"
   apply (simp add: set_object_def get_object_def)
   apply wp
   apply blast
@@ -178,30 +196,18 @@ lemma get_object_wp:
   apply (clarsimp simp: obj_at_def)
   done
 
-(* FIXME: move *)
-lemma hoare_strengthen_pre_via_assert_forward:
-  assumes pos: "\<lbrace> P \<rbrace> f \<lbrace> Q \<rbrace>"
-  assumes rel: "\<And>s. S s \<Longrightarrow> P s \<or> N s"
-  assumes neg: "\<lbrace> N \<rbrace> f \<lbrace> \<bottom>\<bottom> \<rbrace>"
-  shows "\<lbrace> S \<rbrace> f \<lbrace> Q \<rbrace>"
-  apply (rule hoare_weaken_pre)
-   apply (rule hoare_strengthen_post)
-    apply (rule hoare_vcg_disj_lift[OF pos neg])
-   apply simp
-  apply (erule rel)
-  done
-
 lemma hoare_set_object_weaken_pre:
-  assumes "\<lbrace>P\<rbrace> set_object p v \<lbrace>\<lambda>_. Q\<rbrace>"
-  shows "\<lbrace>\<lambda>s. \<forall>ko. ko_at ko p s \<longrightarrow> (a_type v = a_type ko) \<longrightarrow> P s\<rbrace>
-         set_object p v
-         \<lbrace>\<lambda>_. Q\<rbrace>"
-  apply (rule hoare_strengthen_pre_via_assert_forward
-                [OF assms, where N="\<lambda>s. \<forall>ko. ko_at ko p s \<longrightarrow> a_type ko \<noteq> a_type v"])
-  apply fastforce
+  "\<lbrace>P\<rbrace> set_object p v \<lbrace>\<lambda>_. Q\<rbrace> \<Longrightarrow>
+   \<lbrace>\<lambda>s. \<forall>ko. ko_at ko p s \<longrightarrow> (a_type v = a_type ko) \<longrightarrow> P s\<rbrace>
+   set_object p v
+   \<lbrace>\<lambda>_. Q\<rbrace>"
+  apply (rule hoare_strengthen_pre'[
+                where P=P and N="\<lambda>s. \<forall>ko. ko_at ko p s \<longrightarrow> a_type ko \<noteq> a_type v"])
+    apply (fastforce intro: hoare_weaken_pre)
+   apply fastforce
   apply (simp add: set_object_def)
-  apply (rule hoare_seq_ext[OF _ get_object_sp])
-  apply (rule hoare_seq_ext[OF _ assert_sp])
+  apply (rule bind_wp[OF _ get_object_sp])
+  apply (rule bind_wp[OF _ assert_sp])
   apply (fastforce intro: hoare_weaken_pre[OF hoare_pre_cont])
   done
 

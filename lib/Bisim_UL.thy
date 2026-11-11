@@ -8,9 +8,9 @@
 
 theory Bisim_UL
 imports
-  NonDetMonadVCG
+  Monads.Nondet_VCG
   Corres_UL
-  EmptyFailLib
+  Monads.Nondet_Empty_Fail
 begin
 
 (* This still looks a bit wrong to me, although it is more or less what I want \<emdash> we want to be
@@ -159,7 +159,7 @@ lemma bisim_split_handle:
 
 (* Set up wpc *)
 lemma wpc_helper_bisim:
-  "bisim_underlying SR r Q Q' f f' \<Longrightarrow> wpc_helper (P, P') (Q, {s. Q' s}) (bisim_underlying SR r P (\<lambda>s. s \<in> P') f f')"
+  "bisim_underlying SR r Q Q' f f' \<Longrightarrow> wpc_helper (P, P', P'') (Q, Q', Q'') (bisim_underlying SR r P P' f f')"
   apply (clarsimp simp: wpc_helper_def)
   apply (erule bisim_guard_imp)
    apply simp
@@ -342,7 +342,7 @@ lemmas dets_to_det_on [wp] = det_det_on [OF det_gets] det_det_on [OF return_det]
 
 (* Set up wpc *)
 lemma wpc_helper_det_on:
-  "det_on Q f \<Longrightarrow> wpc_helper (P, P') (Q, Q') (det_on P f)"
+  "det_on Q f \<Longrightarrow> wpc_helper (P, P', P'') (Q, Q', Q'') (det_on P f)"
   apply (clarsimp simp: wpc_helper_def det_on_def)
   done
 
@@ -426,7 +426,7 @@ lemma not_empty_gets [wp]:
 
 (* Set up wpc *)
 lemma wpc_helper_not_empty:
-  "not_empty Q f \<Longrightarrow> wpc_helper (P, P') (Q, Q') (not_empty P f)"
+  "not_empty Q f \<Longrightarrow> wpc_helper (P, P', P'') (Q, Q', Q'') (not_empty P f)"
   apply (clarsimp simp: wpc_helper_def not_empty_def)
   done
 
@@ -534,13 +534,8 @@ lemma bisim_splitE_req:
     apply simp
     apply assumption+
    apply (frule (1) use_valid [OF _ v1 [unfolded validE_R_def validE_def]])
-   apply clarsimp
-   apply (case_tac x)
-    apply (clarsimp simp: in_monad)
-    apply (rule_tac x = "(Inl y', t')" in bexI)
-    apply fastforce
-   apply (fastforce simp: in_monad)
-   apply clarsimp
+   apply (clarsimp split: sum.splits)
+    apply (fastforce simp: in_monad bind_def throwError_def return_def split: sum.splits prod.splits)
    apply (rule bisim_underlyingE1 [OF bd])
     apply simp
     apply assumption+
@@ -548,19 +543,14 @@ lemma bisim_splitE_req:
    apply (rule_tac x = "(r'', t'')" in bexI)
     apply clarsimp
    apply (fastforce simp: in_monad)
-
    apply (clarsimp simp: in_monad split_def)
    apply (erule bisim_underlyingE2)
     apply simp
     apply assumption+
    apply (frule (1) use_valid [OF _ v1 [unfolded validE_R_def validE_def]])
    apply clarsimp
-   apply (case_tac r)
-    apply (clarsimp simp: in_monad)
-    apply (rule_tac x = "(Inl aa, s'')" in bexI)
-    apply fastforce
-   apply (fastforce simp: in_monad)
-   apply clarsimp
+   apply (clarsimp split: sum.splits)
+    apply (fastforce simp: in_monad bind_def throwError_def return_def split: sum.splits prod.splits)
    apply (rule bisim_underlyingE2 [OF bd])
     apply simp
     apply assumption+

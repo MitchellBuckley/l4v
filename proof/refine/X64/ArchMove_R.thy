@@ -17,7 +17,7 @@ lemmas cte_index_repair_sym = cte_index_repair[symmetric]
 
 lemmas of_nat_inj64 = of_nat_inj[where 'a=machine_word_len, folded word_bits_def]
 
-context begin interpretation Arch .
+context Arch begin arch_global_naming
 
 lemma no_fail_in8[wp]:
   "no_fail \<top> (in8 a)"
@@ -73,9 +73,6 @@ lemma no_fail_ioapicMapPinToVector[wp]: "no_fail \<top> (ioapicMapPinToVector a 
 lemma no_irq_ioapicMapPinToVector[wp]:
   "no_irq (ioapicMapPinToVector a b c d e)"
   by (simp add: ioapicMapPinToVector_def)
-
-(* Move to Deterministic_AI*)
-crunch valid_etcbs[wp]: copy_global_mappings valid_etcbs (wp: mapM_x_wp')
 
 (* Move to no_gs_types_simps in ArchRetype_AI *)
 lemma no_gs_types_simps' [simp]:
@@ -135,7 +132,8 @@ lemma hw_asid_invalidate_valid_arch_state[wp]:
   "\<lbrace>valid_arch_state\<rbrace> hw_asid_invalidate asid pm \<lbrace>\<lambda>_. valid_arch_state\<rbrace>"
   unfolding hw_asid_invalidate_def by wp
 
-crunch valid_global_objs[wp]: hw_asid_invalidate "valid_global_objs"
+crunch hw_asid_invalidate
+  for valid_global_objs[wp]: "valid_global_objs"
 
 (* Move to invariants *)
 lemma get_pt_mapM_x_lower:
@@ -181,6 +179,18 @@ lemma no_fail_invalidateTranslationSingleASID[wp]:
 lemma no_irq_invalidateTranslationSingleASID[wp]:
   "no_irq (invalidateTranslationSingleASID a b)"
   by (simp add: invalidateTranslationSingleASID_def)
+
+(* FIXME: move, missing in Ipc_AI on this architecture *)
+crunch handle_arch_fault_reply, arch_get_sanitise_register_info
+  for inv[Arch_assms]: P
+
+(* FIXME arch-split: missing from ArchCSpaceInvPre_AI on this architecture *)
+lemma set_cap_aobjs_of[wp]:
+  "set_cap cap ptr \<lbrace>\<lambda>s. P (aobjs_of s)\<rbrace>"
+  unfolding set_cap_def
+  apply (wpsimp wp: set_object_wp get_object_wp)
+  apply (auto simp: opt_map_def obj_at_def aobj_of_def split: option.splits elim!: rsubst[where P=P])
+  done
 
 end
 

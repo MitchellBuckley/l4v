@@ -12,16 +12,18 @@
 theory HaskellLib_H
 imports
   Lib
-  NatBitwise
   More_Numeral_Type
-  NonDetMonadVCG
+  Monads.Nondet_VCG
+  Monads.Nondet_Reader_Option
 begin
 
 abbreviation (input) "flip \<equiv> swp"
 
+abbreviation (input) "listUpdate \<equiv> list_update"
+
 abbreviation(input) bind_drop :: "('a, 'c) nondet_monad \<Rightarrow> ('a, 'b) nondet_monad
                       \<Rightarrow> ('a, 'b) nondet_monad" (infixl ">>'_" 60)
-  where "bind_drop \<equiv> (\<lambda>x y. bind x (K_bind y))"
+  where "bind_drop \<equiv> (\<lambda>x y. Nondet_Monad.bind x (K_bind y))"
 
 lemma bind_drop_test:
   "foldr bind_drop x (return ()) = sequence_x x"
@@ -32,6 +34,12 @@ lemma bind_drop_test:
 definition
   runState :: "('s, 'a) nondet_monad \<Rightarrow> 's \<Rightarrow> ('a \<times> 's)" where
  "runState f s \<equiv> THE x. x \<in> fst (f s)"
+
+definition
+  "runReaderT \<equiv> id"
+
+abbreviation (input)
+  "getsJust \<equiv> gets_the"
 
 definition
   sassert :: "bool \<Rightarrow> 'a \<Rightarrow> 'a" where
@@ -54,7 +62,7 @@ declare haskell_assert_def [simp] haskell_assertE_def [simp]
 
 definition
   stateAssert :: "('a \<Rightarrow> bool) \<Rightarrow> unit list \<Rightarrow> ('a, unit) nondet_monad" where
- "stateAssert P L \<equiv> get >>= (\<lambda>s. assert (P s))"
+ "stateAssert P L \<equiv> state_assert P"
 
 definition
   haskell_fail :: "unit list \<Rightarrow> ('a, 'b) nondet_monad" where
@@ -200,22 +208,22 @@ lemma either_simp[simp]: "either = case_sum"
   apply (simp add: either_def)
   done
 
-class HS_bit = bit_operations +
+class HS_bit = semiring_bit_operations +
   fixes shiftL :: "'a \<Rightarrow> nat \<Rightarrow> 'a"
   fixes shiftR :: "'a \<Rightarrow> nat \<Rightarrow> 'a"
   fixes bitSize :: "'a \<Rightarrow> nat"
 
-instantiation word :: (len0) HS_bit
+instantiation word :: (len) HS_bit
 begin
 
 definition
-  shiftL_word[simp]: "(shiftL :: 'a::len0 word \<Rightarrow> nat \<Rightarrow> 'a word) \<equiv> shiftl"
+  shiftL_word[simp]: "(shiftL :: 'a::len word \<Rightarrow> nat \<Rightarrow> 'a word) \<equiv> shiftl"
 
 definition
-  shiftR_word[simp]: "(shiftR :: 'a::len0 word \<Rightarrow> nat \<Rightarrow> 'a word) \<equiv> shiftr"
+  shiftR_word[simp]: "(shiftR :: 'a::len word \<Rightarrow> nat \<Rightarrow> 'a word) \<equiv> shiftr"
 
 definition
-  bitSize_word[simp]: "(bitSize :: 'a::len0 word \<Rightarrow> nat) \<equiv> size"
+  bitSize_word[simp]: "(bitSize :: 'a::len word \<Rightarrow> nat) \<equiv> size"
 
 instance ..
 
@@ -236,14 +244,14 @@ instance ..
 
 end
 
-class finiteBit = bit_operations +
+class finiteBit = ring_bit_operations +
   fixes finiteBitSize :: "'a \<Rightarrow> nat"
 
-instantiation word :: (len0) finiteBit
+instantiation word :: (len) finiteBit
 begin
 
 definition
-  finiteBitSize_word[simp]: "(finiteBitSize :: 'a::len0 word \<Rightarrow> nat) \<equiv> size"
+  finiteBitSize_word[simp]: "(finiteBitSize :: 'a::len word \<Rightarrow> nat) \<equiv> size"
 
 instance ..
 
@@ -305,12 +313,7 @@ lemma fromIntegral_simp2[simp]: "fromIntegral = unat"
   by (simp add: fromIntegral_def fromInteger_nat toInteger_word)
 
 lemma fromIntegral_simp3[simp]: "fromIntegral = ucast"
-  apply (simp add: fromIntegral_def fromInteger_word toInteger_word)
-  apply (rule ext)
-  apply (simp add: ucast_def)
-  apply (subst word_of_nat)
-  apply (simp add: unat_def)
-  done
+  unfolding fromIntegral_def fromInteger_word toInteger_word by force
 
 lemma fromIntegral_simp_nat[simp]: "(fromIntegral :: nat \<Rightarrow> nat) = id"
   by (simp add: fromIntegral_def fromInteger_nat toInteger_nat)
@@ -318,9 +321,7 @@ lemma fromIntegral_simp_nat[simp]: "(fromIntegral :: nat \<Rightarrow> nat) = id
 definition
   infix_apply :: "'a \<Rightarrow> ('a \<Rightarrow> 'b \<Rightarrow> 'c) \<Rightarrow> 'b \<Rightarrow> 'c" ("_ `~_~` _" [81, 100, 80] 80) where
   infix_apply_def[simp]:
- "infix_apply a f b \<equiv> f a b"
-
-term "return $ a `~b~` c d"
+ "a `~f~` b \<equiv> f a b"
 
 definition
   zip3 :: "'a list \<Rightarrow> 'b list \<Rightarrow> 'c list \<Rightarrow> ('a \<times> 'b \<times> 'c) list" where
@@ -457,7 +458,17 @@ definition
 
 definition
   init :: "'a list \<Rightarrow> 'a list" where
- "init xs \<equiv> case (length xs) of Suc n \<Rightarrow> take n xs | _ \<Rightarrow> undefined"
+ "init xs \<equiv> case (length xs) of Suc n \<Rightarrow> take n xs | _ \<Rightarrow> []"
+
+(* FIXME: eventually we should remove "init", but the "case" formulation is sufficiently different
+          that proofs will break *)
+lemma init_eq_butlast:
+  "init = butlast"
+proof (rule ext)
+  fix xs :: "'a list"
+  show "init xs = butlast xs"
+    by (induct xs, auto simp: init_def neq_Nil_conv)
+qed
 
 primrec
   break :: "('a \<Rightarrow> bool) \<Rightarrow> 'a list \<Rightarrow> ('a list \<times> 'a list)"
@@ -522,5 +533,36 @@ syntax (input)
   "_listcompr" :: "'a \<Rightarrow> lc_qual \<Rightarrow> lc_quals \<Rightarrow> 'a list"  ("[_ | __")
 
 lemma "[(x,1) . x \<leftarrow> [0..10]] = [(x,1) | x \<leftarrow> [0..10]]" by (rule refl)
+
+definition ohaskell_fail :: "unit list \<Rightarrow> ('s, 'a) lookup" where
+  "ohaskell_fail = K ofail"
+
+definition ohaskell_assert :: "bool \<Rightarrow> unit list \<Rightarrow> ('s, unit) lookup" where
+  "ohaskell_assert P ls \<equiv> if P then oreturn () else ofail"
+
+lemma no_ofail_ohaskell_assert[wp]:
+  "no_ofail (\<lambda>_. P) (ohaskell_assert P [])"
+  by (clarsimp simp: no_ofail_def ohaskell_assert_def)
+
+lemma ohaskell_assert_wp[wp]:
+  "\<lblot>\<lambda>s. Q \<longrightarrow> P () s\<rblot> ohaskell_assert Q [] \<lblot>P\<rblot>"
+  apply (clarsimp simp: ohaskell_assert_def)
+  apply (intro conjI; wpsimp)
+  done
+
+lemma ohaskell_assert_sp:
+  "\<lblot>P\<rblot> ohaskell_assert Q [] \<lblot>\<lambda>_ s. P s \<and> Q\<rblot>"
+  apply (clarsimp simp: ohaskell_assert_def)
+  apply (intro conjI; wpsimp)
+  done
+
+lemma gets_the_ohaskell_assert:
+  "gets_the (ohaskell_assert P []) = assert P"
+  by (clarsimp simp: ohaskell_assert_def split: if_splits)
+
+definition ohaskell_state_assert :: "('s \<Rightarrow> bool) \<Rightarrow> unit list \<Rightarrow> ('s, unit) lookup" where
+  "ohaskell_state_assert P L \<equiv> ostate_assert P"
+
+lemmas omonad_defs = omonad_defs ohaskell_assert_def ohaskell_state_assert_def ohaskell_fail_def
 
 end

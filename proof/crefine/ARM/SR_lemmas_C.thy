@@ -10,7 +10,7 @@ imports
   "Refine.Invariants_H"
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 section "ctes"
 
@@ -91,14 +91,14 @@ lemma cap_get_tag_isCap0:
   \<and> isArchCap_tag (cap_get_tag cap') = isArchCap \<top> cap
   \<and> (cap_get_tag cap' = scast cap_small_frame_cap) = (isArchPageCap cap \<and> pageSize cap = ARMSmallPage)
   \<and> (cap_get_tag cap' = scast cap_frame_cap) = (isArchPageCap cap \<and> pageSize cap \<noteq> ARMSmallPage)
+  \<and> (cap_get_tag cap' = scast cap_sgi_signal_cap) = isArchSGISignalCap cap
   \<and> (cap_get_tag cap' = scast cap_domain_cap) = isDomainCap cap"
   using cr
   apply -
   apply (erule ccap_relationE)
   apply (simp add: cap_to_H_def cap_lift_def Let_def isArchCap_tag_def2 isArchCap_def)
-  apply (clarsimp simp: isCap_simps cap_tag_defs word_le_nat_alt pageSize_def Let_def
-                 split: if_split_asm) \<comment> \<open>takes a while\<close>
-  done
+  by (clarsimp simp: isCap_simps cap_tag_defs word_le_nat_alt pageSize_def Let_def
+               split: if_split_asm) \<comment> \<open>takes a while\<close>
 
 
 lemma cap_get_tag_isCap:
@@ -116,6 +116,7 @@ lemma cap_get_tag_isCap:
   and "isArchCap_tag (cap_get_tag cap') = isArchCap \<top> cap"
   and "(cap_get_tag cap' = scast cap_small_frame_cap) = (isArchPageCap cap \<and> pageSize cap = ARMSmallPage)"
   and "(cap_get_tag cap' = scast cap_frame_cap) = (isArchPageCap cap \<and> pageSize cap \<noteq> ARMSmallPage)"
+  and "(cap_get_tag cap' = scast cap_sgi_signal_cap) = isArchSGISignalCap cap"
   and "(cap_get_tag cap' = scast cap_domain_cap) = isDomainCap cap"
   using cap_get_tag_isCap0 [OF cr] by auto
 
@@ -274,6 +275,18 @@ lemma cap_get_tag_DomainCap:
   apply (simp add: cap_get_tag_isCap isCap_simps)
   done
 
+lemma cap_get_tag_SGISignalCap:
+  assumes cr: "ccap_relation cap cap'"
+  shows "(cap_get_tag cap' = scast cap_sgi_signal_cap)
+          = (cap = ArchObjectCap (SGISignalCap (capSGIIRQ_CL (cap_sgi_signal_cap_lift cap'))
+                                               (capSGITarget_CL (cap_sgi_signal_cap_lift cap'))))"
+  using cr
+  apply -
+  apply (rule iffI)
+   apply (clarsimp elim!: ccap_relationE simp: cap_lifts cap_to_H_def)
+  apply (simp add: cap_get_tag_isCap isCap_simps)
+  done
+
 lemmas cap_get_tag_to_H_iffs =
      cap_get_tag_NullCap
      cap_get_tag_ThreadCap
@@ -285,8 +298,35 @@ lemmas cap_get_tag_to_H_iffs =
      cap_get_tag_ZombieCap
      cap_get_tag_UntypedCap
      cap_get_tag_DomainCap
+     cap_get_tag_SGISignalCap
 
 lemmas cap_get_tag_to_H = cap_get_tag_to_H_iffs [THEN iffD1]
+
+lemma cap_tags_distinct:
+  "distinct [
+     cap_page_directory_cap,
+     cap_notification_cap,
+     cap_asid_control_cap,
+     cap_small_frame_cap,
+     cap_irq_handler_cap,
+     cap_irq_control_cap,
+     cap_sgi_signal_cap,
+     cap_page_table_cap,
+     cap_asid_pool_cap,
+     cap_endpoint_cap,
+     cap_untyped_cap,
+     cap_zombie_cap,
+     cap_thread_cap,
+     cap_domain_cap,
+     cap_reply_cap,
+     cap_frame_cap,
+     cap_cnode_cap,
+     cap_null_cap
+   ]"
+  by (simp add: cap_tag_defs)
+
+lemmas cap_tag_neqs =
+  cap_tags_distinct[simplified] distinct_rev[THEN iffD2, OF cap_tags_distinct, simplified]
 
 subsection "mdb"
 
@@ -296,72 +336,15 @@ lemma cmdbnode_relation_mdb_node_to_H [simp]:
   unfolding cmdbnode_relation_def mdb_node_to_H_def mdb_node_lift_def cte_lift_def
   by (fastforce split: option.splits)
 
-(* MOVE --- here down doesn't really belong here, maybe in a haskell specific file?*)
-lemma tcb_cte_cases_in_range1:
-  assumes tc:"tcb_cte_cases (y - x) = Some v"
-  and     al: "is_aligned x tcbBlockSizeBits"
-  shows   "x \<le> y"
-proof -
-  note objBits_defs [simp]
-
-  from tc obtain q where yq: "y = x + q" and qv: "q < 2 ^ tcbBlockSizeBits"
-    unfolding tcb_cte_cases_def
-    by (simp add: diff_eq_eq split: if_split_asm)
-
-  have "x \<le> x + 2 ^ tcbBlockSizeBits - 1" using al
-    by (rule is_aligned_no_overflow)
-
-  hence "x \<le> x + q" using qv
-    apply simp
-    apply unat_arith
-    apply simp
-    done
-
-  thus ?thesis using yq by simp
-qed
-
-lemma tcb_cte_cases_in_range2:
-  assumes tc: "tcb_cte_cases (y - x) = Some v"
-  and     al: "is_aligned x tcbBlockSizeBits"
-  shows   "y \<le> x + 2 ^ tcbBlockSizeBits - 1"
-proof -
-  note objBits_defs [simp]
-
-  from tc obtain q where yq: "y = x + q" and qv: "q \<le> 2 ^ tcbBlockSizeBits - 1"
-    unfolding tcb_cte_cases_def
-    by (simp add: diff_eq_eq split: if_split_asm)
-
-  have "x + q \<le> x + (2 ^ tcbBlockSizeBits - 1)" using qv
-    apply (rule word_plus_mono_right)
-    apply (rule is_aligned_no_overflow' [OF al])
-    done
-
-  thus ?thesis using yq by (simp add: field_simps)
-qed
-
-lemmas tcbSlots =
-  tcbCTableSlot_def tcbVTableSlot_def
-  tcbReplySlot_def tcbCallerSlot_def tcbIPCBufferSlot_def
-
-lemma updateObject_cte_tcb:
-  assumes tc: "tcb_cte_cases (ptr - ptr') = Some (accF, updF)"
-  shows   "updateObject ctea (KOTCB tcb) ptr ptr' next =
-   (do alignCheck ptr' (objBits tcb);
-        magnitudeCheck ptr' next (objBits tcb);
-        return (KOTCB (updF (\<lambda>_. ctea) tcb))
-    od)"
-  using tc unfolding tcb_cte_cases_def
-  apply -
-  apply (clarsimp simp add: updateObject_cte Let_def
-    tcb_cte_cases_def objBits_simps' tcbSlots shiftl_t2n
-    split: if_split_asm cong: if_cong)
-  done
-
-definition
-  tcb_no_ctes_proj :: "tcb \<Rightarrow> Structures_H.thread_state \<times> word32 \<times> word32 \<times> arch_tcb \<times> bool \<times> word8 \<times> word8 \<times> word8 \<times> nat \<times> fault option \<times> word32 option"
+definition tcb_no_ctes_proj ::
+  "tcb \<Rightarrow> Structures_H.thread_state \<times> machine_word \<times> machine_word \<times> arch_tcb \<times> bool \<times> word8
+          \<times> word8 \<times> word8 \<times> nat \<times> fault option \<times> machine_word option
+          \<times> machine_word option \<times> machine_word option \<times> machine_word"
   where
-  "tcb_no_ctes_proj t \<equiv> (tcbState t, tcbFaultHandler t, tcbIPCBuffer t, tcbArch t, tcbQueued t,
-                            tcbMCP t, tcbPriority t, tcbDomain t, tcbTimeSlice t, tcbFault t, tcbBoundNotification t)"
+  "tcb_no_ctes_proj t \<equiv>
+     (tcbState t, tcbFaultHandler t, tcbIPCBuffer t, tcbArch t, tcbQueued t,
+      tcbMCP t, tcbPriority t, tcbDomain t, tcbTimeSlice t, tcbFault t, tcbBoundNotification t,
+      tcbSchedNext t, tcbSchedPrev t, tcbFlags t)"
 
 lemma tcb_cte_cases_proj_eq [simp]:
   "tcb_cte_cases p = Some (getF, setF) \<Longrightarrow>
@@ -370,15 +353,15 @@ lemma tcb_cte_cases_proj_eq [simp]:
   by (auto split: if_split_asm)
 
 lemma map_to_ctes_upd_tcb':
-  "[| ksPSpace s p = Some (KOTCB tcb'); is_aligned p tcbBlockSizeBits;
-   ps_clear p tcbBlockSizeBits s |]
-==> map_to_ctes (ksPSpace s(p |-> KOTCB tcb)) =
-    (%x. if EX getF setF.
+  "\<lbrakk> ksPSpace s p = Some (KOTCB tcb'); is_aligned p tcbBlockSizeBits;
+     ps_clear p tcbBlockSizeBits s \<rbrakk>
+   \<Longrightarrow> map_to_ctes ((ksPSpace s)(p \<mapsto> KOTCB tcb)) =
+       (\<lambda>x. if EX getF setF.
                tcb_cte_cases (x - p) = Some (getF, setF) &
-               getF tcb ~= getF tcb'
-         then case tcb_cte_cases (x - p) of
-              Some (getF, setF) => Some (getF tcb)
-         else ctes_of s x)"
+               getF tcb \<noteq> getF tcb'
+            then case tcb_cte_cases (x - p) of
+               Some (getF, setF) \<Rightarrow> Some (getF tcb)
+            else ctes_of s x)"
   apply (erule (1) map_to_ctes_upd_tcb)
   apply (simp add: field_simps ps_clear_def3 mask_def objBits_defs)
   done
@@ -472,7 +455,7 @@ declare pspace_distinctD' [intro?]
 lemma ctes_of_ksI [intro?]:
   fixes s :: "kernel_state"
   assumes ks: "ksPSpace s x = Some (KOCTE cte)"
-  and     pa: "pspace_aligned' s"  (* yuck *)
+  and     pa: "pspace_aligned' s"
   and     pd: "pspace_distinct' s"
   shows   "ctes_of s x = Some cte"
 proof (rule ctes_of_eq_cte_wp_at')
@@ -492,29 +475,36 @@ qed
 lemma fst_setCTE:
   assumes ct: "cte_at' dest s"
   and     rl: "\<And>s'. \<lbrakk> ((), s') \<in> fst (setCTE dest cte s);
-           (s' = s \<lparr> ksPSpace := ksPSpace s' \<rparr>);
-           (ctes_of s' = ctes_of s(dest \<mapsto> cte));
-           (map_to_eps (ksPSpace s) = map_to_eps (ksPSpace s'));
-           (map_to_ntfns (ksPSpace s) = map_to_ntfns (ksPSpace s'));
-           (map_to_pdes (ksPSpace s) = map_to_pdes (ksPSpace s'));
-           (map_to_ptes (ksPSpace s) = map_to_ptes (ksPSpace s'));
-           (map_to_asidpools (ksPSpace s) = map_to_asidpools (ksPSpace s'));
-           (map_to_user_data (ksPSpace s) = map_to_user_data (ksPSpace s'));
-           (map_to_user_data_device (ksPSpace s) = map_to_user_data_device (ksPSpace s'));
-           (map_option tcb_no_ctes_proj \<circ> map_to_tcbs (ksPSpace s)
-              = map_option tcb_no_ctes_proj \<circ> map_to_tcbs (ksPSpace s'));
-           \<forall>T p. typ_at' T p s = typ_at' T p s'\<rbrakk> \<Longrightarrow> P"
+                       s' = s \<lparr> ksPSpace := ksPSpace s' \<rparr>;
+                       ctes_of s' = (ctes_of s)(dest \<mapsto> cte);
+                       map_to_eps (ksPSpace s) = map_to_eps (ksPSpace s');
+                       map_to_ntfns (ksPSpace s) = map_to_ntfns (ksPSpace s');
+                       map_to_pdes (ksPSpace s) = map_to_pdes (ksPSpace s');
+                       map_to_ptes (ksPSpace s) = map_to_ptes (ksPSpace s');
+                       map_to_asidpools (ksPSpace s) = map_to_asidpools (ksPSpace s');
+                       map_to_user_data (ksPSpace s) = map_to_user_data (ksPSpace s');
+                       map_to_user_data_device (ksPSpace s) = map_to_user_data_device (ksPSpace s');
+                       map_option tcb_no_ctes_proj \<circ> map_to_tcbs (ksPSpace s)
+                         = map_option tcb_no_ctes_proj \<circ> map_to_tcbs (ksPSpace s');
+                       \<forall>T p. typ_at' T p s = typ_at' T p s'\<rbrakk>
+                     \<Longrightarrow> P"
   shows   "P"
 proof -
-  (* Unpack the existential and bind x, theorems in this.  Yuck *)
-  from fst_setCTE0 [where cte = cte, OF ct] guess s' by clarsimp
+  from fst_setCTE0 [where cte = cte, OF ct]
+  obtain s' where
+    "((), s')\<in>fst (setCTE dest cte s)"
+    "s' = s\<lparr>ksPSpace := ksPSpace s'\<rparr>"
+    "dom (ksPSpace s) = dom (ksPSpace s')"
+    "(\<forall>p \<in> dom (ksPSpace s').
+       case the (ksPSpace s p) of
+         KOTCB t \<Rightarrow> \<exists>t'. ksPSpace s' p = Some (KOTCB t') \<and> tcb_no_ctes_proj t = tcb_no_ctes_proj t'
+       | KOCTE _ \<Rightarrow> \<exists>cte. ksPSpace s' p = Some (KOCTE cte)
+       | _ \<Rightarrow> ksPSpace s' p = ksPSpace s p)"
+    by clarsimp
   note thms = this
 
-  from thms have ceq: "ctes_of s' = ctes_of s(dest \<mapsto> cte)"
-    apply -
-    apply (erule use_valid [OF _ setCTE_ctes_of_wp])
-    apply simp
-    done
+  have ceq: "ctes_of s' = (ctes_of s)(dest \<mapsto> cte)"
+    by (rule use_valid [OF thms(1) setCTE_ctes_of_wp]) simp
 
   show ?thesis
   proof (rule rl)
@@ -659,10 +649,6 @@ proof -
   qed fact+
 qed
 
-lemma ctes_of_cte_at:
-  "ctes_of s p = Some x \<Longrightarrow> cte_at' p s"
-  by (simp add: cte_wp_at_ctes_of)
-
 lemma cor_map_relI:
   assumes dm: "dom am = dom am'"
   and     rl: "\<And>x y y' z. \<lbrakk> am x = Some y; am' x = Some y';
@@ -695,7 +681,6 @@ proof (rule cor_map_relI [OF map_option_eq_dom_eq])
 
   hence "tcb_no_ctes_proj tcb = tcb_no_ctes_proj tcb'" using om
     apply -
-    apply (simp add: o_def)
     apply (drule fun_cong [where x = x])
     apply simp
     done
@@ -915,9 +900,9 @@ proof -
     apply (rule is_aligned_weaken[OF _ bits])
     apply (erule cte_wp_atE')
      apply assumption
-    apply (simp add: tcb_cte_cases_def field_simps split: if_split_asm)
+    apply (simp add: tcb_cte_cases_def tcb_cte_cases_neqs field_simps split: if_split_asm)
         apply (fastforce elim: aligned_add_aligned[OF _ _ cte_bits_le_tcb_bits]
-                         simp: is_aligned_def cte_level_bits_def)+
+                         simp: is_aligned_def cte_level_bits_def cteSizeBits_def)+
     apply (erule is_aligned_weaken[OF _  cte_bits_le_tcb_bits])
     done
 qed
@@ -947,6 +932,7 @@ abbreviation
 lemma valid_mdb_ctes_of_next:
   "\<lbrakk> valid_mdb' s; ctes_of s p = Some cte; mdbNext (cteMDBNode cte) \<noteq> 0 \<rbrakk> \<Longrightarrow> cte_at' (mdbNext (cteMDBNode cte)) s"
   unfolding valid_mdb'_def valid_mdb_ctes_def
+  supply word_neq_0_conv[simp del]
   apply clarsimp
   apply (erule (2) valid_dlistE)
   apply (simp add: cte_wp_at_ctes_of)
@@ -955,6 +941,7 @@ lemma valid_mdb_ctes_of_next:
 lemma valid_mdb_ctes_of_prev:
   "\<lbrakk> valid_mdb' s; ctes_of s p = Some cte; mdbPrev (cteMDBNode cte) \<noteq> 0 \<rbrakk> \<Longrightarrow> cte_at' (mdbPrev (cteMDBNode cte)) s"
   unfolding valid_mdb'_def valid_mdb_ctes_def
+  supply word_neq_0_conv[simp del]
   apply clarsimp
   apply (erule (2) valid_dlistE)
   apply (simp add: cte_wp_at_ctes_of)
@@ -1081,6 +1068,8 @@ lemma cstate_relation_only_t_hrs:
   phantom_machine_state_' s = phantom_machine_state_' t;
   ghost'state_' s = ghost'state_' t;
   ksDomScheduleIdx_' s = ksDomScheduleIdx_' t;
+  ksDomScheduleStart_' s = ksDomScheduleStart_' t;
+  ksDomSchedule_' s = ksDomSchedule_' t;
   ksCurDomain_' s = ksCurDomain_' t;
   ksDomainTime_' s = ksDomainTime_' t
   \<rbrakk>
@@ -1106,6 +1095,8 @@ lemma rf_sr_upd:
     "phantom_machine_state_' (globals x) = phantom_machine_state_' (globals y)"
     "ghost'state_' (globals x) = ghost'state_' (globals y)"
     "ksDomScheduleIdx_' (globals x) = ksDomScheduleIdx_' (globals y)"
+    "ksDomScheduleStart_' (globals x) = ksDomScheduleStart_' (globals y)"
+    "ksDomSchedule_' (globals x) = ksDomSchedule_' (globals y)"
     "ksCurDomain_' (globals x) = ksCurDomain_' (globals y)"
     "ksDomainTime_' (globals x) = ksDomainTime_' (globals y)"
   shows "((a, x) \<in> rf_sr) = ((a, y) \<in> rf_sr)"
@@ -1123,6 +1114,8 @@ lemma rf_sr_upd_safe[simp]:
   and     isn: "intStateIRQNode_'(globals (g y)) = intStateIRQNode_' (globals y)"
   and     ist: "intStateIRQTable_'(globals (g y)) = intStateIRQTable_' (globals y)"
   and     dsi: "ksDomScheduleIdx_' (globals (g y)) = ksDomScheduleIdx_' (globals y)"
+  and     dss: "ksDomScheduleStart_' (globals (g y)) = ksDomScheduleStart_' (globals y)"
+  and     ds: "ksDomSchedule_' (globals (g y)) = ksDomSchedule_' (globals y)"
   and     cdom: "ksCurDomain_' (globals (g y)) = ksCurDomain_' (globals y)"
   and     dt: "ksDomainTime_' (globals (g y)) = ksDomainTime_' (globals y)"
   and arch:
@@ -1133,7 +1126,7 @@ lemma rf_sr_upd_safe[simp]:
   and    gs: "ghost'state_' (globals (g y)) = ghost'state_' (globals y)"
   and     wu:  "(ksWorkUnitsCompleted_' (globals (g y))) = (ksWorkUnitsCompleted_' (globals y))"
   shows "((a, (g y)) \<in> rf_sr) = ((a, y) \<in> rf_sr)"
-  using rl rq rqL1 rqL2 sa ct it isn ist arch wu gs dsi cdom dt by - (rule rf_sr_upd)
+  using assms by - (rule rf_sr_upd)
 
 lemma rf_sr_cte_at_valid:
   "\<lbrakk> cte_wp_at' P (ptr_val p) s; (s,s') \<in> rf_sr \<rbrakk> \<Longrightarrow> s' \<Turnstile>\<^sub>c (p :: cte_C ptr)"
@@ -1307,6 +1300,7 @@ lemma getObject_eq:
   and objat: "ko_at' ko p s"
   shows      "(ko, s) \<in> fst (getObject p s)"
   using objat unfolding exs_valid_def obj_at'_def
+  supply projectKOs[simp del]
   apply clarsimp
   apply (simp add: projectKO_def fail_def split: option.splits)
   apply (clarsimp simp: loadObject_default_def getObject_def in_monad return_def lookupAround2_char1
@@ -1441,9 +1435,9 @@ lemma cmap_relation_cong:
    apply (erule imageI)
    done
 
-lemma ctcb_relation_null_queue_ptrs:
+lemma ctcb_relation_null_ep_ptrs:
   assumes rel: "cmap_relation mp mp' tcb_ptr_to_ctcb_ptr ctcb_relation"
-  and same: "map_option tcb_null_queue_ptrs \<circ> mp'' = map_option tcb_null_queue_ptrs \<circ> mp'"
+  and same: "map_option tcb_null_ep_ptrs \<circ> mp'' = map_option tcb_null_ep_ptrs \<circ> mp'"
   shows "cmap_relation mp mp'' tcb_ptr_to_ctcb_ptr ctcb_relation"
   using rel
   apply (rule iffD1 [OF cmap_relation_cong, OF _ map_option_eq_dom_eq, rotated -1])
@@ -1451,7 +1445,7 @@ lemma ctcb_relation_null_queue_ptrs:
    apply (rule same [symmetric])
   apply (drule compD [OF same])
   apply (case_tac b, case_tac b')
-  apply (simp add: ctcb_relation_def tcb_null_queue_ptrs_def)
+  apply (simp add: ctcb_relation_def tcb_null_ep_ptrs_def)
   done
 
 (* Levity: added (20090419 09:44:27) *)
@@ -1464,7 +1458,7 @@ lemma ntfnQueue_tail_mask_4 [simp]:
 
 lemma map_to_ctes_upd_tcb_no_ctes:
   "\<lbrakk>ko_at' tcb thread s ; \<forall>x\<in>ran tcb_cte_cases. (\<lambda>(getF, setF). getF tcb' = getF tcb) x \<rbrakk>
-  \<Longrightarrow> map_to_ctes (ksPSpace s(thread \<mapsto> KOTCB tcb')) = map_to_ctes (ksPSpace s)"
+  \<Longrightarrow> map_to_ctes ((ksPSpace s)(thread \<mapsto> KOTCB tcb')) = map_to_ctes (ksPSpace s)"
   apply (erule obj_atE')
   apply (simp add: projectKOs objBits_simps)
   apply (subst map_to_ctes_upd_tcb')
@@ -1478,14 +1472,14 @@ lemma map_to_ctes_upd_tcb_no_ctes:
 lemma update_ntfn_map_tos:
   fixes P :: "Structures_H.notification \<Rightarrow> bool"
   assumes at: "obj_at' P p s"
-  shows   "map_to_eps (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_eps (ksPSpace s)"
-  and     "map_to_tcbs (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_tcbs (ksPSpace s)"
-  and     "map_to_ctes (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_ctes (ksPSpace s)"
-  and     "map_to_pdes (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_pdes (ksPSpace s)"
-  and     "map_to_ptes (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_ptes (ksPSpace s)"
-  and     "map_to_asidpools (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_asidpools (ksPSpace s)"
-  and     "map_to_user_data (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_user_data (ksPSpace s)"
-  and     "map_to_user_data_device (ksPSpace s(p \<mapsto> KONotification ko)) = map_to_user_data_device (ksPSpace s)"
+  shows   "map_to_eps ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_eps (ksPSpace s)"
+  and     "map_to_tcbs ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_tcbs (ksPSpace s)"
+  and     "map_to_ctes ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_ctes (ksPSpace s)"
+  and     "map_to_pdes ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_pdes (ksPSpace s)"
+  and     "map_to_ptes ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_ptes (ksPSpace s)"
+  and     "map_to_asidpools ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_asidpools (ksPSpace s)"
+  and     "map_to_user_data ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_user_data (ksPSpace s)"
+  and     "map_to_user_data_device ((ksPSpace s)(p \<mapsto> KONotification ko)) = map_to_user_data_device (ksPSpace s)"
   using at
   by (auto elim!: obj_atE' intro!: map_to_ctes_upd_other map_comp_eqI
     simp: projectKOs projectKO_opts_defs split: kernel_object.splits if_split_asm)+
@@ -1493,14 +1487,14 @@ lemma update_ntfn_map_tos:
 lemma update_ep_map_tos:
   fixes P :: "endpoint \<Rightarrow> bool"
   assumes at: "obj_at' P p s"
-  shows   "map_to_ntfns (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_ntfns (ksPSpace s)"
-  and     "map_to_tcbs (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_tcbs (ksPSpace s)"
-  and     "map_to_ctes (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_ctes (ksPSpace s)"
-  and     "map_to_pdes (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_pdes (ksPSpace s)"
-  and     "map_to_ptes (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_ptes (ksPSpace s)"
-  and     "map_to_asidpools (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_asidpools (ksPSpace s)"
-  and     "map_to_user_data (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_user_data (ksPSpace s)"
-  and     "map_to_user_data_device (ksPSpace s(p \<mapsto> KOEndpoint ko)) = map_to_user_data_device (ksPSpace s)"
+  shows   "map_to_ntfns ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_ntfns (ksPSpace s)"
+  and     "map_to_tcbs ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_tcbs (ksPSpace s)"
+  and     "map_to_ctes ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_ctes (ksPSpace s)"
+  and     "map_to_pdes ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_pdes (ksPSpace s)"
+  and     "map_to_ptes ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_ptes (ksPSpace s)"
+  and     "map_to_asidpools ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_asidpools (ksPSpace s)"
+  and     "map_to_user_data ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_user_data (ksPSpace s)"
+  and     "map_to_user_data_device ((ksPSpace s)(p \<mapsto> KOEndpoint ko)) = map_to_user_data_device (ksPSpace s)"
   using at
   by (auto elim!: obj_atE' intro!: map_to_ctes_upd_other map_comp_eqI
     simp: projectKOs projectKO_opts_defs split: kernel_object.splits if_split_asm)+
@@ -1508,13 +1502,13 @@ lemma update_ep_map_tos:
 lemma update_tcb_map_tos:
   fixes P :: "tcb \<Rightarrow> bool"
   assumes at: "obj_at' P p s"
-  shows   "map_to_eps (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_eps (ksPSpace s)"
-  and     "map_to_ntfns (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_ntfns (ksPSpace s)"
-  and     "map_to_pdes (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_pdes (ksPSpace s)"
-  and     "map_to_ptes (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_ptes (ksPSpace s)"
-  and     "map_to_asidpools (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_asidpools (ksPSpace s)"
-  and     "map_to_user_data (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_user_data (ksPSpace s)"
-  and     "map_to_user_data_device (ksPSpace s(p \<mapsto> KOTCB ko)) = map_to_user_data_device (ksPSpace s)"
+  shows   "map_to_eps ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_eps (ksPSpace s)"
+  and     "map_to_ntfns ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_ntfns (ksPSpace s)"
+  and     "map_to_pdes ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_pdes (ksPSpace s)"
+  and     "map_to_ptes ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_ptes (ksPSpace s)"
+  and     "map_to_asidpools ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_asidpools (ksPSpace s)"
+  and     "map_to_user_data ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_user_data (ksPSpace s)"
+  and     "map_to_user_data_device ((ksPSpace s)(p \<mapsto> KOTCB ko)) = map_to_user_data_device (ksPSpace s)"
   using at
   by (auto elim!: obj_atE' intro!: map_to_ctes_upd_other map_comp_eqI
     simp: projectKOs projectKO_opts_defs split: kernel_object.splits if_split_asm)+
@@ -1522,14 +1516,14 @@ lemma update_tcb_map_tos:
 lemma update_asidpool_map_tos:
   fixes P :: "asidpool \<Rightarrow> bool"
   assumes at: "obj_at' P p s"
-  shows   "map_to_ntfns (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_ntfns (ksPSpace s)"
-  and     "map_to_tcbs (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_tcbs (ksPSpace s)"
-  and     "map_to_ctes (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_ctes (ksPSpace s)"
-  and     "map_to_pdes (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_pdes (ksPSpace s)"
-  and     "map_to_ptes (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_ptes (ksPSpace s)"
-  and     "map_to_eps  (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_eps (ksPSpace s)"
-  and     "map_to_user_data (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_user_data (ksPSpace s)"
-  and     "map_to_user_data_device (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_user_data_device (ksPSpace s)"
+  shows   "map_to_ntfns ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_ntfns (ksPSpace s)"
+  and     "map_to_tcbs ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_tcbs (ksPSpace s)"
+  and     "map_to_ctes ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_ctes (ksPSpace s)"
+  and     "map_to_pdes ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_pdes (ksPSpace s)"
+  and     "map_to_ptes ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_ptes (ksPSpace s)"
+  and     "map_to_eps  ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_eps (ksPSpace s)"
+  and     "map_to_user_data ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_user_data (ksPSpace s)"
+  and     "map_to_user_data_device ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap))) = map_to_user_data_device (ksPSpace s)"
 
   using at
   by (auto elim!: obj_atE' intro!: map_to_ctes_upd_other map_comp_eqI
@@ -1538,26 +1532,26 @@ lemma update_asidpool_map_tos:
             arch_kernel_object.split_asm)
 
 lemma update_asidpool_map_to_asidpools:
-  "map_to_asidpools (ksPSpace s(p \<mapsto> KOArch (KOASIDPool ap)))
+  "map_to_asidpools ((ksPSpace s)(p \<mapsto> KOArch (KOASIDPool ap)))
              = (map_to_asidpools (ksPSpace s))(p \<mapsto> ap)"
   by (rule ext, clarsimp simp: projectKOs map_comp_def split: if_split)
 
 lemma update_pte_map_to_ptes:
-  "map_to_ptes (ksPSpace s(p \<mapsto> KOArch (KOPTE pte)))
+  "map_to_ptes ((ksPSpace s)(p \<mapsto> KOArch (KOPTE pte)))
              = (map_to_ptes (ksPSpace s))(p \<mapsto> pte)"
   by (rule ext, clarsimp simp: projectKOs map_comp_def split: if_split)
 
 lemma update_pte_map_tos:
   fixes P :: "pte \<Rightarrow> bool"
   assumes at: "obj_at' P p s"
-  shows   "map_to_ntfns (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_ntfns (ksPSpace s)"
-  and     "map_to_tcbs (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_tcbs (ksPSpace s)"
-  and     "map_to_ctes (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_ctes (ksPSpace s)"
-  and     "map_to_pdes (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_pdes (ksPSpace s)"
-  and     "map_to_eps  (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_eps (ksPSpace s)"
-  and     "map_to_asidpools (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_asidpools (ksPSpace s)"
-  and     "map_to_user_data (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_user_data (ksPSpace s)"
-  and     "map_to_user_data_device (ksPSpace s(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_user_data_device (ksPSpace s)"
+  shows   "map_to_ntfns ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_ntfns (ksPSpace s)"
+  and     "map_to_tcbs ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_tcbs (ksPSpace s)"
+  and     "map_to_ctes ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_ctes (ksPSpace s)"
+  and     "map_to_pdes ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_pdes (ksPSpace s)"
+  and     "map_to_eps  ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_eps (ksPSpace s)"
+  and     "map_to_asidpools ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_asidpools (ksPSpace s)"
+  and     "map_to_user_data ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_user_data (ksPSpace s)"
+  and     "map_to_user_data_device ((ksPSpace s)(p \<mapsto> (KOArch (KOPTE pte)))) = map_to_user_data_device (ksPSpace s)"
   using at
   by (auto elim!: obj_atE' intro!: map_comp_eqI map_to_ctes_upd_other
            split: if_split_asm if_split
@@ -1565,21 +1559,21 @@ lemma update_pte_map_tos:
        auto simp: projectKO_opts_defs)
 
 lemma update_pde_map_to_pdes:
-  "map_to_pdes (ksPSpace s(p \<mapsto> KOArch (KOPDE pde)))
+  "map_to_pdes ((ksPSpace s)(p \<mapsto> KOArch (KOPDE pde)))
              = (map_to_pdes (ksPSpace s))(p \<mapsto> pde)"
   by (rule ext, clarsimp simp: projectKOs map_comp_def split: if_split)
 
 lemma update_pde_map_tos:
   fixes P :: "pde \<Rightarrow> bool"
   assumes at: "obj_at' P p s"
-  shows   "map_to_ntfns (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_ntfns (ksPSpace s)"
-  and     "map_to_tcbs (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_tcbs (ksPSpace s)"
-  and     "map_to_ctes (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_ctes (ksPSpace s)"
-  and     "map_to_ptes (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_ptes (ksPSpace s)"
-  and     "map_to_eps  (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_eps (ksPSpace s)"
-  and     "map_to_asidpools (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_asidpools (ksPSpace s)"
-  and     "map_to_user_data (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_user_data (ksPSpace s)"
-  and     "map_to_user_data_device (ksPSpace s(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_user_data_device (ksPSpace s)"
+  shows   "map_to_ntfns ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_ntfns (ksPSpace s)"
+  and     "map_to_tcbs ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_tcbs (ksPSpace s)"
+  and     "map_to_ctes ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_ctes (ksPSpace s)"
+  and     "map_to_ptes ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_ptes (ksPSpace s)"
+  and     "map_to_eps  ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_eps (ksPSpace s)"
+  and     "map_to_asidpools ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_asidpools (ksPSpace s)"
+  and     "map_to_user_data ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_user_data (ksPSpace s)"
+  and     "map_to_user_data_device ((ksPSpace s)(p \<mapsto> (KOArch (KOPDE pde)))) = map_to_user_data_device (ksPSpace s)"
   using at
   by (auto elim!: obj_atE' intro!: map_comp_eqI map_to_ctes_upd_other
            split: if_split_asm if_split
@@ -1665,7 +1659,6 @@ where
   | "thread_state_to_tsType (Structures_H.BlockedOnReceive oref cg) = scast ThreadState_BlockedOnReceive"
   | "thread_state_to_tsType (Structures_H.BlockedOnSend oref badge cg cgr isc) = scast ThreadState_BlockedOnSend"
   | "thread_state_to_tsType (Structures_H.BlockedOnNotification oref) = scast ThreadState_BlockedOnNotification"
-
 
 lemma ctcb_relation_thread_state_to_tsType:
   "ctcb_relation tcb ctcb \<Longrightarrow> tsType_CL (thread_state_lift (tcbState_C ctcb)) = thread_state_to_tsType (tcbState tcb)"
@@ -1934,9 +1927,9 @@ lemma memory_cross_over:
   apply (cut_tac p=ptr in unat_mask_2_less_4)
   apply (subgoal_tac "(ptr && ~~ mask 2) + (ptr && mask 2) = ptr")
    apply (subgoal_tac "!n x. n < 4 \<longrightarrow> (unat (x::word32) = n) = (x = of_nat n)")
-    apply (auto simp add: eval_nat_numeral unat_eq_0 add.commute
-                elim!: less_SucE)[1]
-    apply (clarsimp simp add: unat32_eq_of_nat word_bits_def)
+    apply (clarsimp simp: eval_nat_numeral)
+    apply (fastforce simp: add.commute elim!: less_SucE)
+   apply (clarsimp simp: unat32_eq_of_nat word_bits_def)
   apply (simp add: add.commute word_plus_and_or_coroll2)
   done
 
@@ -1947,13 +1940,11 @@ lemma cap_get_tag_isCap_ArchObject0:
   \<and> (cap_get_tag cap' = scast cap_page_table_cap) = isPageTableCap cap
   \<and> (cap_get_tag cap' = scast cap_page_directory_cap) = isPageDirectoryCap cap
   \<and> (cap_get_tag cap' = scast cap_small_frame_cap) = (isPageCap cap \<and> capVPSize cap = ARMSmallPage)
-  \<and> (cap_get_tag cap' = scast cap_frame_cap) = (isPageCap cap \<and> capVPSize cap \<noteq> ARMSmallPage)"
-  using cr
-  apply -
-  apply (erule ccap_relationE)
+  \<and> (cap_get_tag cap' = scast cap_frame_cap) = (isPageCap cap \<and> capVPSize cap \<noteq> ARMSmallPage)
+  \<and> (cap_get_tag cap' = scast cap_sgi_signal_cap) = isSGISignalCap cap"
+  apply (rule ccap_relationE[OF cr])
   apply (simp add: cap_to_H_def cap_lift_def Let_def isArchCap_def)
-  apply (clarsimp simp: isCap_simps cap_tag_defs word_le_nat_alt pageSize_def Let_def split: if_split_asm) \<comment> \<open>takes a while\<close>
-  done
+  by (clarsimp simp: isCap_simps cap_tag_defs word_le_nat_alt pageSize_def Let_def split: if_split_asm) \<comment> \<open>takes a while\<close>
 
 lemma cap_get_tag_isCap_ArchObject:
   assumes cr: "ccap_relation (capability.ArchObjectCap cap) cap'"
@@ -1963,6 +1954,7 @@ lemma cap_get_tag_isCap_ArchObject:
   and "(cap_get_tag cap' = scast cap_page_directory_cap) = isPageDirectoryCap cap"
   and "(cap_get_tag cap' = scast cap_small_frame_cap) = (isPageCap cap \<and> capVPSize cap = ARMSmallPage)"
   and "(cap_get_tag cap' = scast cap_frame_cap) = (isPageCap cap \<and> capVPSize cap \<noteq> ARMSmallPage)"
+  and "(cap_get_tag cap' = scast cap_sgi_signal_cap) = isSGISignalCap cap"
   using cap_get_tag_isCap_ArchObject0 [OF cr] by auto
 
 
@@ -1988,10 +1980,17 @@ lemma cap_get_tag_isCap_unfolded_H_cap:
   and "\<lbrakk>ccap_relation (capability.ArchObjectCap (arch_capability.PageCap v102 v38 v39 v40 v41)) cap'; v40\<noteq>ARMSmallPage\<rbrakk>  \<Longrightarrow> (cap_get_tag cap' = scast cap_frame_cap)"
   and "ccap_relation (capability.ArchObjectCap (arch_capability.PageDirectoryCap v42 v43)) cap' \<Longrightarrow> (cap_get_tag cap' = scast cap_page_directory_cap)"
   and "ccap_relation (capability.ArchObjectCap (arch_capability.PageDirectoryCap v44 v45)) cap' \<Longrightarrow> (cap_get_tag cap' = scast cap_page_directory_cap)"
+  and "\<And>irq target. ccap_relation (ArchObjectCap (SGISignalCap irq target)) cap' \<Longrightarrow> (cap_get_tag cap' = scast cap_sgi_signal_cap)"
   apply (simp add: cap_get_tag_isCap cap_get_tag_isCap_ArchObject isCap_simps)
   apply (frule cap_get_tag_isCap(2), simp)
   apply (simp add: cap_get_tag_isCap cap_get_tag_isCap_ArchObject isCap_simps pageSize_def)+
-done
+  done
+
+lemma cap_get_tag_isCap_unfolded_H_cap_page:
+  " \<lbrakk>ccap_relation (ArchObjectCap (PageCap v101 v34 v35 v36 v37)) cap'\<rbrakk>
+  \<Longrightarrow> cap_get_tag cap' = scast (if v36 = ARMSmallPage then cap_small_frame_cap else cap_frame_cap)"
+  by (erule ccap_relationE)
+     (clarsimp simp: cap_to_H_def cap_lift_def Let_def framesize_to_H_def split: if_splits)
 
 lemma cap_get_tag_isCap_ArchObject2_worker:
   "\<lbrakk> \<And>cap''. ccap_relation (ArchObjectCap cap'') cap' \<Longrightarrow> (cap_get_tag cap' = n) = P cap'';
@@ -2015,6 +2014,8 @@ lemma cap_get_tag_isCap_ArchObject2:
            = (isArchObjectCap cap \<and> isPageCap (capCap cap) \<and> capVPSize (capCap cap) = ARMSmallPage)"
   and   "(cap_get_tag cap' = scast cap_frame_cap)
            = (isArchObjectCap cap \<and> isPageCap (capCap cap) \<and> capVPSize (capCap cap) \<noteq> ARMSmallPage)"
+  and   "(cap_get_tag cap' = scast cap_sgi_signal_cap)
+           = (isArchObjectCap cap \<and> isSGISignalCap (capCap cap))"
   by (rule cap_get_tag_isCap_ArchObject2_worker [OF _ cr],
       simp add: cap_get_tag_isCap_ArchObject,
       simp add: isArchCap_tag_def2 cap_tag_defs)+
@@ -2042,11 +2043,10 @@ lemma gs_set_assn_Delete_cstate_relation:
   "cstate_relation s (ghost'state_'_update (gs_set_assn cteDeleteOne_'proc v) gs)
     = cstate_relation s gs"
   apply (cases "ghost'state_' gs")
-  apply (auto simp: rf_sr_def cstate_relation_def Let_def carch_state_relation_def
-                    cmachine_state_relation_def ghost_assertion_data_set_def
-                    ghost_size_rel_def ghost_assertion_data_get_def
-                    cteDeleteOne_'proc_def cap_get_capSizeBits_'proc_def)
-  done
+  by (auto simp: rf_sr_def cstate_relation_def Let_def carch_state_relation_def
+                 cmachine_state_relation_def ghost_assertion_data_set_def
+                 ghost_size_rel_def ghost_assertion_data_get_def
+                 cteDeleteOne_'proc_def cap_get_capSizeBits_'proc_def)
 
 lemma ptr_val_tcb_ptr_mask:
   "obj_at' (P :: tcb \<Rightarrow> bool) thread s
@@ -2179,11 +2179,57 @@ lemma invs_urz[elim!]:
   "invs' s \<Longrightarrow> untyped_ranges_zero' s"
   by (clarsimp simp: invs'_def valid_state'_def)
 
+lemma rf_sr_ctcb_queue_relation:
+  "\<lbrakk> (s, s') \<in> rf_sr; d \<le> maxDomain; p \<le> maxPriority \<rbrakk>
+  \<Longrightarrow> ctcb_queue_relation (ksReadyQueues s (d, p))
+                          (index (ksReadyQueues_' (globals s')) (cready_queues_index_to_C d p))"
+  unfolding rf_sr_def cstate_relation_def cready_queues_relation_def
+  apply (clarsimp simp: Let_def seL4_MinPrio_def minDom_def maxDom_to_H maxPrio_to_H)
+  done
+
 lemma rf_sr_sched_action_relation:
   "(s, s') \<in> rf_sr
    \<Longrightarrow> cscheduler_action_relation (ksSchedulerAction s) (ksSchedulerAction_' (globals s'))"
   by (clarsimp simp: rf_sr_def cstate_relation_def Let_def)
 
-end
-end
+lemma numDomains_sge_1_simp:
+  "1 <s Kernel_C.numDomains \<longleftrightarrow> Suc 0 < Kernel_Config.numDomains"
+  apply (simp add: word_sless_alt sint_numDomains_to_H)
+  done
 
+lemma unat_scast_numDomains:
+  "unat (SCAST(32 signed \<rightarrow> machine_word_len) Kernel_C.numDomains) = unat Kernel_C.numDomains"
+  by (simp add: scast_eq sint_numDomains_to_H unat_numDomains_to_H numDomains_machine_word_safe)
+
+lemma dom_schedule_entry_relation_domainEndMarker:
+  "dom_schedule_entry_relation h_entry c_entry \<Longrightarrow> (h_entry = domainEndMarker) = (c_entry = 0)"
+  unfolding dom_schedule_entry_relation_def domainEndMarker_def
+  apply (rule iffI; clarsimp)
+   apply word_eqI
+   apply (erule allE, erule (1) impE)
+   apply (erule disjE, simp)
+   apply (erule_tac x="n - LENGTH(domain_duration_len)" in allE)
+   apply simp
+  apply (cases h_entry)
+  apply (simp add: ucast_0_eq mask_def)
+  done
+
+lemma msgRegisters_size_sanity:
+  "size_msgRegisters = unat (n_msgRegisters)"
+  by (simp add: n_msgRegisters_def size_msgRegisters_def)
+
+(* link up Kernel_Config loaded from the seL4 build system with physBase in C code *)
+lemma physBase_spec:
+  "\<forall>s. \<Gamma>\<turnstile> {s} Call physBase_'proc {t. ret__unsigned_long_' t = Kernel_Config.physBase }"
+  apply (rule allI, rule conseqPre, vcg)
+  apply (simp add: Kernel_Config.physBase_def)
+  done
+
+lemma rf_sr_obj_update_helper:
+  "(s, s'\<lparr> globals := globals s' \<lparr> t_hrs_' := t_hrs_' (globals (undefined
+              \<lparr> globals := (undefined \<lparr> t_hrs_' := f (globals s') (t_hrs_' (globals s')) \<rparr>)\<rparr>))\<rparr>\<rparr>) \<in> rf_sr
+          \<Longrightarrow> (s, globals_update (\<lambda>v. t_hrs_'_update (f v) v) s') \<in> rf_sr"
+  by (simp cong: StateSpace.state.fold_congs globals.fold_congs)
+
+end
+end

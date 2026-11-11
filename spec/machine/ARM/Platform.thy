@@ -7,52 +7,126 @@
 chapter "Platform Definitions"
 
 theory Platform
-imports
-  "Lib.Defs"
-  "Lib.Lib"
-  "Word_Lib.WordSetup"
-  Setup_Locale
+  imports
+    Lib.Defs
+    Lib.Lib
+    Word_Lib.WordSetup
+    Setup_Locale
+    Kernel_Config
 begin
-
-context Arch begin global_naming ARM
 
 text \<open>
   This theory lists platform-specific types and basic constants, in particular
   the types of interrupts and physical addresses, constants for the
   kernel location, the offsets between physical and virtual kernel
-  addresses, as well as the range of IRQs on the platform.
-\<close>
+  addresses, as well as the range of IRQs on the platform.\<close>
 
-type_synonym irq = "10 word"
-type_synonym paddr = word32
+section \<open>ABI Setup\<close>
 
-abbreviation (input) "toPAddr \<equiv> id"
-abbreviation (input) "fromPAddr \<equiv> id"
+(* representation of C int literals, the default for any unadorned numeral *)
+type_synonym int_literal_len = "32 signed"
+type_synonym int_word = "int_literal_len word"
 
-definition pageColourBits :: nat where
-  "pageColourBits \<equiv> 2"
+section \<open>Platform Constants\<close>
+
+context Arch begin global_naming ARM
+
+(* General interrupts *)
+value_type irq_len = Kernel_Config.irqBits (* IRQ_CNODE_SLOT_BITS *)
+type_synonym irq = "irq_len word"
+
+(* maxIRQ is defined via Kernel_Config on this architecture *)
+definition maxIRQ :: "'a::numeral" where
+  "maxIRQ \<equiv> Kernel_Config.maxIRQ"
+
+(* List of supported Arm platforms that support GICv3 or GICv2 *)
+definition isGICPlatform :: bool where
+  "isGICPlatform \<equiv> \<not>(config_PLAT_OMAP3 \<or> config_PLAT_AM335X \<or> config_PLAT_BCM2837)"
+
+lemmas Kernel_Config_isGICPlatform_def =
+  isGICPlatform_def
+  Kernel_Config.config_PLAT_OMAP3_def
+  Kernel_Config.config_PLAT_AM335X_def
+  Kernel_Config.config_PLAT_BCM2837_def
+
+(* Software-generated interrupts *)
+definition numSGIs_bits :: nat where
+  "numSGIs_bits = 4"
+
+definition numSGIs :: nat where
+  "numSGIs \<equiv> if isGICPlatform then 2^numSGIs_bits else 0"
+
+definition gicNumTargets_bits :: nat where
+  "gicNumTargets_bits \<equiv> if Kernel_Config.config_ARM_GIC_V3 then 32 else 3"
+
+definition gicNumTargets :: nat where
+  "gicNumTargets \<equiv> if isGICPlatform then 2^gicNumTargets_bits else 0"
+
+(* Platforms that have a setTrigger IRQ function. These are currently all
+   platforms that support the Arm GIC. *)
+definition haveSetTrigger :: bool where
+  "haveSetTrigger \<equiv> isGICPlatform"
+
+lemmas Kernel_Config_haveSetTrigger_def =
+  haveSetTrigger_def
+  Kernel_Config_isGICPlatform_def
+
+end
+
+(* Need to declare code equation outside Arch locale. Used in value_type below. *)
+lemmas [code] = ARM.numSGIs_bits_def ARM.gicNumTargets_bits_def
+
+context Arch begin global_naming ARM
+
+value_type sgi_irq_len = numSGIs_bits
+type_synonym sgi_irq = "sgi_irq_len word"
+
+value_type sgi_target_len = gicNumTargets_bits
+type_synonym sgi_target = "sgi_target_len word"
+
+(* Physical addresses *)
+type_synonym paddr = machine_word
+abbreviation (input) toPAddr :: "machine_word \<Rightarrow> paddr" where
+  "toPAddr \<equiv> id"
+
+abbreviation (input) fromPAddr :: "paddr \<Rightarrow> machine_word" where
+  "fromPAddr \<equiv> id"
 
 definition cacheLineBits :: nat where
-  "cacheLineBits = 5"
+  "cacheLineBits = CONFIG_L1_CACHE_LINE_SIZE_BITS"
 
 definition cacheLine :: nat where
   "cacheLine = 2^cacheLineBits"
 
-(* Arch specific kernel base address used for haskell spec *)
-definition pptrBase :: word32 where
-  "pptrBase \<equiv> 0xe0000000"
+(* The first virtual address of the kernel's physical memory window.
+   Coincides with seL4_UserTop and USER_TOP in C for AArch32.
 
-definition physBase :: word32 where
-  "physBase \<equiv> 0x10000000"
+   The definition below singles out the omap3 platform, because it is the only AArch32
+   platform that does not put seL4_UserTop at 0xe0000000. The macro definition in C is
+   hard to get at for the kernel config generation script and the definition here is
+   comparatively straightforward. *)
+definition pptrBase :: word32 where
+  "pptrBase \<equiv> if config_PLAT_OMAP3 then 0xf0000000 else 0xe0000000"
+
+schematic_goal pptrBase_val:
+  "pptrBase = numeral ?n"
+  by (simp add: pptrBase_def Kernel_Config.config_PLAT_OMAP3_def del: word_eq_numeral_iff_iszero)
+
+lemma pptrBase_top_neq_0: (* 20 = size of ARMSectionBits *)
+  "pptrBase >> 20 \<noteq> 0"
+  by (simp add: pptrBase_def)
+
+abbreviation (input) paddrBase :: machine_word where
+  "paddrBase \<equiv> physBase"
 
 definition pptrBaseOffset :: word32 where
-  "pptrBaseOffset \<equiv> pptrBase - physBase"
-
-definition kernelELFBase :: word32 where
-  "kernelELFBase \<equiv> pptrBase + (physBase && mask 22)"
+  "pptrBaseOffset \<equiv> pptrBase - paddrBase"
 
 definition kernelELFPAddrBase :: word32 where
-  "kernelELFPAddrBase \<equiv> 0x10000000"
+  "kernelELFPAddrBase \<equiv> physBase"
+
+definition kernelELFBase :: word32 where
+  "kernelELFBase \<equiv> pptrBase + (kernelELFPAddrBase && mask 22)"
 
 definition kernelELFBaseOffset :: word32 where
   "kernelELFBaseOffset \<equiv> kernelELFBase - kernelELFPAddrBase"
@@ -69,9 +143,10 @@ definition addrFromKPPtr :: "word32 \<Rightarrow> paddr" where
 definition minIRQ :: "irq" where
   "minIRQ \<equiv> 0"
 
-definition maxIRQ :: "irq" where
-  "maxIRQ \<equiv> 0x9F"
-
 end
+
+(* we want to use the Platform constant in the global context instead of the arch-specific one from
+   Kernel_Config *)
+arch_requalify_consts (aliasing) maxIRQ
 
 end

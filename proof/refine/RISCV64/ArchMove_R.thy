@@ -15,17 +15,11 @@ begin
 lemmas cte_index_repair = mult.commute[where a="(2::'a::len word) ^ cte_level_bits"]
 lemmas cte_index_repair_sym = cte_index_repair[symmetric]
 
-lemma invs_valid_ioc[elim!]: "invs s \<Longrightarrow> valid_ioc s"
-  by (clarsimp simp add: invs_def valid_state_def)
-
-context begin interpretation Arch .
+context Arch begin arch_global_naming
 
 (* Move to Arch_Structs_A *)
 definition ppn_len :: nat where
   "ppn_len \<equiv> LENGTH(pte_ppn_len)"
-
-(* Move to Deterministic_AI *)
-crunch valid_etcbs[wp]: copy_global_mappings valid_etcbs (wp: mapM_x_wp')
 
 lemma get_pt_mapM_x_lower:
   assumes g: "\<And>P pt x. \<lbrace> \<lambda>s. P (kheap s pt_ptr) \<rbrace> g pt x \<lbrace> \<lambda>_ s. P (kheap s pt_ptr) \<rbrace>"

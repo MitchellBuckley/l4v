@@ -70,14 +70,17 @@ fun term_search_bf_first pred prune term = let
 in !r end
 
 (* From Pure/Tools/find_theorems.ML, because Florian made it private *)
-fun matches_subterm thy (pat, obj) =
+fun matches_subterm ctxt (pat, obj) =
   let
-    fun msub bounds obj = Pattern.matches thy (pat, obj) orelse
+    val thy = Proof_Context.theory_of ctxt;
+    fun matches obj ctxt' = Pattern.matches thy (pat, obj) orelse
       (case obj of
-        Abs (_, T, t) => msub (bounds + 1) (snd (Term.dest_abs (Name.bound bounds, T, t)))
-      | t $ u => msub bounds t orelse msub bounds u
-      | _ => false)
-  in msub 0 obj end;
+        Abs (_, _, _) =>
+          let val ((_, t'), ctxt'') = Variable.dest_abs obj ctxt'
+          in matches t' ctxt'' end
+      | t $ u => matches t ctxt' orelse matches u ctxt'
+      | _ => false);
+  in matches obj ctxt end;
 
 fun grep_term ctxt pattern =
 let
@@ -85,7 +88,7 @@ let
 in
   term_search_bf_first
       (fn term => Pattern.matches thy (pattern, term))
-      (fn term => not (matches_subterm thy (pattern, term)))
+      (fn term => not (matches_subterm ctxt (pattern, term)))
 end
 
 (* Check whether the term is in L2_monad notation. *)
@@ -106,7 +109,7 @@ fun monad_rewrite (lthy : Proof.context) (mt : Monad_Types.monad_type)
                   (more_facts : thm list) (forward : bool)
                   (term : term) : thm option =
 let
-  val lthy = Utils.set_hidden_ctxt lthy
+  val lthy = Context_Position.set_visible false lthy
   val rules = Monad_Types.monad_type_rules mt
   val rules' = if forward then #lift_rules rules else #unlift_rules rules
   val cterm = Thm.cterm_of lthy term
@@ -134,7 +137,7 @@ in
 fun polish ctxt (mt : Monad_Types.monad_type) do_opt thm =
 let
   (* Apply any polishing rules. *)
-  val ctxt = Utils.set_hidden_ctxt ctxt
+  val ctxt = Context_Position.set_visible false ctxt
   val simps = if do_opt then Utils.get_rules ctxt @{named_theorems polish} else []
 
   (* Simplify using polish rules. *)
@@ -222,7 +225,7 @@ fun monad_convert_tac (ctxt : Proof.context) (monad_name : string) (do_opt : boo
 val _ = Context.>> (Context.map_theory
           (Method.setup (Binding.name "monad_convert")
             (* Based on subgoal_tac parser *)
-            (Args.goal_spec -- Scan.lift (Parse.name -- Args.embedded_inner_syntax) >>
+            (Args.goal_spec -- Scan.lift (Parse.name -- Parse.embedded_inner_syntax) >>
             (fn (quant, (monad_name, term_str)) => fn ctxt =>
                 SIMPLE_METHOD'' quant (handle_invalid_subgoals (
                     monad_convert_tac ctxt monad_name true term_str))))

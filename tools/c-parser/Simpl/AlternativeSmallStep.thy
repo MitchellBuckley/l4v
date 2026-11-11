@@ -1,29 +1,8 @@
 (*
     Author:      Norbert Schirmer
     Maintainer:  Norbert Schirmer, norbert.schirmer at web de
-    License:     LGPL
-*)
-
-(*  Title:      AlternativeSmallStep.thy
-    Author:     Norbert Schirmer, TU Muenchen
 
 Copyright (C) 2006-2008 Norbert Schirmer
-Some rights reserved, TU Muenchen
-
-This library is free software; you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as
-published by the Free Software Foundation; either version 2.1 of the
-License, or (at your option) any later version.
-
-This library is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
-Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public
-License along with this library; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
-USA
 *)
 
 section  \<open>Alternative Small Step Semantics\<close>
@@ -33,7 +12,7 @@ begin
 
 
 text \<open>
-This is the small-step semantics, which is described and used in my PhD-thesis \cite{Schirmer-PhD}.
+This is the small-step semantics, which is described and used in my PhD-thesis \<^cite>\<open>"Schirmer-PhD"\<close>.
 It decomposes the statement into a list of statements and finally executes the head.
 So the redex is always the head of the list. The equivalence between termination
 (based on the big-step semantics) and the absence of infinite computations in
@@ -55,7 +34,7 @@ type_synonym ('s,'p,'f) config =
 
 
 inductive "step"::"[('s,'p,'f) body,('s,'p,'f) config,('s,'p,'f) config] \<Rightarrow> bool"
-                                ("_\<turnstile> (_ \<rightarrow>/ _)" [81,81,81] 100)
+                                (\<open>_\<turnstile> (_ \<rightarrow>/ _)\<close> [81,81,81] 100)
   for \<Gamma>::"('s,'p,'f) body"
 where
   Skip: "\<Gamma>\<turnstile>(Skip#cs,css,Normal s) \<rightarrow> (cs,css,Normal s)"
@@ -152,14 +131,14 @@ inductive_cases step_Normal_elim_cases [cases set]:
 
 abbreviation
  "step_rtrancl" :: "[('s,'p,'f) body,('s,'p,'f) config,('s,'p,'f) config] \<Rightarrow> bool"
-                                ("_\<turnstile> (_ \<rightarrow>\<^sup>*/ _)" [81,81,81] 100)
+                                (\<open>_\<turnstile> (_ \<rightarrow>\<^sup>*/ _)\<close> [81,81,81] 100)
   where
   "\<Gamma>\<turnstile>cs0 \<rightarrow>\<^sup>* cs1     == (step \<Gamma>)\<^sup>*\<^sup>* cs0 cs1"
 
 abbreviation
 
  "step_trancl" :: "[('s,'p,'f) body,('s,'p,'f) config,('s,'p,'f) config] \<Rightarrow> bool"
-                                ("_\<turnstile> (_ \<rightarrow>\<^sup>+/ _)" [81,81,81] 100)
+                                (\<open>_\<turnstile> (_ \<rightarrow>\<^sup>+/ _)\<close> [81,81,81] 100)
   where
   "\<Gamma>\<turnstile>cs0 \<rightarrow>\<^sup>+ cs1     == (step \<Gamma>)\<^sup>+\<^sup>+ cs0 cs1"
 
@@ -523,7 +502,7 @@ qed
 inductive "execs"::"[('s,'p,'f) body,('s,'p,'f) com list,
                       ('s,'p,'f) continuation list,
                       ('s,'f) xstate,('s,'f) xstate] \<Rightarrow> bool"
-                   ("_\<turnstile> \<langle>_,_,_\<rangle> \<Rightarrow> _" [50,50,50,50,50] 50)
+                   (\<open>_\<turnstile> \<langle>_,_,_\<rangle> \<Rightarrow> _\<close> [50,50,50,50,50] 50)
   for \<Gamma>:: "('s,'p,'f) body"
 where
   Nil: "\<Gamma>\<turnstile>\<langle>[],[],s\<rangle> \<Rightarrow> s"
@@ -714,7 +693,7 @@ subsection \<open>Equivalence of Termination and Absence of Infinite Computation
 
 inductive "terminatess":: "[('s,'p,'f) body,('s,'p,'f) com list,
                             ('s,'p,'f) continuation list,('s,'f) xstate] \<Rightarrow> bool"
-                ("_\<turnstile>_,_ \<Down> _" [60,20,60] 89)
+                (\<open>_\<turnstile>_,_ \<Down> _\<close> [60,20,60] 89)
   for  \<Gamma>::"('s,'p,'f) body"
 where
    Nil: "\<Gamma>\<turnstile>[],[]\<Down>s"

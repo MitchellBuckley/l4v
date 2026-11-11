@@ -169,7 +169,7 @@ lemma Collect_asid_high__eval_helper:
    apply (subst arg_cong[where f="(<) _"])
     prefer 2
     apply (rule unat_lt2p)
-   apply (simp add: asid_high_bits_def)
+   apply (simp add: MiscMachine_A.asid_high_bits_def)
   apply (simp add: transform_asid_def asid_high_bits_of_def[abs_def])
   apply (rule set_eqI)
   apply (rule iffI)
@@ -177,41 +177,42 @@ lemma Collect_asid_high__eval_helper:
   apply (clarsimp simp: Collect_conj_eq image_iff)
   apply (rule_tac x="(of_nat asid_high << asid_low_bits) + 1" in bexI)
    apply (subst add.commute, subst shiftr_irrelevant)
-     apply (clarsimp simp: asid_low_bits_def asid_high_bits_def)
-    apply (clarsimp simp: is_aligned_shift)
-   apply (subst shiftl_shiftr_id)
-     apply (clarsimp simp: asid_low_bits_def asid_high_bits_def)
-    apply (clarsimp simp: asid_low_bits_def asid_high_bits_def word_of_nat_less)
+     apply (clarsimp simp: MiscMachine_A.asid_low_bits_def)
+    apply (clarsimp simp: is_aligned_shift MiscMachine_A.asid_low_bits_def)
+   apply (clarsimp simp: MiscMachine_A.asid_low_bits_def)
+   apply (subst shiftl_shiftr_id, simp)
+    apply (clarsimp simp: MiscMachine_A.asid_high_bits_def word_of_nat_less)
    apply (subst ucast_of_nat_small)
-    apply (clarsimp simp: asid_high_bits_def)
+    apply (clarsimp simp: MiscMachine_A.asid_high_bits_def)
    apply simp
   apply clarsimp
   apply (rule conjI)
    apply (clarsimp simp: unat_ucast_eq_unat_and_mask)
    apply (subst add.commute, subst shiftr_irrelevant)
-     apply (clarsimp simp: asid_low_bits_def asid_high_bits_def)
+     apply (clarsimp simp: MiscMachine_A.asid_low_bits_def MiscMachine_A.asid_high_bits_def)
     apply (clarsimp simp: is_aligned_shift)
    apply (subst shiftl_shiftr_id)
-     apply (clarsimp simp: asid_low_bits_def asid_high_bits_def)
-    apply (clarsimp simp: asid_low_bits_def asid_high_bits_def word_of_nat_less)
-   apply (fold asid_high_bits_def)
+     apply (clarsimp simp: MiscMachine_A.asid_low_bits_def)
+    apply (clarsimp simp: MiscMachine_A.asid_low_bits_def MiscMachine_A.asid_high_bits_def
+                          word_of_nat_less)
+   apply (fold asid_high_bits_def[simplified])
    apply (subst less_mask_eq)
-    apply (clarsimp simp: asid_high_bits_def word_of_nat_less)
+    apply (clarsimp simp: MiscMachine_A.asid_high_bits_def word_of_nat_less)
    apply (rule unat_of_nat_eq)
-   apply (clarsimp simp: asid_high_bits_def)
+   apply (clarsimp simp: MiscMachine_A.asid_high_bits_def)
   apply (rule less_is_non_zero_p1[where k="2^asid_high_bits << asid_low_bits"])
-  apply (simp only: shiftl_t2n)
+  apply (simp add: shiftl_t2n)
   apply (subst mult.commute, subst mult.commute, rule word_mult_less_mono1)
-    apply (clarsimp simp: asid_high_bits_def word_of_nat_less)
-   apply (clarsimp simp: asid_low_bits_def)
-  apply (clarsimp simp: asid_low_bits_def asid_high_bits_def)
+    apply (clarsimp simp: MiscMachine_A.asid_high_bits_def word_of_nat_less)
+   apply (clarsimp simp: MiscMachine_A.asid_low_bits_def)
+  apply (clarsimp simp: MiscMachine_A.asid_low_bits_def MiscMachine_A.asid_high_bits_def)
   done
 
 
 section \<open>Assorted helpers\<close>
 lemma fun_upds_to_map_of[THEN eq_reflection]:
   "Map.empty = map_of []"
-  "(map_of xs(k \<mapsto> v)) = map_of ((k, v) # xs)"
+  "((map_of xs)(k \<mapsto> v)) = map_of ((k, v) # xs)"
   by auto
 
 lemma subst_eqn_helper:
@@ -529,13 +530,15 @@ lemma bintrunc_1_1:
 lemmas word_rel_simps_small =
   order_refl (* shortcut *)
   rel_simps simp_thms
-  word_less_alt word_le_def word_uint_eq_iff uint_eq_0 uint_1
+  word_less_alt word_le_def word_uint_eq_iff uint_0_eq uint_1
   (* need bintrunc to reduce numerals mod word size *)
   uint_bintrunc bintrunc_numeral_simps bintrunc_1_1
-  numeral_One BIT_bin_simps BIT_special_simps
+  numeral_One
   (* evaluating word size for bintrunc -- yuck *)
   len_num0 len_num1 len_bit0 len_bit1
   arith_simps mult_1_right pred_numeral_simps numeral_plus_one
+  arith_special
+
 
 (* test for simpset *)
 ML \<open>
@@ -581,9 +584,10 @@ lemma pow_2_numeral:
 (* needed to evaluate "ptr + 2^sz" expressions *)
 lemmas word_pow_arith_simps =
   pow_2_numeral uint_word_arith_bintrs
-  uint_eq_0 uint_1 uint_bintrunc bintrunc_Sucs numeral_One
+  uint_0_eq uint_1 uint_bintrunc bintrunc_Suc_numeral numeral_One
   arith_simps arith_special
   nat_0 nat_one_as_int[symmetric] nat_numeral nat_numeral_diff_1 mult_1_right
+
 
 lemmas object_slots_eval_simps
          [simplified fun_upds_to_map_of] = (* NB: convert Map.empty for FP_Eval compatibility *)
@@ -591,8 +595,6 @@ lemmas object_slots_eval_simps
     cdl_asid_pool.simps
     cdl_cnode.simps
     cdl_irq_node.simps
-    cdl_page_table.simps
-    cdl_page_directory.simps
     cdl_tcb.simps
 
 (* Main simpset and congs *)
@@ -611,7 +613,7 @@ lemmas obj_policy_eval_simps =
 
         (* evaluating asid integrity *)
         cdl_cap_asid'.simps
-        is_null_cap_def cap_object_simps
+        is_null_cap_def cap_object_simps tcb_slot_defs
         image_empty
         semiring_1_class.of_nat_0 semiring_1_class.of_nat_1 semiring_1_class.of_nat_numeral
 

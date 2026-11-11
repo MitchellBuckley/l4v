@@ -14,20 +14,18 @@ imports
   Invocations_H
   InvocationLabels_H
   Config_H
-  MachineExports
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (H)
   minUntypedSizeBits
   maxUntypedSizeBits
-
-end
+  postResetUntyped
 
 consts
   cNodeOverlap :: "(machine_word \<Rightarrow> nat option) \<Rightarrow> (machine_word \<Rightarrow> bool) \<Rightarrow> bool"
 
-#INCLUDE_HASKELL SEL4/Object/Untyped.lhs NOT cNodeOverlap canonicalAddressAssert
+#INCLUDE_HASKELL SEL4/Object/Untyped.lhs decls_only ONLY archOverlap
+
+#INCLUDE_HASKELL SEL4/Object/Untyped.lhs Arch= NOT cNodeOverlap canonicalAddressAssert archOverlap
 
 end

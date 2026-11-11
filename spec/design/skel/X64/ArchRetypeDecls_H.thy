@@ -15,7 +15,7 @@ imports
   ArchObjInsts_H
 begin
 
-context Arch begin global_naming X64_H
+context Arch begin arch_global_naming (H)
 
 #INCLUDE_HASKELL SEL4/API/Invocation/X64.lhs CONTEXT X64_H decls_only NOT Invocation IRQControlInvocation
 
@@ -26,9 +26,6 @@ context Arch begin global_naming X64_H
 end (*context X64*)
 
 (* Defined differently and/or delayed on different architectures *)
-definition
-  canonicalAddressAssert :: "machine_word => bool" where
-  canonicalAddressAssert_def[simp]:
-  "canonicalAddressAssert p = True"
+consts canonicalAddressAssert :: "machine_word => bool"
 
 end

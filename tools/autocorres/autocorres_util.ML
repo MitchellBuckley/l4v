@@ -308,11 +308,11 @@ fun define_funcs
     val fn_bodies = map (snd #> #1) functions
     (* Generalise over the function arguments *)
     val fn_thms = map (snd #> (fn (_, thm, frees) =>
-                        (Thm.generalize ([], map fst frees) (Thm.maxidx_of thm + 1) thm)))
+                        (Thm.generalize (Names.empty, Names.make_set (map fst frees)) (Thm.maxidx_of thm + 1) thm)))
                       functions
 
     val _ = writeln ("Defining (" ^ FunctionInfo.string_of_phase phase ^ ") " ^
-                     (Utils.commas (map get_const_name fn_names)))
+                     (commas (map get_const_name fn_names)))
 
     (*
      * Determine if we are in a recursive case by checking to see if the
@@ -397,7 +397,7 @@ fun define_funcs
         (* Fetch parameters to this function. *)
         val free_params =
             get_fn_args fn_name
-            |> Variable.variant_frees ctxt' [measure_var]
+            |> Variable.variant_names (Variable.declare_names measure_var ctxt')
             |> map Free
       in
         (* Generate the prop. *)
@@ -428,7 +428,7 @@ fun define_funcs
      * all assumptions that our callees refine. *)
     val helper_thms =
         (map (Symtab.lookup callee_thms #> the) combined_normal_calls) @ pred_thms
-        |> map (Drule.forall_intr_vars)
+        |> map (Thm.forall_intr_vars)
         |> map (Conv.fconv_rule (Object_Logic.atomize ctxt))
 
     (* Generate a proof term of equivalence using the folded definitions. *)

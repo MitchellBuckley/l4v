@@ -19,18 +19,17 @@ scheduling. These proofs are used by the [system initialiser
 proof](../../sys-init), as described in the [ICFEM '13 paper][Boyton_13]
 and Andrew Boyton's PhD thesis.
 
-  [Boyton_13]: https://ts.data61.csiro.au/publications/nictaabstracts/Boyton_ABFGGKLS_13.abstract "Formally Verified System Initialisation"
+  [Boyton_13]: https://trustworthy.systems/publications/nictaabstracts/Boyton_ABFGGKLS_13.abstract "Formally Verified System Initialisation"
 
 Building
 --------
 
-To build from the `l4v/` directory, run:
+To build for the ARM architecture from the `l4v/` directory, run:
 
-    ./isabelle/bin/isabelle build -d . -v -b DSpecProofs
+    L4V_ARCH=ARM ./run_tests DSpecProofs
 
 Important Theories
 ------------------
 
 The top-level theory is [`API_DP`](API_DP.thy). The seL4 API and kernel
 model are located in [`Kernel_DP`](Kernel_DP.thy).
-

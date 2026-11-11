@@ -1,4 +1,5 @@
 (*
+ * Copyright 2023, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
@@ -14,9 +15,13 @@ lemma invokeIRQHandler_AckIRQ_ccorres:
   "ccorres dc xfdc
        invs' (UNIV \<inter> {s. irq_' s = ucast irq}) []
      (InterruptDecls_H.invokeIRQHandler (AckIRQ irq)) (Call invokeIRQHandler_AckIRQ_'proc)"
-  apply (cinit lift: irq_' simp: Interrupt_H.invokeIRQHandler_def invokeIRQHandler_def)
+  apply (cinit lift: irq_' simp: Interrupt_H.invokeIRQHandler_def invokeIRQHandler_def dmo_if)
+   apply csymbr (* make config_set(CONFIG_ARM_GIC_V3_SUPPORT) available *)
+   apply (rule ccorres_cond_both'[where Q=\<top> and Q'=\<top>])
+     apply (simp add: Kernel_Config.config_ARM_GIC_V3_def) (* match C condition *)
+    apply (ctac add: deactivateInterrupt_ccorres)
    apply (ctac add: maskInterrupt_ccorres)
-  apply (simp add: from_bool_def false_def)
+  apply (simp add: theIRQ_def)
   done
 
 lemma getIRQSlot_ccorres:
@@ -47,12 +52,11 @@ lemma ptr_add_assertion_irq_guard:
                 (hrs_htd \<acute>t_hrs)\<rbrace> c ;; m)"
   by (simp add: ptr_add_assertion_def sint_ucast_eq_uint is_down)
 
-
 lemma cte_at_irq_node':
   "invs' s \<Longrightarrow>
-    cte_at' (irq_node' s + 2 ^ cte_level_bits * ucast (irq :: 10 word)) s"
+    cte_at' (irq_node' s + 2 ^ cte_level_bits * ucast (irq :: irq)) s"
   by (clarsimp simp: invs'_def valid_state'_def valid_irq_node'_def
-                     cte_level_bits_def real_cte_at')
+                     cte_level_bits_def real_cte_at' cteSizeBits_def shiftl_t2n)
 
 lemma invokeIRQHandler_SetIRQHandler_ccorres:
   "ccorres dc xfdc
@@ -69,30 +73,28 @@ proof -
   apply (cinit lift: irq_' slot_' cap_' simp: Interrupt_H.invokeIRQHandler_def)
    apply (rule ccorres_Guard_intStateIRQNode_array_Ptr)
    apply (rule ccorres_move_array_assertion_irq)
-   apply (simp add: ucast_up_ucast is_up of_int_uint_ucast[symmetric])
+   apply (simp)
    apply (ctac(no_vcg) add: getIRQSlot_ccorres[simplified])
      apply (rule ccorres_symb_exec_r)
        apply (ctac(no_vcg) add: cteDeleteOne_ccorres[where w="-1"])
         apply (rule ccorres_call)
-           apply (rule cteInsert_ccorres[simplified dc_def])
+           apply (rule cteInsert_ccorres)
           apply (simp add: pred_conj_def)+
-       apply (strengthen ntfn_badge_derived_enough_strg[unfolded o_def]
+       apply (strengthen ntfn_badge_derived_enough_strg
                          invs_mdb_strengthen' valid_objs_invs'_strg)
-       apply (wp cteDeleteOne_other_cap[unfolded o_def])[1]
+       apply (wp cteDeleteOne_other_cap[unfolded o_def])
       apply vcg
-     apply (rule conseqPre, vcg, clarsimp simp: rf_sr_def
-        gs_set_assn_Delete_cstate_relation[unfolded o_def])
+     apply (rule conseqPre, vcg,
+            clarsimp simp: rf_sr_def gs_set_assn_Delete_cstate_relation[unfolded o_def])
     apply (simp add: getIRQSlot_def getInterruptState_def locateSlot_conv)
     apply wp
    apply (simp add: guard_is_UNIV_def ghost_assertion_data_get_def
                     ghost_assertion_data_set_def)
   apply (clarsimp simp: cte_at_irq_node' ucast_nat_def)
   apply (clarsimp simp: invs_pspace_aligned' cte_wp_at_ctes_of badge_derived'_def
-                        Collect_const_mem unat_gt_0 valid_cap_simps' ARM.maxIRQ_def)
-  apply (drule word_le_nat_alt[THEN iffD1])
-  apply (clarsimp simp:uint_0_iff unat_gt_0 uint_up_ucast is_up unat_def[symmetric])
-  apply (drule valid_globals_ex_cte_cap_irq[where irq=irq])
-  apply (auto simp add:Word.uint_up_ucast is_up unat_def[symmetric])
+                        Collect_const_mem unat_gt_0 valid_cap_simps')
+  apply (drule valid_globals_ex_cte_cap_irq[where irq=irq]; clarsimp)
+  apply (unat_arith; simp) (* only word type bounds should be left *)
   done
 qed
 
@@ -105,23 +107,22 @@ lemma invokeIRQHandler_ClearIRQHandler_ccorres:
   apply (cinit lift: irq_' simp: Interrupt_H.invokeIRQHandler_def)
    apply (rule ccorres_Guard_intStateIRQNode_array_Ptr)
    apply (rule ccorres_move_array_assertion_irq)
-   apply (simp add: ucast_up_ucast is_up of_int_uint_ucast[symmetric])
+   apply simp
    apply (ctac(no_vcg) add: getIRQSlot_ccorres[simplified])
      apply (rule ccorres_symb_exec_r)
-       apply (ctac add: cteDeleteOne_ccorres[where w="-1",simplified dc_def])
+       apply (ctac add: cteDeleteOne_ccorres[where w="-1"])
       apply vcg
-     apply (rule conseqPre, vcg, clarsimp simp: rf_sr_def
-        gs_set_assn_Delete_cstate_relation[unfolded o_def])
+     apply (rule conseqPre, vcg,
+            clarsimp simp: rf_sr_def gs_set_assn_Delete_cstate_relation[unfolded o_def])
     apply (simp add: getIRQSlot_def getInterruptState_def locateSlot_conv)
     apply wp
    apply (simp add: guard_is_UNIV_def ghost_assertion_data_get_def
                     ghost_assertion_data_set_def)
   apply (clarsimp simp: cte_at_irq_node' ucast_nat_def)
-  apply (simp add: of_int_uint_ucast[symmetric])
   apply (drule word_le_nat_alt[THEN iffD1])
-  apply (auto simp add:Word.uint_up_ucast is_up unat_def[symmetric])
+  apply clarsimp
   apply (case_tac "of_int (uint irq) \<noteq> 0 \<longrightarrow> 0 < unat irq")
-   by (auto simp: Collect_const_mem unat_eq_0)
+  by (auto simp: Collect_const_mem unat_eq_0)
 
 
 lemma ntfn_case_can_send:
@@ -222,7 +223,7 @@ lemma decodeIRQHandlerInvocation_ccorres:
      apply (clarsimp simp: Collect_const_mem neq_Nil_conv
                     dest!: interpret_excaps_eq)
      apply (simp add: rf_sr_ksCurThread if_1_0_0 mask_def[where n=4]
-                      "StrictC'_thread_state_defs" cap_get_tag_isCap excaps_map_def
+                      ThreadState_defs cap_get_tag_isCap excaps_map_def
                       word_sless_def word_sle_def)
     apply (simp add: invocationCatch_def throwError_bind
                      interpret_excaps_test_null Collect_True
@@ -250,43 +251,35 @@ lemma decodeIRQHandlerInvocation_ccorres:
     apply (simp add: syscall_error_to_H_cases)
    apply simp
   apply (clarsimp simp: Collect_const_mem tcb_at_invs')
-  apply (clarsimp simp: invs_queues invs_valid_objs'
+  apply (clarsimp simp: invs_valid_objs'
                         ct_in_state'_def
                         ccap_rights_relation_def
-                        mask_def[where n=4]
-                        "StrictC'_thread_state_defs")
+                        mask_def[where n=4] ThreadState_defs)
   apply (subst pred_tcb'_weakenE, assumption, fastforce)+
   apply (clarsimp simp: rf_sr_ksCurThread word_sle_def word_sless_def
     sysargs_rel_n_def word_less_nat_alt)
   apply (clarsimp simp: cte_wp_at_ctes_of neq_Nil_conv sysargs_rel_def n_msgRegisters_def
-                    excaps_map_def excaps_in_mem_def word_less_nat_alt hd_conv_nth
-                    slotcap_in_mem_def valid_tcb_state'_def from_bool_def toBool_def
-             dest!: interpret_excaps_eq split: bool.splits)
+                        excaps_map_def excaps_in_mem_def word_less_nat_alt hd_conv_nth
+                        slotcap_in_mem_def valid_tcb_state'_def
+                  dest!: interpret_excaps_eq split: bool.splits)
   apply (intro conjI impI allI)
   apply (clarsimp simp: cte_wp_at_ctes_of neq_Nil_conv sysargs_rel_def n_msgRegisters_def
                     excaps_map_def excaps_in_mem_def word_less_nat_alt hd_conv_nth
-                    slotcap_in_mem_def valid_tcb_state'_def from_bool_def toBool_def
+                    slotcap_in_mem_def valid_tcb_state'_def
              dest!: interpret_excaps_eq split: bool.splits)+
-     apply (auto dest: st_tcb_at_idle_thread' ctes_of_valid')[4]
+     apply (auto dest: st_tcb_at_idle_thread' ctes_of_valid')[6]
     apply (drule ctes_of_valid')
      apply fastforce
-    apply (clarsimp simp add:valid_cap_simps' ARM.maxIRQ_def)
-    apply (erule order.trans,simp)
+    apply unat_arith (* only word type bounds should be left *)
+    apply simp
   apply (auto dest: st_tcb_at_idle_thread' ctes_of_valid')
   done
 
 declare mask_of_mask[simp]
 
-lemma ucast_maxIRQ_le_eq:
-  "UCAST(10 \<rightarrow> 32) irq \<le> SCAST(32 signed \<rightarrow> 32) Kernel_C.maxIRQ \<Longrightarrow>
-   UCAST(10 \<rightarrow> 16) irq \<le> SCAST(32 signed \<rightarrow> 16) Kernel_C.maxIRQ"
-  apply (subst ucast_le_ucast[where 'a=16 and 'b=32, symmetric])
-  apply simp
-  by (clarsimp simp: ucast_up_ucast is_up Kernel_C.maxIRQ_def)
-
 lemma invokeIRQControl_expanded_ccorres:
   "ccorres (\<lambda>_ r. r = scast EXCEPTION_NONE) (ret__unsigned_long_')
-      (invs' and cte_at' parent and (\<lambda>_. (ucast irq) \<le> (ucast Kernel_C.maxIRQ :: machine_word)))
+      (invs' and cte_at' parent and (\<lambda>_. ucast irq \<le> (ucast Kernel_C.maxIRQ :: machine_word)))
       (UNIV \<inter> {s. irq_' s = ucast irq}
             \<inter> {s. controlSlot_' s = cte_Ptr parent}
             \<inter> {s. handlerSlot_' s = cte_Ptr slot}) hs
@@ -306,28 +299,18 @@ lemma invokeIRQControl_expanded_ccorres:
    apply clarsimp
    apply (vcg exspec=setIRQState_modifies)
   apply (clarsimp simp: is_simple_cap'_def isCap_simps valid_cap_simps' capAligned_def
-                        word_bits_def)
-  apply (rule conjI)
-   apply (fastforce simp: word_bits_def intro!: ucast_maxIRQ_le_eq)
-  apply (simp add: invs_mdb' invs_valid_objs' invs_pspace_aligned')
-  apply (rule conjI)
-   apply (clarsimp simp: maxIRQ_def Kernel_C.maxIRQ_def)
-   apply unat_arith
+                        word_bits_def Kernel_C_maxIRQ)
+  apply (rule conjI, fastforce)+
   apply (clarsimp simp: Collect_const_mem ccap_relation_def cap_irq_handler_cap_lift
-                        cap_to_H_def c_valid_cap_def cl_valid_cap_def
-                        word_bw_assocs mask_twice maxIRQ_def Kernel_C.maxIRQ_def ucast_ucast_a
-                        is_up ucast_ucast_b is_down)
-  apply (subst less_mask_eq)
-   apply (rule le_m1_iff_lt[THEN iffD1,THEN iffD1])
-    apply simp
-   apply (erule order.trans, simp)
-  apply (rule word_eqI)
-  apply (simp add: nth_ucast word_size)
+                        cap_to_H_def c_valid_cap_def cl_valid_cap_def irq_len_val ucast_and_mask)
+  (* if irq_len < 8, there may be an additional term in the goal *)
+  apply (rule conjI, word_eqI_solve)?
+  apply (word_eqI_solve dest: bit_imp_le_length)
   done
 
 lemma invokeIRQControl_ccorres:
   "ccorres (K (K \<bottom>) \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
-      (invs' and cte_at' parent and (\<lambda>_. (ucast irq) \<le> (ucast Kernel_C.maxIRQ :: machine_word)))
+      (invs' and cte_at' parent and (\<lambda>_. ucast irq \<le> (ucast Kernel_C.maxIRQ :: machine_word)))
       (UNIV \<inter> {s. irq_' s = ucast irq}
                   \<inter> {s. controlSlot_' s = cte_Ptr parent}
                   \<inter> {s. handlerSlot_' s = cte_Ptr slot}) hs
@@ -343,7 +326,7 @@ lemma invokeIRQControl_ccorres:
    apply simp+
   done
 
-lemma Arch_invokeIRQControl_ccorres:
+lemma Arch_invokeIRQControl_IssueIRQHandler_ccorres:
   "ccorres ((K (K \<bottom>)) \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
       (invs' and cte_at' parent and (\<lambda>_. (ucast irq) \<le> (ucast Kernel_C.maxIRQ :: machine_word)))
       (UNIV \<inter> {s. irq_' s = ucast irq}
@@ -356,39 +339,44 @@ lemma Arch_invokeIRQControl_ccorres:
   apply (cinit lift: irq_' handlerSlot_' controlSlot_' trigger_'
                simp: ARM_H.performIRQControl_def IRQ_def)
    apply (rule ccorres_liftE)
-   apply (ctac (no_vcg) add: setIRQTrigger_ccorres)
+   apply csymbr (* make config_set(HAVE_SET_TRIGGER) available *)
+   apply (rule ccorres_split_nothrow_novcg)
+       apply (unfold when_def)[1]
+       apply (rule ccorres_cond_both'[where Q=\<top> and Q'=\<top>])
+         apply (clarsimp simp: Kernel_Config_haveSetTrigger_def) (* sync haveSetTrigger with C *)
+        apply (rule ccorres_call[where xf'=xfdc, OF setIRQTrigger_ccorres]; simp)
+       apply (rule ccorres_return[where R=\<top> and R'=UNIV])
+       apply vcg
+       apply simp
+      apply ceqv
      apply (rule ccorres_add_return2)
      apply (ctac (no_vcg) add: invokeIRQControl_expanded_ccorres)
-       apply (rule_tac P=\<top> and P'=UNIV in ccorres_from_vcg_throws)
-       apply (rule allI, rule conseqPre, vcg)
-       apply (clarsimp simp: return_def)
-      apply (wpsimp simp: ucast_def guard_is_UNIV_def)+
+      apply (rule_tac P=\<top> and P'=UNIV in ccorres_from_vcg_throws)
+      apply (rule allI, rule conseqPre, vcg)
+      apply (clarsimp simp: return_def)
+     apply (wpsimp simp: guard_is_UNIV_def)+
   done
+
+lemma irqstate_to_C_inactive:
+  "(irqstate_to_C irq_st = scast Kernel_C.IRQInactive) = (irq_st = irqstate.IRQInactive)"
+  by (cases irq_st; simp add: irq_state_defs)
 
 lemma isIRQActive_ccorres:
   "ccorres (\<lambda>rv rv'. rv' = from_bool rv) ret__unsigned_long_'
-        (\<lambda>s. irq \<le> scast Kernel_C.maxIRQ) (UNIV \<inter> {s. irq_' s = ucast irq}) []
+        (\<lambda>s. irq \<le> scast Kernel_C.maxIRQ) \<lbrace>\<acute>irq = ucast irq\<rbrace> []
         (isIRQActive irq) (Call isIRQActive_'proc)"
   apply (cinit lift: irq_')
    apply (simp add: getIRQState_def getInterruptState_def)
-   apply (rule_tac P="irq \<le> ucast Kernel_C.maxIRQ \<and> unat irq < (160::nat)" in ccorres_gen_asm)
+   apply (rule_tac P="irq \<le> Kernel_Config.maxIRQ" in ccorres_gen_asm)
    apply (rule ccorres_from_vcg_throws[where P=\<top> and P'=UNIV])
    apply (rule allI, rule conseqPre, vcg)
-   apply (clarsimp simp: simpler_gets_def word_sless_msb_less maxIRQ_def
-                         word_less_nat_alt)
-   apply (clarsimp simp: order_le_less_trans unat_less_helper Kernel_C.IRQInactive_def
-                         Kernel_C.maxIRQ_def word_0_sle_from_less[OF order_less_le_trans, OF ucast_less])
-   apply (clarsimp simp: rf_sr_def cstate_relation_def Kernel_C.maxIRQ_def
-                         Let_def cinterrupt_relation_def)
-   apply (drule spec, drule(1) mp)
-   apply (case_tac "intStateIRQTable (ksInterruptState \<sigma>) irq")
-     apply (simp add: from_bool_def irq_state_defs Kernel_C.maxIRQ_def
-                      word_le_nat_alt)+
+   apply (clarsimp simp: simpler_gets_def)
+   apply (rule conjI, solves \<open>clarsimp simp: ucast_irq_array_guard Kernel_C_maxIRQ\<close>)
+   apply (clarsimp simp: from_bool_eq_if' cong: if_cong)
+   apply (clarsimp simp: rf_sr_def cstate_relation_def  Let_def cinterrupt_relation_def)
+   apply (fastforce simp: Kernel_C_maxIRQ irqstate_to_C_inactive)
+  apply (simp add: Kernel_C_maxIRQ word_le_nat_alt)
   done
-
-lemma Platform_maxIRQ:
-  "ARM.maxIRQ = scast Kernel_C.maxIRQ"
-  by (simp add: ARM.maxIRQ_def Kernel_C.maxIRQ_def)
 
 lemma liftME_invocationCatch:
   "liftME f m >>= invocationCatch thread isBlocking isCall f'
@@ -400,15 +388,12 @@ lemma liftME_invocationCatch:
             split: sum.split)
   done
 
-lemma maxIRQ_ucast_scast [simp]:
-  "ucast (scast Kernel_C.maxIRQ :: 10 word) = scast Kernel_C.maxIRQ"
-  by (clarsimp simp: Kernel_C.maxIRQ_def)
-
 lemma decodeIRQ_arch_helper: "x \<noteq> IRQIssueIRQHandler \<Longrightarrow>
          (case x of IRQIssueIRQHandler \<Rightarrow> f | _ \<Rightarrow> g) = g"
   by (clarsimp split: gen_invocation_labels.splits)
 
-lemma decodeIRQ_arch_helper': "x \<noteq> ArchInvocationLabel ARMIRQIssueIRQHandler \<Longrightarrow>
+lemma decodeIRQ_arch_helper':
+  "x \<noteq> ArchInvocationLabel ARMIRQIssueIRQHandler \<Longrightarrow>
          (case x of ArchInvocationLabel ARMIRQIssueIRQHandler \<Rightarrow> f | _ \<Rightarrow> g) = g"
   by (clarsimp split: invocation_label.splits arch_invocation_label.splits)
 
@@ -419,8 +404,8 @@ lemma Arch_checkIRQ_ccorres:
    (checkIRQ irq) (Call Arch_checkIRQ_'proc)"
   apply (cinit lift: irq_w_' )
    apply (simp add: rangeCheck_def unlessE_def ARM.minIRQ_def checkIRQ_def
-                    ucast_nat_def word_le_nat_alt[symmetric]
-                    linorder_not_le[symmetric] Platform_maxIRQ
+                    ucast_nat_def word_le_nat_alt[symmetric] Kernel_C_maxIRQ
+                    linorder_not_le[symmetric]
                     length_ineq_not_Nil hd_conv_nth cast_simps
                del: Collect_const cong: call_ignore_cong)
    apply (rule ccorres_Cond_rhs_Seq)
@@ -432,14 +417,112 @@ lemma Arch_checkIRQ_ccorres:
                           exception_defs syscall_error_rel_def
                           syscall_error_to_H_cases)
    apply clarsimp
-   apply (rule ccorres_return_CE, simp+)
+   apply (rule ccorres_return_CE; simp)
+  apply (simp add: Kernel_C_maxIRQ)
   done
 
 lemma checkIRQ_ret_good:
-  "\<lbrace>\<lambda>s. (irq \<le> scast Kernel_C.maxIRQ \<longrightarrow> P s) \<and> Q s\<rbrace> checkIRQ irq \<lbrace>\<lambda>rv. P\<rbrace>, \<lbrace>\<lambda>rv. Q\<rbrace>"
-  apply (clarsimp simp: checkIRQ_def rangeCheck_def Platform_maxIRQ minIRQ_def)
-  apply (rule hoare_pre,wp)
-  by (clarsimp simp: Kernel_C.maxIRQ_def split: if_split)
+  "\<lbrace>\<lambda>s. (irq \<le> Kernel_Config.maxIRQ \<longrightarrow> P s) \<and> Q s\<rbrace> checkIRQ irq \<lbrace>\<lambda>rv. P\<rbrace>, \<lbrace>\<lambda>rv. Q\<rbrace>"
+  apply (wpsimp simp: checkIRQ_def rangeCheck_def minIRQ_def)
+  by (clarsimp split: if_split)
+
+lemma sgi_target_valid_sgi_target_len:
+  "isGICPlatform \<Longrightarrow> isSGITargetValid w = (w \<le> mask sgi_target_len)"
+  by (simp add: isSGITargetValid_def gicNumTargets_def sgi_target_len_def mask_def)
+
+lemma Arch_invokeIRQControl_IssueSGISignal_ccorres:
+  "ccorres (K (K \<bottom>) \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
+      (invs' and cte_at' controlSlot and K (isSGITargetValid target \<and> irq < of_nat numSGIs))
+      (\<lbrace>\<acute>irq = irq\<rbrace> \<inter> \<lbrace>\<acute>target___unsigned_long = target\<rbrace> \<inter>
+       \<lbrace>\<acute>controlSlot = cte_Ptr controlSlot\<rbrace> \<inter> \<lbrace>\<acute>sgiSlot = cte_Ptr sgiSlot\<rbrace>)
+      hs
+      (Arch.performIRQControl (IssueSGISignal irq target controlSlot sgiSlot))
+      (Call Arch_invokeIssueSGISignal_'proc)"
+  apply (cinit' lift: irq_' target___unsigned_long_' controlSlot_' sgiSlot_')
+   apply (clarsimp simp: ARM_H.performIRQControl_def liftE_def)
+   apply csymbr
+   apply (ctac (no_vcg) add: cteInsert_ccorres)
+    apply (rule ccorres_from_vcg_throws[where P=\<top> and P'=UNIV])
+    apply (clarsimp, rule conseqPre, vcg)
+    apply (clarsimp simp: return_def)
+   apply wp
+  apply (clarsimp split: if_split)
+  apply (clarsimp simp: is_simple_cap'_def isCap_simps valid_cap_simps' capAligned_def)
+  apply (rule conjI, fastforce)+
+  apply clarsimp
+  apply (erule notE)
+  apply (clarsimp simp: ccap_relation_def map_option_Some_eq2 cap_lift_def
+                        cap_sgi_signal_cap_lift_def Let_def cap_tag_defs cap_to_H_def
+                        sgi_target_valid_sgi_target_len numSGIs_def)
+  apply (rule le_mask_imp_and_mask[symmetric])
+  apply (simp add: numSGIs_bits_def mask_def word_le_nat_alt word_less_nat_alt
+              split: if_split_asm)
+  done
+
+lemma toEnum_unat_maxIRQ:
+  "x \<le> scast Kernel_C.maxIRQ \<Longrightarrow> toEnum (unat x) \<le> (scast Kernel_C.maxIRQ :: irq)"
+  for x::machine_word
+  by (simp add: Kernel_C.maxIRQ_def toEnum_unat_le)
+
+lemma ucast_toEnum_unat_maxIRQ:
+  "x \<le> scast Kernel_C.maxIRQ \<Longrightarrow>
+   ucast (toEnum (unat x)::irq) \<le> (ucast Kernel_C.maxIRQ :: machine_word)" for x::machine_word
+  apply (drule toEnum_unat_maxIRQ)
+  apply (simp add: word_le_nat_alt Kernel_C.maxIRQ_def)
+  done
+
+lemma ucast_toEnum_unat_maxIRQ_eq:
+  "x \<le> scast Kernel_C.maxIRQ\<Longrightarrow> x = ucast (toEnum (unat x)::irq)" for x::machine_word
+  apply (simp add: toEnum_def length_word_enum Kernel_C.maxIRQ_def word_le_nat_alt enum_word_nth_eq
+                   ucast_ucast_mask)
+  apply (rule sym)
+  apply (simp add: and_mask_eq_iff_le_mask)
+  apply (simp add: mask_def word_le_nat_alt)
+  done
+
+lemma toEnum_unat_irq_t_leq_scast:
+  "x \<le> ucast maxIRQ \<Longrightarrow> (toEnum (unat x)::irq) \<le> scast Kernel_C.maxIRQ" for x::machine_word
+  apply (simp add: Kernel_C_maxIRQ word_le_nat_alt)
+  apply (subst toEnum_unat_ucast)
+   apply (erule le_less_trans)
+   apply (rule maxIRQ_less_2p_irq_len)
+  apply (simp add: unat_ucast)
+  done
+
+lemma ucast_toEnum_unat_irq_t_leq_ucast:
+  "x \<le> Kernel_Config.maxIRQ \<Longrightarrow>
+   UCAST(_ \<rightarrow> machine_word_len) (toEnum (unat x)::irq) \<le> ucast Kernel_C.maxIRQ"
+  for x::machine_word
+  by (simp add: Kernel_C_maxIRQ maxIRQ_ucast_toEnum_eq_irq ucast_ucast_mask word_and_le)
+
+lemma ucast_toEnum_unat_irq_t_leq_scast:
+  "x \<le> Kernel_Config.maxIRQ \<Longrightarrow>
+   UCAST(_ \<rightarrow> machine_word_len) (toEnum (unat x)::irq) \<le> scast Kernel_C.maxIRQ"
+  for x::machine_word
+  by (simp add: Kernel_C_maxIRQ maxIRQ_ucast_toEnum_eq_irq ucast_ucast_mask word_and_le)
+
+lemmas maxIRQ_casts = toEnum_unat_irq_t_leq_scast ucast_toEnum_unat_irq_t_leq_ucast
+                      maxIRQ_ucast_toEnum_eq_machine ucast_toEnum_unat_irq_t_leq_scast
+
+lemma ucast_ucast_machine_word_irq:
+  "irq \<le> Kernel_Config.maxIRQ \<Longrightarrow> ucast (ucast irq :: irq) = irq" for irq :: machine_word
+  apply (drule le_maxIRQ_machine_less_irqBits_val)
+  apply (simp add: ucast_ucast_mask and_mask_eq_iff_le_mask word_le_nat_alt)
+  apply (simp add: mask_def)
+  done
+
+lemma plat_SGITargetValid_spec:
+  "\<forall>s. \<Gamma> \<turnstile> {s}
+       Call plat_SGITargetValid_'proc
+       { t. ret__unsigned_long_' t = from_bool (isSGITargetValid (target___unsigned_long_' s)) }"
+  apply (rule allI)
+  apply (hoare_rule HoarePartial.ProcNoRec1)
+  apply vcg
+  apply (simp add: isSGITargetValid_def gicNumTargets_def sgi_target_len_val
+                   Kernel_Config_isGICPlatform_def max_minus_one_word32
+              flip: sgi_target_len_def
+              split: if_split)
+  done
 
 lemma Arch_decodeIRQControlInvocation_ccorres:
   notes if_cong[cong]
@@ -460,6 +543,7 @@ lemma Arch_decodeIRQControlInvocation_ccorres:
      (Arch.decodeIRQControlInvocation label args slot (map fst extraCaps)
         >>= invocationCatch thread isBlocking isCall (InvokeIRQControl o ArchIRQControl))
      (Call Arch_decodeIRQControlInvocation_'proc)"
+  supply tl_drop_1[simp]
   apply (cinit' lift: invLabel_' srcSlot_' length___unsigned_long_' current_extra_caps_' buffer_')
    apply (simp add: ARM_H.decodeIRQControlInvocation_def invocation_eq_use_types
                del: Collect_const
@@ -480,9 +564,24 @@ lemma Arch_decodeIRQControlInvocation_ccorres:
                       invocationCatch_def)
      apply (rule syscall_error_throwError_ccorres_n)
      apply (simp add: syscall_error_to_H_cases)
+    apply ccorres_rewrite
+    apply csymbr (* !config_set(HAVE_SET_TRIGGER) *)
     apply (simp add: interpret_excaps_test_null excaps_map_def
-                     word_less_nat_alt Let_def
+                     word_less_nat_alt Let_def length_ineq_not_Nil
                 del: Collect_const cong: call_ignore_cong)
+    apply (rule ccorres_cond_seq)
+    apply (rule ccorres_cond_both[where P="\<lambda>_. \<not>haveSetTrigger" and R=\<top>])
+      (* sync C condition *)
+      apply (simp add: Kernel_Config_haveSetTrigger_def)
+     (* \<not>haveSetTrigger *)
+     apply (rule ccorres_gen_asm[where P="\<not>haveSetTrigger"])
+     apply ccorres_rewrite
+     apply (simp add: throwError_bind invocationCatch_def)
+     apply (rule syscall_error_throwError_ccorres_n)
+     apply (simp add: syscall_error_to_H_cases)
+    (* haveSetTrigger *)
+    apply (rule ccorres_gen_asm[where P="haveSetTrigger"])
+    apply simp
     apply (rule ccorres_add_return)
     apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=0 and buffer=buffer])
       apply csymbr
@@ -499,9 +598,8 @@ lemma Arch_decodeIRQControlInvocation_ccorres:
               apply (rule ccorres_assert2)
               apply (simp add: rangeCheck_def unlessE_def ARM.minIRQ_def
                                ucast_nat_def word_le_nat_alt[symmetric]
-                               linorder_not_le[symmetric] Platform_maxIRQ
+                               linorder_not_le[symmetric]
                                length_ineq_not_Nil hd_conv_nth cast_simps
-                               maxIRQ_ucast_scast
                           del: Collect_const cong: call_ignore_cong)
               apply (simp add: split_def invocationCatch_use_injection_handler
                                injection_handler_bindE bindE_assoc
@@ -527,9 +625,9 @@ lemma Arch_decodeIRQControlInvocation_ccorres:
                       apply (ctac add: ccorres_injection_handler_csum1
                                        [OF ensureEmptySlot_ccorres])
                       apply (simp add: injection_handler_returnOk ccorres_invocationCatch_Inr
-                                       performInvocation_def bindE_assoc) using [[goals_limit=2]]
+                                       performInvocation_def bindE_assoc)
                       apply (ctac add: setThreadState_ccorres)
-                      apply (ctac(no_vcg) add: Arch_invokeIRQControl_ccorres)
+                      apply (ctac(no_vcg) add: Arch_invokeIRQControl_IssueIRQHandler_ccorres)
                       apply (rule ccorres_alternative2)
                       apply (rule ccorres_return_CE, simp+)[1]
                       apply (rule ccorres_return_C_errorE, simp+)[1]
@@ -582,39 +680,157 @@ lemma Arch_decodeIRQControlInvocation_ccorres:
      apply wp
     apply (simp add: Collect_const_mem all_ex_eq_helper)
     apply (vcg exspec=getSyscallArg_modifies)
-   apply (clarsimp simp: decodeIRQ_arch_helper')
-   apply (simp add: throwError_bind invocationCatch_def)
-   apply (rule syscall_error_throwError_ccorres_n)
-   apply (simp add: syscall_error_to_H_cases)
+   \<comment> \<open>ARMIRQIssueSGISignal\<close>
+   apply ccorres_rewrite
+   supply Collect_const[simp del]
+   apply (rule ccorres_Cond_rhs)
+    apply (simp add: list_case_If2 cong: call_ignore_cong)
+    apply (rule ccorres_rhs_assoc)+
+    apply csymbr+
+    apply (rule ccorres_Cond_rhs_Seq)
+     apply (simp add: word_less_nat_alt throwError_bind invocationCatch_def)
+     apply (rule ccorres_cond_true_seq)
+     apply (rule syscall_error_throwError_ccorres_n)
+     apply (simp add: syscall_error_to_H_cases)
+    apply csymbr
+    apply (rule ccorres_Cond_rhs_Seq)
+     apply (simp add: interpret_excaps_test_null excaps_map_def
+                      throwError_bind invocationCatch_def)
+     apply (rule syscall_error_throwError_ccorres_n)
+     apply (simp add: syscall_error_to_H_cases)
+    apply (prop_tac "args \<noteq> []", solves \<open>clarsimp simp: word_less_nat_alt\<close>)
+    apply (simp add: interpret_excaps_test_null excaps_map_def
+                     word_less_nat_alt Let_def
+                cong: call_ignore_cong)
+    apply csymbr (* wrap_config_set(NUM_SGIS) *)
+    apply (rule ccorres_cond_seq)
+    apply (rule ccorres_cond_both[where P="\<lambda>_. numSGIs = 0" and R=\<top>])
+      apply (simp add: numSGIs_def Kernel_Config_isGICPlatform_def) (* sync C condition *)
+     apply (rule ccorres_gen_asm[where P="numSGIs = 0"])
+     apply (simp cong: call_ignore_cong ccorres_prog_only_cong)
+     apply ccorres_rewrite
+     apply (simp add: throwError_bind invocationCatch_def)
+     apply (rule syscall_error_throwError_ccorres_n)
+     apply (simp add: syscall_error_to_H_cases)
+    apply (rule ccorres_gen_asm[where P="numSGIs \<noteq> 0"])
+    apply (simp cong: call_ignore_cong ccorres_prog_only_cong) (* remove whenE (numSGIs = 0) *)
+    (* now in GIC case: *)
+    apply (prop_tac "isGICPlatform", simp add: numSGIs_def split: if_split_asm)
+    apply (rule ccorres_add_return)
+    apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=0 and buffer=buffer])
+      apply (rule ccorres_add_return)
+      apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=1 and buffer=buffer])
+        apply (rule ccorres_add_return)
+        apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=2 and buffer=buffer])
+          apply (rule ccorres_add_return)
+          apply (ctac add: getSyscallArg_ccorres_foo[where args=args and n=3 and buffer=buffer])
+            apply (rule getSlotCap_ccorres_fudge_n[where vals=extraCaps and n=0])
+            apply (rule ccorres_move_c_guard_cte)
+            apply ctac
+              apply (rule ccorres_assert2)
+              apply (simp add: rangeCheck_def unlessE_def
+                               length_ineq_not_Nil hd_conv_nth
+                          cong: call_ignore_cong ccorres_prog_only_cong)
+              apply csymbr (* wrap_config_set(NUM_SGIS) *)
+              apply (rule ccorres_cond_seq)
+              apply (rule ccorres_cond_both[where P="\<lambda>_. \<not> args!0 \<le> of_nat (numSGIs - Suc 0)"
+                                            and R=\<top>])
+                (* on non-GIC platforms the conditions are not in sync, but we can force them
+                   to be equal, because Kernel_Config_isGICPlatform_def gives us a contradiction
+                   with being on the isGICPlatform branch *)
+                apply (solves \<open>clarsimp simp: numSGIs_def numSGIs_bits_def word_le_nat_alt not_le
+                                              less_eq_Suc_le Kernel_Config_isGICPlatform_def\<close>)
+               apply (rule ccorres_gen_asm[where P="\<not> args!0 \<le> of_nat (numSGIs - Suc 0)"])
+               apply (simp add: throwError_bind invocationCatch_def
+                           cong: call_ignore_cong ccorres_prog_only_cong)
+               apply (rule syscall_error_throwError_ccorres_n)
+               (* same as above, for non-GIC platforms need to solve by contradiction *)
+               apply (solves \<open>simp add: syscall_error_to_H_cases numSGIs_def numSGIs_bits_def
+                                        Kernel_Config_isGICPlatform_def\<close>)
+              apply (rule ccorres_gen_asm[where P="args!0 \<le> of_nat (numSGIs - Suc 0)"])
+              apply (simp cong: call_ignore_cong ccorres_prog_only_cong)
+              apply csymbr
+              apply (simp cong: call_ignore_cong ccorres_prog_only_cong)
+              apply (rule ccorres_Cond_rhs_Seq)
+               apply (simp add: throwError_bind invocationCatch_def from_bool_0
+                           cong: call_ignore_cong ccorres_prog_only_cong)
+               apply (rule syscall_error_throwError_ccorres_n)
+               apply (solves \<open>simp add: syscall_error_to_H_cases mask_def\<close>)
+              apply (simp add: invocationCatch_use_injection_handler injection_handler_bindE
+                               bindE_assoc
+                          cong: call_ignore_cong ccorres_prog_only_cong)
+              apply (ctac add: ccorres_injection_handler_csum1[OF lookupTargetSlot_ccorres,
+                                                               unfolded lookupTargetSlot_def])
+                 prefer 2
+                 apply ccorres_rewrite
+                 apply (ctac add: ccorres_return_C_errorE)
+                apply ccorres_rewrite
+                apply csymbr
+                apply (ctac add: ccorres_injection_handler_csum1[OF ensureEmptySlot_ccorres])
+                   prefer 2
+                   apply ccorres_rewrite
+                   apply (ctac add: ccorres_return_C_errorE)
+                  apply ccorres_rewrite
+                  apply (simp add: ccorres_invocationCatch_Inr performInvocation_def
+                                   liftE_bindE bindE_assoc injection_handler_returnOk
+                              cong: ccorres_prog_only_cong)
+                  apply (ctac (no_vcg) add: setThreadState_ccorres)
+                   apply (simp add: performIRQControl_def)
+                   apply (ctac (no_vcg) add: Arch_invokeIRQControl_IssueSGISignal_ccorres)
+                     apply (clarsimp simp: liftE_alternative)
+                     apply (rule ccorres_alternative2)
+                     apply (ctac add: ccorres_return_CE)
+                    apply (ctac add: ccorres_inst[where P=\<top> and P'=UNIV])
+                   apply wp
+                  apply (wp sts_invs_minor')
+                 apply clarsimp
+                 apply (wp injection_handler_wp)
+                apply (rule conseqPre, vcg exspec=ensureEmptySlot_modifies, rule order_refl)
+               apply (wp injection_handler_wp hoare_drop_imps)
+              apply clarsimp
+              apply (rule conseqPre, vcg exspec=lookupTargetSlot_modifies, rule order_refl)
+             apply (wpsimp wp: getSlotCap_wp)
+            apply clarsimp
+            apply (rule conseqPre, vcg, rule order_refl)
+           apply wp
+          apply (rule conseqPre, vcg exspec=getSyscallArg_modifies, rule order_refl)
+         apply clarsimp
+         apply wp
+        apply (rule conseqPre, vcg exspec=getSyscallArg_modifies, rule order_refl)
+       apply clarsimp
+       apply wp
+      apply (rule conseqPre, vcg exspec=getSyscallArg_modifies, rule order_refl)
+     apply clarsimp
+     apply wp
+    apply clarsimp
+    apply (rule conseqPre, vcg exspec=getSyscallArg_modifies, rule order_refl)
+   apply (rule ccorres_inst[where P=\<top> and P'=UNIV])
+   apply (auto split: invocation_label.split arch_invocation_label.split
+               intro: syscall_error_throwError_ccorres_n[simplified throwError_def o_def]
+               simp: throwError_def invocationCatch_def syscall_error_to_H_cases invocation_eq_use_types)[1]
   apply (clarsimp simp: interpret_excaps_test_null excaps_map_def
                         Collect_const_mem word_sless_def word_sle_def
-                        ThreadState_Restart_def unat_of_nat mask_def)
-  apply (rule conjI)
-   apply (simp add: Kernel_C.maxIRQ_def word_le_nat_alt ucast_nat_def unat_ucast)
-   apply (cut_tac unat_lt2p[where x="args ! 3"])
-   apply clarsimp
-   apply (clarsimp simp: sysargs_rel_to_n word_less_nat_alt unat_ucast)
-   apply (auto,
-          auto simp: ct_in_state'_def neq_Nil_conv word_bits_def
-                     excaps_in_mem_def slotcap_in_mem_def
-                     cte_wp_at_ctes_of numeral_eqs[symmetric]
-                     valid_tcb_state'_def
-               elim!: pred_tcb'_weakenE
-               dest!: st_tcb_at_idle_thread' interpret_excaps_eq)[1]
-  apply (clarsimp simp: neq_Nil_conv numeral_eqs[symmetric] word_sle_def word_sless_def)
-  apply (drule interpret_excaps_eq[rule_format, where n=0], simp)
-  apply (clarsimp simp: mask_def[where n=4] "StrictC'_thread_state_defs"
-                        rf_sr_ksCurThread ccap_rights_relation_def
-                        rightsFromWord_wordFromRights)
-  apply (simp cong: conj_cong)
-  apply (clarsimp simp: Kernel_C.maxIRQ_def word_le_nat_alt
-                        ucast_nat_def ucast_ucast_mask mask_eq_ucast_eq unat_ucast_mask
-                        less_mask_eq[unfolded word_less_nat_alt])
-  apply (cases "args ! Suc 0 = 0"; clarsimp simp: true_def false_def)
-  done
+                        ThreadState_Restart_def unat_of_nat mask_def
+                        sysargs_rel_to_n
+                  cong: if_cong)
+  apply (cut_tac unat_lt2p[where x="args ! 3"])
+  apply (clarsimp simp: word_less_nat_alt unat_ucast)
+  apply (prop_tac "0 < numSGIs \<longrightarrow> args ! 0 \<le> word_of_nat numSGIs - 1 \<longrightarrow>
+                   unat (args ! 0) < unat (word_of_nat numSGIs :: machine_word)")
+   apply (simp add: numSGIs_def numSGIs_bits_def word_le_nat_alt split: if_split)
+  apply (prop_tac "\<not> length args < 4 \<longrightarrow> args \<noteq> []", clarsimp)
+  apply (clarsimp simp: invs_valid_objs' invs_pspace_aligned'
+                        invs_pspace_distinct' tcb_at_invs' invs_sch_act_wf'
+                        excaps_in_mem_def slotcap_in_mem_def ct_active_st_tcb_at_runnable'
+                        cte_wp_at_ctes_of numeral_eqs[symmetric] word_bits_def
+                        Kernel_C_maxIRQ maxIRQ_ucast_toEnum_eq_irq irq_machine_le_maxIRQ_irq)
+  by (fastforce simp: ct_in_state'_def  neq_Nil_conv[where xs=extraCaps]
+                      ucast_ucast_machine_word_irq rf_sr_ksCurThread from_bool_eq_if'
+                elim!: pred_tcb'_weakenE
+                dest!: interpret_excaps_eq)
 
 lemma decodeIRQControlInvocation_ccorres:
-  notes if_cong[cong]
+  notes if_cong[cong] tl_drop_1[simp]
   shows
   "interpret_excaps extraCaps' = excaps_map extraCaps \<Longrightarrow>
    ccorres (intr_and_se_rel \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
@@ -670,9 +886,8 @@ lemma decodeIRQControlInvocation_ccorres:
             apply (rule ccorres_assert2)
             apply (simp add: rangeCheck_def unlessE_def ARM.minIRQ_def
                              ucast_nat_def word_le_nat_alt[symmetric]
-                             linorder_not_le[symmetric] Platform_maxIRQ
+                             linorder_not_le[symmetric]
                              length_ineq_not_Nil hd_conv_nth cast_simps
-                             maxIRQ_ucast_scast
                         del: Collect_const cong: call_ignore_cong)
             apply (simp add: split_def invocationCatch_use_injection_handler injection_handler_bindE
                              bindE_assoc
@@ -752,17 +967,17 @@ lemma decodeIRQControlInvocation_ccorres:
    apply (clarsimp simp: decodeIRQ_arch_helper)
    apply (simp add: liftME_invocationCatch)
    apply (rule ccorres_add_returnOk)
-   apply (ctac add: Arch_decodeIRQControlInvocation_ccorres)
-      apply (rule ccorres_return_CE, simp+)[1]
-     apply (rule ccorres_return_C_errorE, simp+)[1]
-    apply wp
-   apply (vcg exspec=Arch_decodeIRQControlInvocation_modifies)
+   apply (ctac (no_vcg) add: Arch_decodeIRQControlInvocation_ccorres)
+     apply (rule ccorres_return_CE, simp+)[1]
+    apply (rule ccorres_return_C_errorE, simp+)[1]
+   apply wp
   apply (simp add: syscall_error_to_H_cases)
   apply (clarsimp simp: interpret_excaps_test_null excaps_map_def
                         Collect_const_mem word_sless_def word_sle_def
-                        ThreadState_Restart_def unat_of_nat mask_def)
+                         unat_of_nat mask_def)
   apply (rule conjI)
-   apply (simp add: Kernel_C.maxIRQ_def word_le_nat_alt ucast_nat_def
+   apply (simp add: Kernel_C_maxIRQ maxIRQ_ucast_toEnum_eq_irq)
+   apply (simp add: Kernel_C_maxIRQ word_le_nat_alt ucast_nat_def
                     unat_ucast)
    apply (cut_tac unat_lt2p[where x="args ! 2"])
    apply clarsimp
@@ -777,14 +992,14 @@ lemma decodeIRQControlInvocation_ccorres:
   apply (clarsimp simp: neq_Nil_conv numeral_eqs[symmetric]
                         word_sle_def word_sless_def)
   apply (drule interpret_excaps_eq[rule_format, where n=0], simp)
-  apply (clarsimp simp: mask_def[where n=4] "StrictC'_thread_state_defs"
+  apply (clarsimp simp: mask_def[where n=4] ThreadState_defs
                         rf_sr_ksCurThread ccap_rights_relation_def
-                        rightsFromWord_wordFromRights)
-
+                        rightsFromWord_wordFromRights
+                        Kernel_C_maxIRQ maxIRQ_ucast_toEnum_eq_irq)
   apply (simp cong: conj_cong)
-  apply (clarsimp simp: Kernel_C.maxIRQ_def word_le_nat_alt
-                        ucast_nat_def ucast_ucast_mask mask_eq_ucast_eq unat_ucast_mask
-                        less_mask_eq[unfolded word_less_nat_alt])
+  apply (drule le_maxIRQ_machine_less_irqBits_val)
+  apply (clarsimp simp: mask_eq_ucast_eq less_mask_eq[unfolded word_less_nat_alt])
   done
+
 end
 end

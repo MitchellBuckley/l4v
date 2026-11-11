@@ -8,9 +8,7 @@ theory ArchAInvsPre
 imports AInvsPre
 begin
 
-context Arch begin
-
-global_naming ARM
+context Arch begin arch_global_naming
 
 definition
   "kernel_mappings \<equiv> {x. x \<ge> kernel_base}"
@@ -22,8 +20,7 @@ lemma kernel_mappings_slots_eq:
   apply (fold word_le_nat_alt)
   apply (rule iffI)
    apply (simp add: le_shiftr)
-  apply (simp add: kernel_base_def)
-  apply word_bitwise
+  apply (simp add: kernel_base_def pptrBase_def split: if_split_asm; word_bitwise)
   done
 
 lemma valid_global_pd_mappingsE:
@@ -98,15 +95,6 @@ lemma get_pd_of_thread_reachable:
           split: Structures_A.kernel_object.splits if_split_asm option.splits
                  cap.splits arch_cap.splits)
 
-lemma is_aligned_ptrFromPAddrD:
-"\<lbrakk>is_aligned (ptrFromPAddr b) a; a \<le> 24\<rbrakk> \<Longrightarrow> is_aligned b a"
-  apply (clarsimp simp: ptrFromPAddr_def pptrBaseOffset_def pptrBase_def physBase_def)
-  apply (erule is_aligned_addD2)
-  apply (rule is_aligned_weaken[where x = 24])
-   apply (simp add: is_aligned_def)
-  apply simp
-  done
-
 lemma obj_bits_data_at:
   "data_at sz (ptrFromPAddr b) s
   \<Longrightarrow> obj_bits (the (kheap s (ptrFromPAddr b))) = pageBitsForSize sz"
@@ -149,8 +137,7 @@ lemma some_get_page_info_umapsD:
     apply (case_tac ao, simp_all add: a_type_simps obj_at_def )[1]
      apply (simp add: get_pt_info_def get_pt_entry_def)
      apply (drule_tac x="(ucast ((p >> 12) && mask 8))" in spec)
-     apply (clarsimp simp: obj_at_def
-      split: pte.splits,intro exI conjI,simp_all)[1]
+     apply (clarsimp simp: obj_at_def split: pte.splits,intro exI conjI,simp_all)[1]
       apply (frule obj_bits_data_at)
       apply (clarsimp simp: pspace_aligned_def data_at_def)
       apply (drule_tac x = "(ptrFromPAddr b)" in  bspec )
@@ -159,21 +146,19 @@ lemma some_get_page_info_umapsD:
      apply (frule (1) data_at_aligned)
      apply (intro exI conjI, simp_all add: pageBits_def is_aligned_ptrFromPAddrD)[1]
     apply (simp add: get_pt_info_def get_pt_entry_def)
-   apply clarsimp
    apply (frule obj_bits_data_at)
    apply (intro exI conjI, simp_all add: pageBits_def)[1]
    apply (clarsimp simp: pspace_aligned_def data_at_def)
-    apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
+   apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
     apply (fastforce simp: obj_at_def)
    apply (clarsimp dest!: is_aligned_ptrFromPAddrD)
-  apply clarsimp
   apply (frule obj_bits_data_at)
   apply (intro exI conjI, simp_all add: pageBits_def)[1]
   apply (clarsimp simp: pspace_aligned_def data_at_def)
-   apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
+  apply (drule_tac x = "(ptrFromPAddr b)" in  bspec)
    apply (fastforce simp: obj_at_def)
   apply (clarsimp dest!: is_aligned_ptrFromPAddrD)
-  done (*FIXME: ugly proof by Xin,Gao. needs general lemmas *)
+  done
 
 lemma user_mem_dom_cong:
   "kheap s = kheap s' \<Longrightarrow> dom (user_mem s) = dom (user_mem s')"
@@ -188,17 +173,12 @@ lemma device_frame_in_device_region:
   \<Longrightarrow> device_state (machine_state s) p \<noteq> None"
   by (auto simp add: pspace_respects_device_region_def dom_def device_mem_def)
 
-lemma is_aligned_pptrBaseOffset:
-"is_aligned pptrBaseOffset (pageBitsForSize sz)"
-  by (case_tac sz, simp_all add: pptrBaseOffset_def
-                   pptrBase_def physBase_def is_aligned_def)[1]
 
-global_naming Arch
-named_theorems AInvsPre_asms
+clear_named_theorems Arch_assms (* accumulate assumptions for AInvsPre locale *)
 
 
 
-lemma (* ptable_rights_imp_frame *)[AInvsPre_asms]:
+lemma (* ptable_rights_imp_frame *)[Arch_assms]:
   assumes "valid_state s"
   shows "ptable_rights t s x \<noteq> {} \<Longrightarrow>
          ptable_lift t s x = Some (addrFromPPtr y) \<Longrightarrow>
@@ -236,17 +216,14 @@ lemma (* ptable_rights_imp_frame *)[AInvsPre_asms]:
     apply (case_tac sz, simp_all add: word_bits_conv)[1]
   apply (clarsimp simp: field_simps simp: data_at_def)
   done
+
+lemmas AInvsPre_assms = Arch_assms (* extract accumulated assumptions *)
+
 end
 
 global_interpretation AInvsPre?: AInvsPre
   proof goal_cases
-  interpret Arch .
-  case 1 show ?case by (intro_locales; (unfold_locales, fact AInvsPre_asms)?)
+  case 1 show ?case by (intro_locales; (unfold_locales, fact ARM.AInvsPre_assms)?)
   qed
 
-requalify_facts
-  ARM.user_mem_dom_cong
-  ARM.device_mem_dom_cong
-  ARM.device_frame_in_device_region
-  ARM.is_aligned_pptrBaseOffset
 end

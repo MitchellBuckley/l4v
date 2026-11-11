@@ -6,18 +6,34 @@
 """Parser for skeletons of theory files which are completed
 by inserting parsed Haskell."""
 
-from __future__ import print_function
-from __future__ import absolute_import
 import sys
-import lhs_pars
 import os
 import os.path
+import tempfile
+
+import lhs_pars
+from msgs import error, warning, status
 
 
 def create_find_source():
     dir = os.environ['L4CAP']
     dir = os.path.join(dir, 'src')
     return lambda x: os.path.join(dir, x)
+
+
+def continued_lines(file):
+    '''Iterate over lines in file, using backslash at EOL as line continuation
+    character.'''
+    out = []
+    for line in file:
+        if line.endswith('\\\n'):
+            out.append(line[:-2])
+        else:
+            out.append(line)
+            yield ''.join(out)
+            out = []
+    if out:
+        raise IOError('No line after line continuation character')
 
 
 find_source = create_find_source()
@@ -37,15 +53,19 @@ for line in instructions:
         continue
 
     [input, output] = [bit.strip() for bit in instruct.split('-->')]
-    output_tmp = os.path.join(os.path.dirname(output), 'pars_skel.tmp')
+    # use unique temp file name, so that concurrent runs for different L4V_ARCH
+    # do not overwrite each other.
+    fd, output_tmp = tempfile.mkstemp(dir=os.path.dirname(output),
+                                      prefix=f'.{os.path.basename(output)}.',
+                                      suffix='.tmp')
 
-    output_f = open(output_tmp, 'w')
+    output_f = os.fdopen(fd, 'w')
     output_f.write('(* THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT EDIT. *)\n')
     output_f.write('(* instead, see the skeleton file %s *)\n' %
                    os.path.basename(input))
 
     input_f = open(input)
-    for line in input_f:
+    for line in continued_lines(input_f):
         if line.startswith('#INCLUDE_HASKELL'):
             call = lhs_pars.Call()
 
@@ -80,7 +100,7 @@ for line in instructions:
             try:
                 parsed = lhs_pars.parse(call)
             except:
-                print("%s -X-> %s" % (input, output))
+                warning("%s -X-> %s" % (input, output), input)
                 raise
 
             bad_type_assignment |= call.bad_type_assignment
@@ -99,7 +119,7 @@ for line in instructions:
 
     # at this point, output_tmp should exist, but output might not exist
     if not os.path.exists(output_tmp):
-        print('Error: {} did not generate correctly'.format(output_tmp))
+        error('{} did not generate correctly'.format(output_tmp))
         sys.exit(1)
 
     if os.path.exists(output):
@@ -108,26 +128,25 @@ for line in instructions:
             lines2 = [line for line in open(output)]
             changed = not (lines1 == lines2)
         except IOError as e:
-            print("IOError comparing {} and {}:\n{}".format(output_tmp, output, e))
+            error("IOError comparing {} and {}:\n{}".format(output_tmp, output, e))
             sys.exit(1)
     else:
-        #print('Warning: {} does not exist, assuming changed'.format(output))
+        # warning('{} does not exist, assuming changed'.format(output))
         changed = 1
 
     if changed:
         if not quiet:
-            print(instruct)
+            status(instruct)
+        # atomic replace: concurrent readers see either the old or the new file
         try:
-            os.unlink(output)
-        except:
-            pass
-        try:
-            os.rename(output_tmp, output)
-        except IOError as e:
-            print("IOError moving {} -> {}:\n{}".format(output_tmp, output, e))
+            os.replace(output_tmp, output)
+        except OSError as e:
+            error("IOError moving {} -> {}:\n{}".format(output_tmp, output, e))
             sys.exit(1)
     else:
         os.unlink(output_tmp)
+
+status("")
 
 if bad_type_assignment and not quiet:
     print("Note: for type assignments with parameters, define "

@@ -11,7 +11,7 @@ CSpace invariants
 theory ArchCSpaceInvPre_AI
 imports CSpaceInvPre_AI
 begin
-context Arch begin global_naming ARM
+context Arch begin arch_global_naming
 
 lemma aobj_ref_acap_rights_update[simp]:
   "aobj_ref (acap_rights_update f x) = aobj_ref x"
@@ -39,8 +39,7 @@ definition
               arch_cap.PageDirectoryCap ptr None
          | _ \<Rightarrow> acap)"
 
-lemma
-  cap_master_arch_cap_eqDs1:
+lemma cap_master_arch_cap_eqDs1:
   "cap_master_arch_cap cap =  (arch_cap.PageCap dev ref rghts sz mapdata)
      \<Longrightarrow> rghts = UNIV \<and> mapdata = None
           \<and> (\<exists>rghts mapdata. cap =  (arch_cap.PageCap dev ref rghts sz mapdata))"
@@ -52,6 +51,8 @@ lemma
      \<Longrightarrow> data = None \<and> (\<exists>data. cap =  (arch_cap.PageTableCap ptr data))"
   "cap_master_arch_cap cap =  (arch_cap.PageDirectoryCap ptr data2)
      \<Longrightarrow> data2 = None \<and> (\<exists>data2. cap =  (arch_cap.PageDirectoryCap ptr data2))"
+  "cap_master_arch_cap cap = SGISignalCap irq target
+     \<Longrightarrow> cap = SGISignalCap irq target"
   by (clarsimp simp: cap_master_arch_cap_def
              split: arch_cap.split_asm)+
 
@@ -64,6 +65,12 @@ definition
   "is_ap_cap cap \<equiv> case cap of (ArchObjectCap (arch_cap.ASIDPoolCap ap asid)) \<Rightarrow> True | _ \<Rightarrow> False"
 
 lemmas is_ap_cap_simps [simp] = is_ap_cap_def [split_simps cap.split arch_cap.split]
+
+(* No badges on arch capabilities on this architecture *)
+definition arch_cap_badge :: "arch_cap \<Rightarrow> machine_word option" where
+  "arch_cap_badge acap \<equiv> None"
+
+lemmas arch_cap_badge_simps[simp] = arch_cap_badge_def
 
 definition
   "reachable_pg_cap cap \<equiv> \<lambda>s.
@@ -150,8 +157,6 @@ lemma set_cap_valid_vs_lookup:
      apply (clarsimp dest!: table_cap_ref_vs_cap_ref_Some)+
   apply (auto simp: cte_wp_at_caps_of_state)[1]
   done
-
-crunch arch[wp]: set_cap "\<lambda>s. P (arch_state s)" (simp: split_def)
 
 lemma set_cap_valid_table_caps:
   "\<lbrace>\<lambda>s. valid_table_caps s
@@ -295,7 +300,7 @@ lemma cap_master_arch_cap_rights [simp]:
   by (simp add: cap_master_arch_cap_def acap_rights_update_def
            split: arch_cap.splits)
 
-lemma acap_rights_update_id [intro!, simp]:
+lemma valid_acap_rights_update_id [intro!, simp]:
   "valid_arch_cap ac s \<Longrightarrow> acap_rights_update (acap_rights ac) ac = ac"
   unfolding acap_rights_update_def acap_rights_def valid_arch_cap_def
   by (cases ac; simp)
@@ -311,15 +316,11 @@ lemma set_cap_hyp_refs_of [wp]:
   \<lbrace>\<lambda>rv s. P (state_hyp_refs_of s)\<rbrace>"
   apply (simp add: set_cap_def set_object_def split_def)
   apply (wp get_object_wp | wpc)+
-  apply (auto elim!: rsubst[where P=P]
-               simp: ARM.state_hyp_refs_of_def obj_at_def
-             intro!: ext
-             split: if_split_asm)
-  done
+  by (fastforce elim!: rsubst[where P=P]
+                simp: state_hyp_refs_of_def obj_at_def
+                split: if_split_asm)
 
-lemma state_hyp_refs_of_revokable[simp]:
-  "state_hyp_refs_of (s \<lparr> is_original_cap := m \<rparr>) = state_hyp_refs_of s"
-  by (simp add: state_hyp_refs_of_def)
+lemmas state_hyp_refs_of_revokable = state_hyp_refs_update
 
 lemma is_valid_vtable_root_is_arch_cap:
   "is_valid_vtable_root cap \<Longrightarrow> is_arch_cap cap"

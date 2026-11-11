@@ -12,12 +12,7 @@ theory ArchVSpace_AI
 imports VSpacePre_AI
 begin
 
-(* FIXME: move to lib *)
-lemma throw_opt_wp[wp]:
-  "\<lbrace>if v = None then E ex else Q (the v)\<rbrace> throw_opt ex v \<lbrace>Q\<rbrace>,\<lbrace>E\<rbrace>"
-  unfolding throw_opt_def by wpsimp auto
-
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 definition kernel_mappings_only :: "(pt_index \<Rightarrow> pte) \<Rightarrow> 'z::state_ext state \<Rightarrow> bool" where
   "kernel_mappings_only pt s \<equiv>
@@ -28,9 +23,10 @@ lemma find_vspace_for_asid_wp[wp]:
         (\<forall>pt. vspace_for_asid asid s = Some pt \<longrightarrow> Q pt s) \<rbrace>
    find_vspace_for_asid asid \<lbrace>Q\<rbrace>,\<lbrace>E\<rbrace>"
   unfolding find_vspace_for_asid_def
-  by (wpsimp wp: throw_opt_wp)
+  by wpsimp
 
-crunch pspace_in_kernel_window[wp]: perform_page_invocation "pspace_in_kernel_window"
+crunch perform_page_invocation
+  for pspace_in_kernel_window[wp]: "pspace_in_kernel_window"
   (simp: crunch_simps wp: crunch_wps)
 
 lemma asid_word_bits [simp]: "asid_bits < word_bits"
@@ -57,11 +53,12 @@ lemma dmo_pt_at_asid[wp]:
   "do_machine_op f \<lbrace>vspace_at_asid a pt\<rbrace>"
   by (wpsimp simp: do_machine_op_def vspace_at_asid_def)
 
-crunch valid_vs_lookup[wp]: do_machine_op "valid_vs_lookup"
+crunch do_machine_op
+  for valid_vs_lookup[wp]: "valid_vs_lookup"
 
 lemmas ackInterrupt_irq_masks = no_irq[OF no_irq_ackInterrupt]
 
-crunches sfence, hwASIDFlush, setVSpaceRoot
+crunch sfence, hwASIDFlush, setVSpaceRoot
   for underlying_memory_inv[wp]: "\<lambda>ms. P (underlying_memory ms)"
 
 
@@ -133,7 +130,7 @@ lemma valid_vs_lookup_unmap_strg:
 lemma asid_high_bits_shl:
   "is_aligned base asid_low_bits \<Longrightarrow> ucast (asid_high_bits_of base) << asid_low_bits = base"
   unfolding asid_high_bits_of_def asid_low_bits_def is_aligned_mask
-  by word_bitwise (simp add: word_size)
+  by word_eqI_solve
 
 lemma valid_asid_map_unmap:
   "valid_asid_map s \<and> is_aligned base asid_low_bits \<longrightarrow>
@@ -208,7 +205,7 @@ definition
        and (\<lambda>s. \<forall>asid vref. vs_cap_ref_arch acap = Some (asid, vref) \<longrightarrow>
                             vspace_for_asid asid s \<noteq> aobj_ref acap)"
 
-crunches unmap_page
+crunch unmap_page
   for aligned [wp]: pspace_aligned
   and "distinct" [wp]: pspace_distinct
   and valid_objs[wp]: valid_objs
@@ -233,7 +230,7 @@ next
   from \<open>0 < level\<close>  show ?case by (subst pt_lookup_from_level_simps) (wpsimp wp: IH)
 qed
 
-crunches unmap_page_table
+crunch unmap_page_table
   for aligned[wp]: pspace_aligned
   and valid_objs[wp]: valid_objs
   and "distinct"[wp]: pspace_distinct
@@ -250,7 +247,8 @@ definition
       and K (0 < asid)
       and (\<lambda>s. pool_for_asid asid s = Some p)"
 
-crunch device_state_inv[wp]: ackInterrupt "\<lambda>ms. P (device_state ms)"
+crunch ackInterrupt
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
 
 lemmas setIRQTrigger_irq_masks = no_irq[OF no_irq_setIRQTrigger]
 
@@ -298,7 +296,8 @@ lemma set_vm_root_invs[wp]:
   unfolding set_vm_root_def
   by (wpsimp simp: if_distribR wp: get_cap_wp)
 
-crunch pred_tcb_at[wp]: set_vm_root "pred_tcb_at proj P t"
+crunch set_vm_root
+  for pred_tcb_at[wp]: "\<lambda>s. Q (pred_tcb_at proj P t s)"
   (simp: crunch_simps)
 
 lemmas set_vm_root_typ_ats [wp] = abs_typ_at_lifts [OF set_vm_root_typ_at]
@@ -370,7 +369,7 @@ lemma mdb_cte_at_store_pte[wp]:
   apply (wpsimp wp: hoare_vcg_disj_lift hoare_vcg_all_lift simp: store_pte_def set_pt_def)
   done
 
-crunches store_pte
+crunch store_pte
   for global_refs[wp]: "\<lambda>s. P (global_refs s)"
 
 (* FIXME: move *)
@@ -689,7 +688,7 @@ lemma unmap_page_table_invs[wp]:
   apply (simp add: unmap_page_table_def)
   apply (rule hoare_pre)
    apply (wp dmo_invs | wpc | simp)+
-     apply (rule_tac Q="\<lambda>_. invs" in hoare_post_imp)
+     apply (rule_tac Q'="\<lambda>_. invs" in hoare_post_imp)
       apply safe
        apply (drule_tac Q="\<lambda>_ m'. underlying_memory m' p =
                                   underlying_memory m p" in use_valid)
@@ -933,15 +932,16 @@ lemma is_final_cap_caps_of_state_2D:
                         prod_eqI)
   done
 
-crunch underlying_memory[wp]: ackInterrupt, hwASIDFlush, read_stval, setVSpaceRoot, sfence
-  "\<lambda>m'. underlying_memory m' p = um"
+crunch ackInterrupt, hwASIDFlush, read_stval, setVSpaceRoot, sfence, ifence
+  for underlying_memory[wp]: "\<lambda>m'. underlying_memory m' p = um"
   (simp: cache_machine_op_defs machine_op_lift_def machine_rest_lift_def split_def)
 
-crunches storeWord, ackInterrupt, hwASIDFlush, read_stval, setVSpaceRoot, sfence
+crunch storeWord, ackInterrupt, hwASIDFlush, read_stval, setVSpaceRoot, sfence, ifence
   for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
   (simp: crunch_simps)
 
-crunch pspace_respects_device_region[wp]: perform_page_invocation "pspace_respects_device_region"
+crunch perform_page_invocation
+  for pspace_respects_device_region[wp]: "pspace_respects_device_region"
   (simp: crunch_simps wp: crunch_wps set_object_pspace_respects_device_region
          pspace_respects_device_region_dmo)
 
@@ -956,31 +956,6 @@ lemma mapM_x_store_pte_valid_cap[wp]:
 lemma mapM_x_store_pte_final_cap[wp]:
   "mapM_x (swp store_pte InvalidPTE) slots \<lbrace>is_final_cap' cap\<rbrace>"
   by (wpsimp wp: final_cap_lift)
-
-lemma table_base_plus:
-  "\<lbrakk> is_aligned pt_ptr pt_bits; i \<le> mask ptTranslationBits \<rbrakk> \<Longrightarrow>
-   table_base (pt_ptr + (i << pte_bits)) = pt_ptr"
-  unfolding is_aligned_mask bit_simps
-  by (subst word_plus_and_or_coroll; word_bitwise; simp add: word_size)
-
-lemma table_base_plus_ucast:
-  "is_aligned pt_ptr pt_bits \<Longrightarrow>
-   table_base (pt_ptr + (ucast (i::pt_index) << pte_bits)) = pt_ptr"
-  by (fastforce intro!: table_base_plus ucast_leq_mask simp: bit_simps)
-
-lemma table_index_plus:
-  "\<lbrakk> is_aligned pt_ptr pt_bits; i \<le> mask ptTranslationBits \<rbrakk> \<Longrightarrow>
-   table_index (pt_ptr + (i << pte_bits)) = ucast i"
-  unfolding is_aligned_mask bit_simps
-  by (subst word_plus_and_or_coroll; word_bitwise; simp add: word_size)
-
-lemma table_index_plus_ucast:
-  "is_aligned pt_ptr pt_bits \<Longrightarrow>
-   table_index (pt_ptr + (ucast (i::pt_index) << pte_bits)) = i"
-  apply (drule table_index_plus[where i="ucast i"])
-   apply (rule ucast_leq_mask, simp add: bit_simps)
-  apply (simp add: is_down_def target_size_def source_size_def word_size ucast_down_ucast_id)
-  done
 
 lemma mapM_x_store_pte_empty[wp]:
   "\<lbrace> \<lambda>s. slots = [p , p + (1 << pte_bits) .e. p + (1 << pt_bits) - 1] \<and>
@@ -1061,7 +1036,7 @@ lemma mapM_x_typ_at[wp]:
   "mapM_x (swp store_pte InvalidPTE) slots \<lbrace>\<lambda>s. P (typ_at T p s)\<rbrace>"
   by (wpsimp wp: mapM_x_wp')
 
-crunches unmap_page_table
+crunch unmap_page_table
   for global_refs[wp]: "\<lambda>s. P (global_refs s)"
   and vspace_for_asid[wp]: "\<lambda>s. P (vspace_for_asid asid s)"
   and valid_cap[wp]: "valid_cap cap"
@@ -1098,11 +1073,11 @@ lemma perform_pt_inv_unmap_invs[wp]:
    apply (subst table_base_plus[simplified shiftl_t2n mult_ac], assumption)
     apply (simp add: mask_def bit_simps)
     apply unat_arith
-    apply (simp add: unat_of_nat)
+    apply (subst (asm) unat_of_nat, simp)
    apply (subst table_base_plus[simplified shiftl_t2n mult_ac], assumption)
     apply (simp add: mask_def bit_simps)
     apply unat_arith
-    apply (simp add: unat_of_nat)
+    apply (subst (asm) unat_of_nat, simp)
    apply (rule conjI; clarsimp)
     apply (drule valid_global_refsD2, clarsimp)
     apply (simp add: cap_range_def)
@@ -1199,10 +1174,12 @@ lemma perform_page_table_invocation_invs[wp]:
   "\<lbrace>invs and valid_pti pti\<rbrace> perform_page_table_invocation pti \<lbrace>\<lambda>_. invs\<rbrace>"
   unfolding perform_page_table_invocation_def by (cases pti; wpsimp)
 
-crunch cte_wp_at [wp]: unmap_page "\<lambda>s. P (cte_wp_at P' p s)"
+crunch unmap_page
+  for cte_wp_at[wp]: "\<lambda>s. P (cte_wp_at P' p s)"
   (wp: crunch_wps simp: crunch_simps)
 
-crunch typ_at [wp]: unmap_page "\<lambda>s. P (typ_at T p s)"
+crunch unmap_page
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
   (wp: crunch_wps simp: crunch_simps)
 
 lemmas unmap_page_typ_ats [wp] = abs_typ_at_lifts [OF unmap_page_typ_at]
@@ -1476,7 +1453,7 @@ end
 
 locale asid_pool_map = Arch +
   fixes s ap pool asid ptp pt and s' :: "'a::state_ext state"
-  defines "s' \<equiv> s\<lparr>kheap := kheap s(ap \<mapsto> ArchObj (ASIDPool (pool(asid_low_bits_of asid \<mapsto> ptp))))\<rparr>"
+  defines "s' \<equiv> s\<lparr>kheap := (kheap s)(ap \<mapsto> ArchObj (ASIDPool (pool(asid_low_bits_of asid \<mapsto> ptp))))\<rparr>"
   assumes ap:  "asid_pools_of s ap = Some pool"
   assumes new: "pool (asid_low_bits_of asid) = None"
   assumes pt:  "pts_of s ptp = Some pt"
@@ -1639,7 +1616,7 @@ lemma valid_vspace_obj:
 
 end
 
-context Arch begin global_naming RISCV64
+context Arch begin arch_global_naming
 
 lemma set_asid_pool_arch_objs_map:
   "\<lbrace>valid_vspace_objs and valid_arch_state and valid_global_objs and
@@ -1668,13 +1645,6 @@ lemma set_asid_pool_arch_objs_map:
   apply (rule conjI; clarsimp)
   apply (frule asid_pool_map.valid_pool)
   apply (fastforce simp: obj_at_def)
-  done
-
-lemma caps_of_state_fun_upd:
-  "obj_at (same_caps val) p s \<Longrightarrow>
-   (caps_of_state (s\<lparr>kheap := (kheap s) (p \<mapsto> val)\<rparr>)) = caps_of_state s"
-  apply (drule caps_of_state_after_update)
-  apply (simp add: fun_upd_def)
   done
 
 lemma set_asid_pool_valid_arch_caps_map:
@@ -1797,12 +1767,10 @@ lemma store_pte_valid_arch_state_unreachable:
   unfolding valid_arch_state_def by (wpsimp wp: store_pte_valid_global_tables)
 
 lemma store_pte_valid_vs_lookup_unreachable:
-  "\<lbrace> valid_vs_lookup and pspace_aligned and valid_vspace_objs and valid_asid_table and
-     (\<lambda>s. \<forall>level. \<not> \<exists>\<rhd> (level, table_base p) s) and
-     (\<lambda>s. \<forall>slot asidopt. caps_of_state s slot = Some (ArchObjectCap (PageTableCap (table_base p) asidopt))
-                          \<longrightarrow> asidopt \<noteq> None) \<rbrace>
+  "\<lbrace>valid_vs_lookup and pspace_aligned and valid_vspace_objs and valid_asid_table and
+    (\<lambda>s. \<forall>level. \<not> \<exists>\<rhd> (level, table_base p) s)\<rbrace>
    store_pte p pte
-   \<lbrace> \<lambda>_. valid_vs_lookup \<rbrace>"
+   \<lbrace>\<lambda>_. valid_vs_lookup\<rbrace>"
   unfolding valid_vs_lookup_def
   apply (wpsimp wp: hoare_vcg_all_lift hoare_vcg_imp_lift' store_pte_vs_lookup_target_unreachable)
   apply (erule disjE; clarsimp)
@@ -1985,20 +1953,11 @@ lemma invs_aligned_pdD:
   "\<lbrakk> pspace_aligned s; valid_arch_state s \<rbrakk> \<Longrightarrow> is_aligned (riscv_global_pt (arch_state s)) pt_bits"
   by (clarsimp simp: valid_arch_state_def)
 
-lemma do_machine_op_valid_kernel_mappings:
-  "do_machine_op f \<lbrace>valid_kernel_mappings\<rbrace>"
-  unfolding valid_kernel_mappings_def by wp
-
 lemma valid_vspace_obj_default:
   assumes tyunt: "ty \<noteq> Structures_A.apiobject_type.Untyped"
-  shows "ArchObj ao = default_object ty dev us \<Longrightarrow> valid_vspace_obj level ao s'"
+  shows "ArchObj ao = default_object ty dev us d \<Longrightarrow> valid_vspace_obj level ao s'"
   by (cases ty; simp add: default_object_def tyunt)
 
-end
-
-context begin interpretation Arch .
-requalify_facts
-  do_machine_op_valid_kernel_mappings
 end
 
 end

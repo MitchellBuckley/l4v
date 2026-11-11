@@ -93,7 +93,7 @@ pptrTop :: VPtr
 pptrTop = VPtr 0xFFFFFFFF80000000
 
 kernelELFPAddrBase :: PAddr
-kernelELFPAddrBase = toPAddr $ (fromPAddr Platform.physBase) + 0x4000000
+kernelELFPAddrBase = Platform.physBase
 
 kernelELFBase :: VPtr
 kernelELFBase = VPtr $ fromVPtr pptrTop + (fromPAddr kernelELFPAddrBase .&. (mask 30))
@@ -147,10 +147,10 @@ resetTimer = do
     liftIO $ Platform.resetTimer cbptr
 
 initIRQController :: MachineMonad ()
-initIRQController = error "Unimplemented - boot code"
+initIRQController = error "Unimplemented init code"
 
 setIRQTrigger :: IRQ -> Bool -> MachineMonad ()
-setIRQTrigger irq trigger = error "Unimplemented - machine op"
+setIRQTrigger irq trigger = isabelleOp
 
 getRestartPC = getRegister (Register RISCV64.FaultIP)
 setNextPC = setRegister (Register RISCV64.NextIP)
@@ -168,7 +168,7 @@ setNextPC = setRegister (Register RISCV64.NextIP)
 -- that might previously have been stored in the region.
 
 clearMemory :: PPtr Word -> Int -> MachineMonad ()
-clearMemory ptr byteLength = error "Unimplemented -- machine op"
+clearMemory ptr byteLength = isabelleOp
 
 -- This function is called before a region of memory is made user-accessible.
 -- Though in Haskell, it is implemented as "clearMemory",
@@ -191,22 +191,25 @@ freeMemory _ _ = return ()
 -- caches must be done separately.
 
 clearMemoryVM :: PPtr Word -> Int -> MachineMonad ()
-clearMemoryVM ptr bits = error "Unimplemented -- machine op"
+clearMemoryVM ptr bits = isabelleOp
 
 {- Address Space Setup -}
 
 setVSpaceRoot :: PAddr -> Word64 -> MachineMonad ()
-setVSpaceRoot addr asid = error "Unimplemented - machine op"
+setVSpaceRoot addr asid = isabelleOp
 
 {- Memory Barriers -}
 
 sfence :: MachineMonad ()
-sfence = error "Unimplemented - machine op"
+sfence = isabelleOp
+
+ifence :: MachineMonad ()
+ifence = isabelleOp
 
 {- Cache Cleaning and TLB Flushes -}
 
 hwASIDFlush :: Word64 -> MachineMonad ()
-hwASIDFlush asid = error "unimplemented - machine op"
+hwASIDFlush asid = isabelleOp
 
 {- Page Table Structure -}
 
@@ -263,14 +266,10 @@ data PTE
         pteRights :: VMRights }
     | PageTablePTE {
         ptePPN :: PAddr,
-        pteGlobal :: Bool,
-        pteUser :: Bool }
+        pteGlobal :: Bool }
     deriving (Show, Eq)
 
 {- Simulator callbacks -}
-
-pageColourBits :: Int
-pageColourBits = Platform.pageColourBits
 
 getMemoryRegions :: MachineMonad [(PAddr, PAddr)]
 getMemoryRegions = do
@@ -319,7 +318,7 @@ debugPrint :: String -> MachineMonad ()
 debugPrint str = liftIO $ putStrLn str
 
 read_stval :: MachineMonad Word
-read_stval = error "Unimplemented - machine op"
+read_stval = isabelleOp
 
 plic_complete_claim :: IRQ -> MachineMonad ()
-plic_complete_claim = error "Unimplemented - machine op"
+plic_complete_claim = isabelleOp

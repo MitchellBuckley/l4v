@@ -12,7 +12,7 @@ imports
   ArchInvocation_A
 begin
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   This is a placeholder function. We may wish to extend the specification
@@ -25,9 +25,13 @@ definition reserve_region :: "obj_ref \<Rightarrow> nat \<Rightarrow> bool \<Rig
 text \<open>Initialise architecture-specific objects.\<close>
 
 definition init_arch_objects ::
-  "apiobject_type \<Rightarrow> obj_ref \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> obj_ref list \<Rightarrow> (unit,'z::state_ext) s_monad"
+  "apiobject_type \<Rightarrow> bool \<Rightarrow> obj_ref \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> obj_ref list \<Rightarrow> (unit,'z::state_ext) s_monad"
   where
-  "init_arch_objects new_type ptr num_objects obj_sz refs \<equiv> return ()"
+  "init_arch_objects new_type is_device ptr num_objects obj_sz refs \<equiv> return ()"
+
+definition arch_post_reset_untyped :: "bool \<Rightarrow> nat \<Rightarrow> (unit,'z::state_ext) s_monad" where
+  "arch_post_reset_untyped is_device sz \<equiv>
+     when (\<not>is_device \<and> pageBits \<le> sz) $ do_machine_op ifence"
 
 definition empty_context :: user_context
   where

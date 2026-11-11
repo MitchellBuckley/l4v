@@ -16,7 +16,7 @@ theory StateTranslation_D
 imports Lemmas_D
 begin
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 type_synonym kernel_object = Structures_A.kernel_object
 type_synonym tcb = Structures_A.tcb
@@ -30,6 +30,14 @@ type_synonym pte = ARM_A.pte
 definition
   transform_cptr :: "word32 \<Rightarrow> cdl_cptr" where
   "transform_cptr w \<equiv> w"
+
+definition transform_vm_attributes :: "vm_attributes \<Rightarrow> vmpage_size \<Rightarrow> word32" where
+  "transform_vm_attributes attr sz \<equiv>
+     case sz of
+       ARMSmallPage \<Rightarrow> attribs_to_word (attr - {Global, ParityEnabled})
+     | ARMLargePage \<Rightarrow> attribs_to_word (attr - {Global, ParityEnabled})
+     | ARMSection \<Rightarrow>attribs_to_word (attr - {Global})
+     | ARMSuperSection \<Rightarrow> attribs_to_word (attr - {Global})"
 
 (* transform an abstract-spec recv_slot description to a capDL one *)
 definition
@@ -53,12 +61,12 @@ where
     else if x = 2  then Some EndpointType
     else if x = 3  then Some NotificationType
     else if x = 4  then Some CNodeType
-    else if x = 5  then Some (FrameType 12)
-    else if x = 6  then Some (FrameType 16)
-    else if x = 7  then Some (FrameType 20)
-    else if x = 8  then Some (FrameType 24)
-    else if x = 9  then Some PageTableType
-    else if x = 10 then Some PageDirectoryType
+    else if x = 5  then Some (PageTableType PD)
+    else if x = 6  then Some (FrameType 12)
+    else if x = 7  then Some (FrameType 16)
+    else if x = 8  then Some (FrameType 20)
+    else if x = 9  then Some (FrameType 24)
+    else if x = 10 then Some (PageTableType PT)
     else None"
 
 definition
@@ -159,6 +167,12 @@ where
     Some (TcbSetSpaceIntent fault_ep croot_data vroot_data)
    | _ \<Rightarrow> None)"
 
+definition transform_intent_tcb_set_flags :: "machine_word list \<Rightarrow> cdl_tcb_intent option" where
+  "transform_intent_tcb_set_flags args \<equiv>
+     case args of flags_set # flags_clear # _ \<Rightarrow>
+       Some $ TcbSetFlagsIntent flags_set flags_clear
+     | _ \<Rightarrow> None"
+
 definition
   transform_cnode_index_and_depth :: "(word32 \<Rightarrow> word32 \<Rightarrow> 'a) \<Rightarrow> word32 list \<Rightarrow> 'a option"
 where
@@ -222,7 +236,7 @@ where
   "transform_intent_issue_irq_handler args \<equiv>
    case args of
       irqW#index#depth#_ \<Rightarrow>
-         Some (IrqControlIssueIrqHandlerIntent ((ucast irqW)::10 word) index depth)
+         Some (IrqControlIssueIrqHandlerIntent (ucast irqW :: irq) index depth)
     | _ \<Rightarrow> Nothing"
 
 definition
@@ -231,7 +245,17 @@ where
   "arch_transform_intent_issue_irq_handler args \<equiv>
    case args of
       irqW#trigger#index#depth#_ \<Rightarrow>
-         Some (IrqControlIssueIrqHandlerIntent ((ucast irqW)::10 word) index depth)
+         Some (IrqControlIssueIrqHandlerIntent (ucast irqW) index depth)
+    | _ \<Rightarrow> Nothing"
+
+definition
+  arch_transform_intent_issue_sgi_signal :: "word32 list \<Rightarrow> cdl_irq_control_intent option"
+where
+  "arch_transform_intent_issue_sgi_signal args \<equiv>
+   case args of
+      irqW#targetsW#index#depth#_ \<Rightarrow>
+         Some (ArchIrqControlIssueIrqHandlerIntent
+                 (ARMIssueSGISignalIntent irqW targetsW index depth))
     | _ \<Rightarrow> Nothing"
 
 definition
@@ -253,12 +277,39 @@ where
     | _ \<Rightarrow> Nothing)"
 
 definition
-  transform_intent_domain :: "word32 list \<Rightarrow> cdl_domain_intent option"
+  transform_intent_domain_set :: "word32 list \<Rightarrow> cdl_domain_intent option"
 where
-  "transform_intent_domain args =
+  "transform_intent_domain_set args =
      (case args of
          d#_ \<Rightarrow> Some (DomainSetIntent (ucast d :: word8))
        | _   \<Rightarrow> Nothing)"
+
+definition
+  transform_intent_domain_set_start :: "word32 list \<Rightarrow> cdl_domain_intent option"
+where
+  "transform_intent_domain_set_start args \<equiv>
+     case args of
+       start#_ \<Rightarrow> Some (DomainScheduleSetStartIntent (unat start))
+     | _   \<Rightarrow> None"
+
+definition
+  cdl_duration_arg :: "word32 list \<Rightarrow> domain_duration option"
+where
+  "cdl_duration_arg args \<equiv>
+     case args of
+       dur_low # dur_high # _ \<Rightarrow> Some ((ucast dur_high << 32) + ucast dur_low)
+     | _ \<Rightarrow> None"
+
+definition
+  transform_intent_domain_configure :: "word32 list \<Rightarrow> cdl_domain_intent option"
+where
+  "transform_intent_domain_configure args \<equiv>
+     case args of
+       idx # domain # more_args \<Rightarrow> do {
+         duration \<leftarrow> cdl_duration_arg more_args;
+         Some (DomainScheduleConfigureIntent (unat idx) (ucast domain) duration)
+       }
+     | _  \<Rightarrow> None"
 
 (* Added for IOAPIC patch *)
 definition
@@ -310,6 +361,9 @@ definition
     | GenInvocationLabel TCBBindNotification \<Rightarrow> Some (TcbIntent TcbBindNTFNIntent)
     | GenInvocationLabel TCBUnbindNotification \<Rightarrow> Some (TcbIntent TcbUnbindNTFNIntent)
     | GenInvocationLabel TCBSetTLSBase \<Rightarrow> Some (TcbIntent TcbSetTLSBaseIntent)
+    | GenInvocationLabel TCBSetFlags \<Rightarrow>
+          map_option TcbIntent
+                   (transform_intent_tcb_set_flags args)
     | GenInvocationLabel CNodeRevoke \<Rightarrow>
           map_option CNodeIntent
                    (transform_cnode_index_and_depth CNodeRevokeIntent args)
@@ -367,7 +421,19 @@ definition
     | ArchInvocationLabel ARMIRQIssueIRQHandler \<Rightarrow>
                           map_option IrqControlIntent
                                    (arch_transform_intent_issue_irq_handler args)
-    | GenInvocationLabel DomainSetSet \<Rightarrow> map_option DomainIntent (transform_intent_domain args)"
+    | ArchInvocationLabel ARMIRQIssueSGISignal \<Rightarrow>
+                          map_option IrqControlIntent
+                                   (arch_transform_intent_issue_sgi_signal args)
+    | GenInvocationLabel DomainSetSet \<Rightarrow>
+        map_option DomainIntent (transform_intent_domain_set args)
+    | GenInvocationLabel DomainScheduleSetStart \<Rightarrow>
+        map_option DomainIntent (transform_intent_domain_set_start args)
+    | GenInvocationLabel DomainScheduleConfigure \<Rightarrow>
+        map_option DomainIntent (transform_intent_domain_configure args)"
+
+lemmas transform_intent_simps =
+  transform_intent_def[split_simps invocation_label.split gen_invocation_labels.split
+                                   arch_invocation_label.split]
 
 lemmas transform_intent_tcb_defs =
   transform_intent_tcb_read_registers_def
@@ -379,6 +445,7 @@ lemmas transform_intent_tcb_defs =
   transform_intent_tcb_set_sched_params_def
   transform_intent_tcb_set_ipc_buffer_def
   transform_intent_tcb_set_space_def
+  transform_intent_tcb_set_flags_def
 
 lemma transform_tcb_intent_invocation:
   "transform_intent label args = Some (TcbIntent ti)
@@ -396,7 +463,8 @@ lemma transform_tcb_intent_invocation:
    ((label = GenInvocationLabel TCBResume) = (ti = TcbResumeIntent)) \<and>
    ((label = GenInvocationLabel TCBBindNotification) = (ti = TcbBindNTFNIntent)) \<and>
    ((label = GenInvocationLabel TCBUnbindNotification) = (ti = TcbUnbindNTFNIntent)) \<and>
-   ((label = GenInvocationLabel TCBSetTLSBase) = (ti = TcbSetTLSBaseIntent))
+   ((label = GenInvocationLabel TCBSetTLSBase) = (ti = TcbSetTLSBaseIntent) \<and>
+   ((label = GenInvocationLabel TCBSetFlags) = (ti = TcbSetFlagsIntent (args ! 0) (args ! 1) \<and> length args \<ge> 2)))
    ) \<and>
    (
     label \<noteq> GenInvocationLabel InvalidInvocation \<and>
@@ -428,17 +496,21 @@ lemma transform_tcb_intent_invocation:
     label \<noteq> ArchInvocationLabel ARMPDCleanInvalidate_Data \<and>
     label \<noteq> ArchInvocationLabel ARMPDUnify_Instruction \<and>
     label \<noteq> ArchInvocationLabel ARMASIDControlMakePool \<and>
-    label \<noteq> GenInvocationLabel DomainSetSet)"
+    label \<noteq> ArchInvocationLabel ARMIRQIssueSGISignal \<and>
+    label \<noteq> GenInvocationLabel DomainSetSet \<and>
+    label \<noteq> GenInvocationLabel DomainScheduleConfigure \<and>
+    label \<noteq> GenInvocationLabel DomainScheduleSetStart)"
   apply(intro conjI)
    apply(rule iffI,
          simp add: transform_intent_def transform_intent_tcb_defs split: list.split_asm,
          simp add: transform_intent_def transform_intent_tcb_defs
               split: gen_invocation_labels.split_asm invocation_label.split_asm
                      arch_invocation_label.split_asm list.split_asm)+
-                               (* 30 subgoals *)
-                               apply(simp add: transform_intent_def transform_intent_tcb_defs
-                                          split: gen_invocation_labels.split_asm invocation_label.split_asm
-                                                 arch_invocation_label.split_asm)+
+                               (* 33 subgoals *)
+                                  apply(simp add: transform_intent_def transform_intent_tcb_defs
+                                             split: gen_invocation_labels.split_asm
+                                                    invocation_label.split_asm
+                                                    arch_invocation_label.split_asm)+
   done
 
 lemma transform_intent_isnot_UntypedIntent:
@@ -453,7 +525,8 @@ lemma transform_intent_isnot_UntypedIntent:
    apply(unfold transform_intent_untyped_retype_def)
    apply (clarsimp split: list.split, safe, simp_all)[1]
    apply (clarsimp simp: transform_type_def)
-   apply (simp add: linorder_not_less eval_nat_numeral le_Suc_eq unat_arith_simps)
+   apply (simp add: unat_arith_simps)
+   apply (simp add: eval_nat_numeral linorder_not_less le_Suc_eq)
   apply(erule disjE)
    apply(auto simp: transform_intent_def option_map_def
               split: gen_invocation_labels.split invocation_label.split arch_invocation_label.split
@@ -529,6 +602,7 @@ lemma transform_intent_isnot_TcbIntent:
           (label = GenInvocationLabel TCBSetSchedParams \<longrightarrow> length args < 2) \<and>
           (label = GenInvocationLabel TCBSetIPCBuffer \<longrightarrow> length args < 1) \<and>
           (label = GenInvocationLabel TCBSetSpace \<longrightarrow> length args < 3) \<and>
+          (label = GenInvocationLabel TCBSetFlags \<longrightarrow> length args < 2) \<and>
           (label \<noteq> GenInvocationLabel TCBSuspend) \<and>
           (label \<noteq> GenInvocationLabel TCBResume) \<and>
           (label \<noteq> GenInvocationLabel TCBBindNotification) \<and>
@@ -599,9 +673,13 @@ where
  * Transform a cap in the abstract spec to an equivalent
  * CapDL cap.
  *)
+definition free_range_of_untyped :: "nat \<Rightarrow> nat \<Rightarrow> cdl_object_id \<Rightarrow> cdl_object_id set" where
+  "free_range_of_untyped \<equiv> (\<lambda>idx size_bits ptr.
+     if idx \<le> 2 ^ size_bits - 1 \<and> ptr \<le> ptr + of_nat idx
+     then {ptr + of_nat idx .. ptr + 2 ^ size_bits - 1}
+     else {})"
 
-definition "free_range_of_untyped \<equiv> (\<lambda>idx size_bits ptr.
-  (if (idx \<le> 2^size_bits - 1) then {ptr + of_nat idx .. ptr + 2^size_bits - 1} else {}))"
+
 definition
   transform_cap :: "cap \<Rightarrow> cdl_cap"
 where
@@ -637,9 +715,11 @@ where
         | ARM_A.PageCap dev ptr cap_rights_ sz mp \<Rightarrow>
             Types_D.FrameCap dev ptr cap_rights_ (pageBitsForSize sz) Real (transform_mapping mp)
         | ARM_A.PageTableCap ptr mp \<Rightarrow>
-            Types_D.PageTableCap ptr Real (transform_mapping mp)
+            Types_D.PageTableCap PT ptr Real (transform_mapping mp)
         | ARM_A.PageDirectoryCap ptr mp \<Rightarrow>
-            Types_D.PageDirectoryCap ptr Real (option_map transform_asid mp)
+            Types_D.PageTableCap PD ptr Real (option_map (\<lambda>asid. (transform_asid asid, 0)) mp)
+        | ARM_A.SGISignalCap irq target \<Rightarrow>
+            Types_D.SGISignalCap irq target
         )
   "
 
@@ -663,9 +743,7 @@ where
       Some $ bin_to_bl bits (of_nat n)"
 
 lemma nat_to_bl_id [simp]: "nat_to_bl (size (x :: (('a::len) word))) (unat x) = Some (to_bl x)"
-  apply (clarsimp simp: nat_to_bl_def to_bl_def)
-  apply (auto simp: uint_nat le_def word_size)
-  done
+  by (clarsimp simp: nat_to_bl_def to_bl_def le_def word_size)
 
 (* FIXME: MOVE *)
 definition
@@ -756,7 +834,8 @@ where
 definition
   get_tcb_message_info :: "tcb \<Rightarrow> Structures_A.message_info"
 where
-  "get_tcb_message_info t \<equiv> data_to_message_info ((arch_tcb_context_get (tcb_arch t)) msg_info_register)"
+  "get_tcb_message_info t \<equiv>
+     data_to_message_info ((user_regs (arch_tcb_context_get (tcb_arch t))) msg_info_register)"
 
 definition
   get_tcb_mrs :: "machine_state \<Rightarrow> tcb \<Rightarrow> word32 list"
@@ -764,7 +843,7 @@ where
   "get_tcb_mrs ms tcb \<equiv>
     let
       info = get_tcb_message_info tcb;
-      cpu_mrs = map (arch_tcb_context_get (tcb_arch tcb)) msg_registers;
+      cpu_mrs = map (user_regs (arch_tcb_context_get (tcb_arch tcb))) msg_registers;
       mem_mrs = get_ipc_buffer_words ms tcb [length msg_registers + 1 ..< Suc msg_max_length]
     in
       (take (unat (mi_length info)) (cpu_mrs @ mem_mrs))"
@@ -783,7 +862,7 @@ where
                      (invocation_type (mi_label mi))
                      (get_tcb_mrs ms tcb)),
     cdl_intent_error = guess_error (mi_label mi),
-    cdl_intent_cap = arch_tcb_context_get (tcb_arch tcb) cap_register,
+    cdl_intent_cap = user_regs (arch_tcb_context_get (tcb_arch tcb)) cap_register,
     cdl_intent_extras = get_ipc_buffer_words ms tcb [buffer_cptr_index ..< buffer_cptr_index + (unat (mi_extra_caps mi))],
     cdl_intent_recv_slot = case (get_ipc_buffer_words ms tcb [offset ..< offset + 3]) of
                                 [croot, index, depth] \<Rightarrow> Some (croot, index, unat depth)
@@ -799,9 +878,9 @@ abbreviation
   "tcb_has_fault \<equiv> \<lambda>tcb. tcb_fault tcb \<noteq> None"
 
 definition
-  transform_tcb :: "machine_state \<Rightarrow> obj_ref \<Rightarrow> tcb \<Rightarrow> etcb \<Rightarrow> cdl_object"
+  transform_tcb :: "machine_state \<Rightarrow> obj_ref \<Rightarrow> tcb \<Rightarrow> cdl_object"
 where
-  "transform_tcb ms ptr tcb etcb \<equiv>
+  "transform_tcb ms ptr tcb \<equiv>
     Types_D.Tcb \<lparr> cdl_tcb_caps = [
                    tcb_cspace_slot \<mapsto> (transform_cap $ tcb_ctable tcb),
                    tcb_vspace_slot \<mapsto> (transform_cap $ tcb_vtable tcb),
@@ -809,7 +888,8 @@ where
                    tcb_caller_slot \<mapsto> (transform_cap $ tcb_caller tcb),
                    tcb_ipcbuffer_slot \<mapsto> (transform_cap $ tcb_ipcframe tcb),
                    tcb_pending_op_slot \<mapsto> (infer_tcb_pending_op ptr (tcb_state tcb)),
-                   tcb_boundntfn_slot \<mapsto> (infer_tcb_bound_notification (tcb_bound_notification tcb))
+                   tcb_boundntfn_slot \<mapsto> (infer_tcb_bound_notification (tcb_bound_notification tcb)),
+                   tcb_boundvcpu_slot \<mapsto> cdl_cap.NullCap
                  ],
 
                  cdl_tcb_fault_endpoint = (of_bl (tcb_fault_handler tcb)),
@@ -817,7 +897,11 @@ where
                  \<comment> \<open>Decode the thread's intent.\<close>
                  cdl_tcb_intent = transform_full_intent ms ptr tcb,
                  cdl_tcb_has_fault = (tcb_has_fault tcb),
-                 cdl_tcb_domain = tcb_domain etcb
+                 cdl_tcb_domain = tcb_domain tcb,
+
+                 \<comment> \<open>FIXME: we're ignoring ASpec data here. We ought to carry over the data and
+                            update DRefine proofs\<close>
+                 cdl_tcb_extra = default_tcb_extra_data
                 \<rparr>"
 
 definition
@@ -825,7 +909,7 @@ definition
 where
   "transform_asid_pool_entry p \<equiv> case p of
        None \<Rightarrow> Types_D.NullCap
-     | Some p \<Rightarrow> Types_D.PageDirectoryCap p Fake None"
+     | Some p \<Rightarrow> Types_D.PageTableCap PD p (Fake undefined) None"
 
 (*
  * Transform an AsidPool.
@@ -854,12 +938,12 @@ definition
 where
   "transform_pte pte \<equiv> case pte of
            ARM_A.InvalidPTE \<Rightarrow> cdl_cap.NullCap
-         | ARM_A.LargePagePTE ref _ rights_ \<Rightarrow>
+         | ARM_A.LargePagePTE ref attr rights_ \<Rightarrow>
              Types_D.FrameCap False (transform_paddr ref) rights_
-                              (pageBitsForSize ARMLargePage) Fake None
-         | ARM_A.SmallPagePTE ref _ rights_ \<Rightarrow>
+                              (pageBitsForSize ARMLargePage) (Fake (attribs_to_word attr))  None
+         | ARM_A.SmallPagePTE ref attr rights_ \<Rightarrow>
              Types_D.FrameCap False (transform_paddr ref) rights_
-                              (pageBitsForSize ARMSmallPage) Fake None"
+                              (pageBitsForSize ARMSmallPage) (Fake (attribs_to_word attr)) None"
 
 definition
   transform_page_table_contents :: "(word8 \<Rightarrow> ARM_A.pte) \<Rightarrow> (nat \<Rightarrow> cdl_cap option)"
@@ -876,14 +960,14 @@ definition
 where
   "transform_pde pde \<equiv> case pde of
            ARM_A.InvalidPDE \<Rightarrow> cdl_cap.NullCap
-         | ARM_A.PageTablePDE ref _ _ \<Rightarrow>
-             Types_D.PageTableCap (transform_paddr ref) Fake None
-         | ARM_A.SectionPDE ref _ _ rights_ \<Rightarrow>
+         | ARM_A.PageTablePDE ref attr _ \<Rightarrow>
+             Types_D.PageTableCap PT (transform_paddr ref) (Fake (attribs_to_word attr)) None
+         | ARM_A.SectionPDE ref attr _ rights_ \<Rightarrow>
              Types_D.FrameCap False (transform_paddr ref) rights_
-                              (pageBitsForSize ARMSection) Fake None
-         | ARM_A.SuperSectionPDE ref _ rights_ \<Rightarrow>
+                              (pageBitsForSize ARMSection) (Fake (attribs_to_word attr)) None
+         | ARM_A.SuperSectionPDE ref attr rights_ \<Rightarrow>
              Types_D.FrameCap False (transform_paddr ref) rights_
-                              (pageBitsForSize ARMSuperSection) Fake None"
+                              (pageBitsForSize ARMSuperSection) (Fake (attribs_to_word attr)) None"
 
 definition
   kernel_pde_mask ::  "(12 word \<Rightarrow> ARM_A.pde) \<Rightarrow> (12 word \<Rightarrow> ARM_A.pde)"
@@ -896,13 +980,11 @@ definition
 where
   "transform_page_directory_contents M \<equiv> unat_map (Some o transform_pde o kernel_pde_mask M)"
 
-(* sseefried: The 'undefined' case below will never occur as long as this function is invoked in an environment
-   where the invariant 'valid_etcbs s' holds *)
 (* Transform a kernel object. *)
 definition
-  transform_object :: "machine_state \<Rightarrow> obj_ref \<Rightarrow> etcb option \<Rightarrow> kernel_object \<Rightarrow> cdl_object"
+  transform_object :: "machine_state \<Rightarrow> obj_ref \<Rightarrow> kernel_object \<Rightarrow> cdl_object"
   where
-  "transform_object ms ref opt_etcb ko \<equiv> case ko of
+  "transform_object ms ref ko \<equiv> case ko of
            Structures_A.CNode 0 c \<Rightarrow>
               Types_D.IRQNode \<lparr>cdl_irq_node_caps = transform_cnode_contents 0 c\<rparr>
          | Structures_A.CNode sz c \<Rightarrow>
@@ -910,17 +992,18 @@ definition
                 cdl_cnode_caps = transform_cnode_contents sz c,
                 cdl_cnode_size_bits = sz
                 \<rparr>
-         | Structures_A.TCB tcb \<Rightarrow> (case opt_etcb of Some etcb \<Rightarrow> transform_tcb ms ref tcb etcb | None \<Rightarrow> undefined)
+         | Structures_A.TCB tcb \<Rightarrow> transform_tcb ms ref tcb
          | Structures_A.Endpoint _ \<Rightarrow> Types_D.Endpoint
          | Structures_A.Notification _ \<Rightarrow> Types_D.Notification
          | Structures_A.ArchObj (ARM_A.ASIDPool ap) \<Rightarrow>
                 Types_D.AsidPool \<lparr>cdl_asid_pool_caps = (transform_asid_pool_contents ap)\<rparr>
          | Structures_A.ArchObj (ARM_A.PageTable ptx) \<Rightarrow>
-                Types_D.PageTable \<lparr>cdl_page_table_caps = (transform_page_table_contents ptx)\<rparr>
+                Types_D.PageTable PT (transform_page_table_contents ptx)
          | Structures_A.ArchObj (ARM_A.PageDirectory pd) \<Rightarrow>
-                Types_D.PageDirectory \<lparr>cdl_page_directory_caps = (transform_page_directory_contents pd)\<rparr>
+                Types_D.PageTable PD (transform_page_directory_contents pd)
          | Structures_A.ArchObj (ARM_A.DataPage dev sz) \<Rightarrow>
-                Types_D.Frame \<lparr>cdl_frame_size_bits = pageBitsForSize sz\<rparr>"
+                Types_D.Frame \<lparr>cdl_frame_size_bits = pageBitsForSize sz,
+                               cdl_frame_fills = default_frame_fill_data\<rparr>"
 
 lemmas transform_object_simps [simp] =
   transform_object_def [split_simps Structures_A.kernel_object.split ARM_A.arch_kernel_obj.split]
@@ -971,7 +1054,7 @@ definition
   transform_objects :: "det_ext state \<Rightarrow> (cdl_object_id \<Rightarrow> cdl_object option)"
 where
    "transform_objects s = (\<lambda>ptr. Some Types_D.Untyped) |` (- {idle_thread s}) ++
-                           (\<lambda>ptr. map_option (transform_object (machine_state s) ptr ((ekheap s |` (- {idle_thread s})) ptr))
+                           (\<lambda>ptr. map_option (transform_object (machine_state s) ptr)
                                 ((kheap s  |` (- {idle_thread s})) ptr))"
 
 lemma evalMonad_return [simp]:
@@ -1154,7 +1237,9 @@ where
     cdl_current_thread = transform_current_thread s,
     cdl_irq_node       = interrupt_irq_node s,
     cdl_asid_table     = transform_asid_table s,
-    cdl_current_domain = transform_current_domain s
+    cdl_current_domain = transform_current_domain s,
+    cdl_dom_schedule   = domain_list s,
+    cdl_dom_start      = domain_start_index s
     \<rparr>"
 
 end

@@ -47,6 +47,7 @@ IO pages are invoked using InvokePage (cap contains a bit indicating it is an IO
 #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
 >     | InvokeVCPU VCPUInvocation
 #endif
+>     | InvokeSGISignal SGISignalInvocation
 #ifdef CONFIG_ARM_SMMU
 >     | InvokeIOSpace IOSpaceInvocation
 >     | InvokeIOPageTable IOPageTableInvocation
@@ -118,8 +119,6 @@ IO pages are invoked using InvokePage (cap contains a bit indicating it is an IO
 
 \subsection{VCPUs}
 
-FIXME ARMHYP move HyperReg definition (to Hardware?)
-
 > type HyperReg = VCPUReg
 > type HyperRegVal = Word
 
@@ -133,12 +132,20 @@ FIXME ARMHYP move HyperReg definition (to Hardware?)
 
 #endif
 
+\subsection{SGI}
+
+> data SGISignalInvocation
+>     = SGISignalGenerate {
+>         sgiIRQ :: Word,
+>         sgiTargets :: Word }
+>     deriving (Show, Eq)
+
 #ifdef CONFIG_ARM_SMMU
 
 \subsection{IO Page Tables}
 
 Note the assymetry: for IO pages, IOPageTableMap handles IOPDEs and PageMapIO
-handles IOPTEs, but on the normal MMU side PageMap handles both. FIXME ARMHYP check this again
+handles IOPTEs, but on the normal MMU side PageMap handles both.
 
 > data IOPageTableInvocation
 >     = IOPageTableUnmap {
@@ -180,6 +187,11 @@ The ARM platform requires an interrupt control call to record whether the interr
 >         issueHandlerSlot,
 >         issueHandlerControllerSlot :: PPtr CTE,
 >         issueHandlerTrigger :: Bool }
+>     | IssueSGISignal {
+>         issueSGIIRQ :: Word,
+>         issueSGITargets :: Word,
+>         issueSGIControlSlot,
+>         issueSGISlot :: PPtr CTE }
 >     deriving (Show, Eq)
 
 \subsection{Additional Register Subsets}

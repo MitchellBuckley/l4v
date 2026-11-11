@@ -14,14 +14,10 @@ theory Invocations_A
 imports ArchInvocation_A
 begin
 
-context begin interpretation Arch .
-
-requalify_types
+arch_requalify_types (A)
   arch_copy_register_sets
   arch_irq_control_invocation
   arch_invocation
-
-end
 
 text \<open>These datatypes encode the arguments to the available system calls.\<close>
 
@@ -41,7 +37,7 @@ datatype tcb_invocation =
     WriteRegisters machine_word bool "machine_word list" arch_copy_register_sets
   | ReadRegisters machine_word bool machine_word arch_copy_register_sets
   | CopyRegisters machine_word machine_word bool bool bool bool arch_copy_register_sets
-  | ThreadControl machine_word cslot_ptr
+  | ThreadControl (tc_target: machine_word) (tc_slot: cslot_ptr)
                   (tc_new_fault_ep: "cap_ref option")
                   (tc_new_mcpriority: "(word8 * obj_ref) option")
                   (tc_new_priority: "(word8 * obj_ref) option")
@@ -52,6 +48,7 @@ datatype tcb_invocation =
   | Resume "obj_ref"
   | NotificationControl "obj_ref" "obj_ref option"
   | SetTLSBase obj_ref machine_word
+  | SetFlags obj_ref tcb_flags tcb_flags
 
 datatype irq_control_invocation =
     IRQControl irq cslot_ptr cslot_ptr
@@ -62,13 +59,20 @@ datatype irq_handler_invocation =
   | SetIRQHandler irq cap cslot_ptr
   | ClearIRQHandler irq
 
+datatype domain_invocation =
+    InvokeDomainSet (dom_thread : obj_ref) (dom_domain : domain)
+  | InvokeDomainScheduleSetStart (dom_index : nat)
+  | InvokeDomainScheduleConfigure (dom_index : nat)
+                                  (dom_domain : domain)
+                                  (dom_duration : domain_duration)
+
 datatype invocation =
     InvokeUntyped untyped_invocation
   | InvokeEndpoint obj_ref machine_word bool bool
   | InvokeNotification obj_ref machine_word
   | InvokeReply obj_ref cslot_ptr bool
   | InvokeTCB tcb_invocation
-  | InvokeDomain obj_ref word8
+  | InvokeDomain domain_invocation
   | InvokeCNode cnode_invocation
   | InvokeIRQControl irq_control_invocation
   | InvokeIRQHandler irq_handler_invocation

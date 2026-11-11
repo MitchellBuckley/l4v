@@ -12,7 +12,7 @@ theory ArchCSpacePre_AI
 imports CSpacePre_AI
 begin
 
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
 lemmas typ_at_eq_kheap_obj = typ_at_eq_kheap_obj atyp_at_eq_kheap_obj
 
@@ -88,7 +88,8 @@ lemma ups_of_heap_non_arch_upd:
   "h x = Some ko \<Longrightarrow> non_arch_obj ko \<Longrightarrow> non_arch_obj ko' \<Longrightarrow> ups_of_heap (h(x \<mapsto> ko')) = ups_of_heap h"
   by (rule ext) (auto simp add: ups_of_heap_def non_arch_obj_def split: kernel_object.splits)
 
-crunch inv[wp]: lookup_ipc_buffer "I"
+crunch lookup_ipc_buffer
+  for inv[wp]: "I"
 
 lemma vs_cap_ref_to_table_cap_ref:
   "\<not> is_pg_cap cap \<Longrightarrow> vs_cap_ref cap = table_cap_ref cap"
@@ -127,7 +128,7 @@ lemma masked_as_full_test_function_stuff[simp]:
 
 lemma same_aobject_as_commute:
   "same_aobject_as x y \<Longrightarrow> same_aobject_as y x"
-  by (cases x; cases y; clarsimp simp: same_aobject_as_def)
+  by (cases x; cases y; clarsimp)
 
 lemmas wellformed_cap_simps = wellformed_cap_def
   [simplified wellformed_acap_def, split_simps cap.split arch_cap.split]
@@ -161,24 +162,6 @@ lemma unique_table_caps_upd_eqD:
   apply (simp add: if_distrib split:if_splits)
   done
 
-(* FIXME: unused *)
-lemma set_untyped_cap_as_full_not_final_not_pg_cap:
-  "\<lbrace>\<lambda>s. (\<exists>a b. (a, b) \<noteq> dest \<and> \<not> is_pg_cap cap'
-            \<and> cte_wp_at (\<lambda>cap. gen_obj_refs cap = gen_obj_refs cap' \<and> \<not> is_pg_cap cap) (a, b) s)
-      \<and> cte_wp_at ((=) src_cap) src s\<rbrace>
-  set_untyped_cap_as_full src_cap cap src
-  \<lbrace>\<lambda>_ s.(\<exists>a b. (a, b) \<noteq> dest \<and> \<not> is_pg_cap cap'
-            \<and> cte_wp_at (\<lambda>cap. gen_obj_refs cap = gen_obj_refs cap' \<and> \<not> is_pg_cap cap) (a, b) s)\<rbrace>"
-  apply (rule hoare_pre)
-  apply (wp hoare_vcg_ex_lift)
-   apply (rule_tac Q = "cte_wp_at Q slot"
-               and Q'="cte_wp_at ((=) src_cap) src" for Q slot in P_bool_lift' )
-    apply (wp set_untyped_cap_as_full_cte_wp_at)
-    subgoal by (auto simp: cte_wp_at_caps_of_state is_cap_simps masked_as_full_def cap_bits_untyped_def)
-   apply (wp set_untyped_cap_as_full_cte_wp_at_neg)
-   apply (auto simp: cte_wp_at_caps_of_state is_cap_simps masked_as_full_def cap_bits_untyped_def)
-  done
-
 lemma arch_derived_is_device:
   "\<lbrakk>cap_master_arch_cap c = cap_master_arch_cap c';
         is_derived_arch (ArchObjectCap c) (ArchObjectCap c')\<rbrakk>
@@ -193,7 +176,7 @@ lemma valid_arch_mdb_simple:
   "\<And>s capa. \<lbrakk>valid_arch_mdb (is_original_cap s) (caps_of_state s);
               is_simple_cap cap; caps_of_state s src = Some capa\<rbrakk> \<Longrightarrow>
          valid_arch_mdb ((is_original_cap s) (dest := is_cap_revocable cap capa))
-                       (caps_of_state s(dest \<mapsto> cap))"
+                       ((caps_of_state s)(dest \<mapsto> cap))"
   by (auto simp: valid_arch_mdb_def ioport_revocable_def is_cap_revocable_def arch_is_cap_revocable_def
                  is_simple_cap_def safe_parent_for_def is_cap_simps)
 
@@ -235,14 +218,14 @@ lemma set_untyped_cap_as_full_valid_arch_mdb:
 lemma valid_arch_mdb_not_arch_cap_update:
      "\<And>s cap capa. \<lbrakk>\<not>is_arch_cap cap; valid_arch_mdb (is_original_cap s) (caps_of_state s)\<rbrakk>
        \<Longrightarrow> valid_arch_mdb ((is_original_cap s)(dest := True))
-            (caps_of_state s(src \<mapsto> cap, dest\<mapsto>capa))"
+            ((caps_of_state s)(src \<mapsto> cap, dest\<mapsto>capa))"
   by (auto simp: valid_arch_mdb_def ioport_revocable_def is_cap_simps)
 
 lemma valid_arch_mdb_derived_cap_update:
   "\<And>s capa. \<lbrakk>valid_arch_mdb (is_original_cap s) (caps_of_state s);
              is_derived (cdt s) src cap capa\<rbrakk> \<Longrightarrow>
            valid_arch_mdb ((is_original_cap s)(dest := is_cap_revocable cap capa))
-                           (caps_of_state s(dest \<mapsto> cap))"
+                           ((caps_of_state s)(dest \<mapsto> cap))"
   apply (clarsimp simp: valid_arch_mdb_def ioport_revocable_def is_cap_simps is_cap_revocable_def
                         arch_is_cap_revocable_def)
   by (clarsimp simp: is_derived_def is_cap_simps is_derived_arch_def split: if_split_asm)
@@ -251,7 +234,7 @@ lemma valid_arch_mdb_free_index_update':
   "\<And>s capa. \<lbrakk>valid_arch_mdb (is_original_cap s) (caps_of_state s); caps_of_state s src = Some capa;
                    is_untyped_cap cap\<rbrakk> \<Longrightarrow>
            valid_arch_mdb ((is_original_cap s) (dest := is_cap_revocable cap capa))
-            (caps_of_state s(dest \<mapsto> cap, src \<mapsto> max_free_index_update capa))"
+            ((caps_of_state s)(dest \<mapsto> cap, src \<mapsto> max_free_index_update capa))"
   by (auto simp: valid_arch_mdb_def ioport_revocable_def is_cap_simps is_cap_revocable_def
                         arch_is_cap_revocable_def free_index_update_def split: cap.splits)
 
@@ -265,7 +248,7 @@ lemma valid_arch_mdb_weak_derived_update:
   "\<And>s capa. \<lbrakk>valid_arch_mdb (is_original_cap s) (caps_of_state s);
                       caps_of_state s src = Some capa; weak_derived cap capa\<rbrakk> \<Longrightarrow>
         valid_arch_mdb ((is_original_cap s) (dest := is_original_cap s src, src := False))
-            (caps_of_state s(dest \<mapsto> cap, src \<mapsto> NullCap))"
+            ((caps_of_state s)(dest \<mapsto> cap, src \<mapsto> NullCap))"
   by (auto simp: valid_arch_mdb_def ioport_revocable_def
           split: if_split_asm
        simp del: split_paired_All)
@@ -273,7 +256,7 @@ lemma valid_arch_mdb_weak_derived_update:
 lemma valid_arch_mdb_tcb_cnode_update:
   "valid_arch_mdb (is_original_cap s) (caps_of_state s) \<Longrightarrow>
            valid_arch_mdb ((is_original_cap s) ((t, tcb_cnode_index 2) := True))
-              (caps_of_state s((t, tcb_cnode_index 2) \<mapsto> ReplyCap t True canReplyGrant))"
+              ((caps_of_state s)((t, tcb_cnode_index 2) \<mapsto> ReplyCap t True canReplyGrant))"
   by (clarsimp simp: valid_arch_mdb_def ioport_revocable_def)
 
 lemmas valid_arch_mdb_updates = valid_arch_mdb_free_index_update valid_arch_mdb_not_arch_cap_update
@@ -313,10 +296,10 @@ lemma valid_arch_mdb_null_filter:
 lemma valid_arch_mdb_untypeds:
   "\<And>s. valid_arch_mdb (is_original_cap s) (caps_of_state s)
        \<Longrightarrow> valid_arch_mdb (\<lambda>x. x \<noteq> cref \<longrightarrow> is_original_cap s x)
-            (caps_of_state s(cref \<mapsto> default_cap tp oref sz dev))"
+            ((caps_of_state s)(cref \<mapsto> default_cap tp oref sz dev))"
   "\<And>s. valid_arch_mdb (is_original_cap s) (caps_of_state s)
        \<Longrightarrow> valid_arch_mdb (is_original_cap s)
-            (caps_of_state s(cref \<mapsto> UntypedCap dev ptr sz idx))"
+            ((caps_of_state s)(cref \<mapsto> UntypedCap dev ptr sz idx))"
   by (clarsimp simp: valid_arch_mdb_def ioport_revocable_def)+
 
 lemma same_object_as_ioports:

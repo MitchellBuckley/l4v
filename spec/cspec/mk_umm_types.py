@@ -46,13 +46,13 @@ if "ISABELLE_PROCESS" not in os.environ or "ISABELLE_TOOL" not in os.environ:
     print("Run this from within 'isabelle env'.")
     sys.exit(1)
 
-THY_DATA = """
+THY_DATA = r"""
 theory UmmTypesFile
   imports CParser.CTranslation
 begin
 declare [[allow_underscore_idents = true]]
 external_file "%(input)s"
-setup {* IsarInstall.gen_umm_types_file "%(input)s" "%(output)s" *}
+setup \<open> IsarInstall.gen_umm_types_file "%(input)s" "%(output)s" \<close>
 end
 """
 

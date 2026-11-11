@@ -32,7 +32,7 @@ val the' = Utils.the'
 
 (* Simpset we use for automated tactics. *)
 fun setup_l2_ss ctxt = put_simpset AUTOCORRES_SIMPSET ctxt
-                         addsimps [@{thm ucast_id}, @{thm pred_conj_def}]
+                         addsimps @{thms pred_conj_def}
 
 (* Convert a set of variable names into an Isabelle list of strings. *)
 fun var_set_to_isa_list prog_info s =
@@ -56,8 +56,7 @@ fun var_set_to_isa_list prog_info s =
  *
  * would return ("x", @{term "x + b + c"}).
  *)
-fun convert_local_vars name_map term [] = ([], term)
-  | convert_local_vars name_map term ((var_name, var_term) :: vars)  =
+fun convert_local_vars name_map term [] = ([], term)  | convert_local_vars name_map term ((var_name, var_term) :: vars)  =
       if Utils.contains_subterm var_term term then
         let
           val free_var = name_map (var_name, fastype_of var_term)
@@ -693,7 +692,7 @@ let
        head $ st $ ret_xf $ ex_xf $ precond $ new_l2_term $ l1_term
        |> map_aterms convert_free_to_var
        |> HOLogic.mk_Trueprop
-  val new_thm = list_implies (cprems_of thm, Thm.cterm_of ctxt new_concl)
+  val new_thm = list_implies (Thm.cprems_of thm, Thm.cterm_of ctxt new_concl)
 in
   Goal.init new_thm
   |> asm_full_simp_tac (put_simpset HOL_basic_ss ctxt addsimps [mk_meta_eq @{thm split_def}]) 1 |> Seq.hd
@@ -749,7 +748,7 @@ fun inject_return_vals ctxt prog_info name_map needed_returns allow_excess throw
         in
           mk_corresXF_thm' ctxt prog_info name_map needed_returns throw_vars (vars_read UNION preserved_vals)
               generated_term l1_term
-              (@{thm L2corres_inject_return} OF [thm, @{thm validE_weaken} OF [preserve_proof]])
+              (@{thm L2corres_inject_return} OF [thm, @{thm hoare_chainE} OF [preserve_proof]])
         end
     in
       (vars_read UNION preserved_vals, needed_returns, generated_term, generated_thm)
@@ -951,7 +950,7 @@ in
           in
             mkthm block_reads rhs_rets generated_term
                 (@{thm L2corres_seq} OF [lhs_thm, rhs_thm,
-                    @{thm validE_weaken} OF [preserve_proof]])
+                    @{thm hoare_chainE} OF [preserve_proof]])
           end
         in
           inject (block_reads, rhs_rets, generated_term, thm)
@@ -987,7 +986,7 @@ in
             val preserve_proof = mk_multivar_preservation_proof ctxt prog_info name_map lhs_term needed_preserves
           in
             mkthm block_reads needed_vars generated_term
-                (@{thm L2corres_catch} OF [lhs_thm, rhs_thm, @{thm validE_weaken} OF [preserve_proof]])
+                (@{thm L2corres_catch} OF [lhs_thm, rhs_thm, @{thm hoare_chainE} OF [preserve_proof]])
           end
         in
           inject (block_reads, needed_vars, generated_term, thm)
@@ -1072,7 +1071,7 @@ in
                 ] @{thm L2corres_while}
           in
             mkthm (body_reads UNION read_vars UNION loop_iterators) loop_iterators generated_term
-                (base_thm OF [body_thm, @{thm validE_weaken} OF [preserve_proof]])
+                (base_thm OF [body_thm, @{thm hoare_chainE} OF [preserve_proof]])
           end
         in
           inject (body_reads UNION read_vars UNION loop_iterators, loop_iterators, generated_term, thm)
@@ -1355,7 +1354,7 @@ fun get_l2corres_thm ctxt prog_info l1_infos l1_call_info do_opt trace_opt fn_na
     |> apply_tac "solve main goal" (resolve_tac ctxt [thm] 1)
     |> apply_tac "solve guard_imp" (REPEAT (FIRST [
           resolve_tac ctxt @{thms HOL.refl} 1,
-          resolve_tac ctxt @{thms pred_andI} 1,
+          resolve_tac ctxt @{thms pred_conjI} 1,
           resolve_tac ctxt @{thms conjI} 1,
           CHANGED (asm_full_simp_tac (setup_l2_ss ctxt) 1)]))
     |> Goal.finish ctxt

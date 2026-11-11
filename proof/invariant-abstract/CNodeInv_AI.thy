@@ -13,14 +13,10 @@ theory CNodeInv_AI
 imports ArchIpc_AI
 begin
 
-
-context begin interpretation Arch .
-requalify_facts
-  set_cap_arch
+arch_requalify_facts
   cte_at_length_limit
   arch_derive_cap_untyped
   valid_arch_mdb_cap_swap
-end
 
 declare set_cap_arch[wp]
 
@@ -70,7 +66,6 @@ where
 | "valid_rec_del_call (ReduceZombieCall cap slot _) =
        (cte_wp_at ((=) cap) slot and is_final_cap' cap
             and K (is_zombie cap))"
-
 
 locale CNodeInv_AI =
   fixes state_ext_t :: "'state_ext::state_ext itself"
@@ -169,10 +164,10 @@ locale CNodeInv_AI =
       \<lbrace>cap_refs_in_kernel_window and cte_wp_at (weak_derived c) a and cte_wp_at (weak_derived c') b\<rbrace>
         cap_swap c a c' b
       \<lbrace>\<lambda>rv. cap_refs_in_kernel_window :: 'state_ext state \<Rightarrow> bool\<rbrace>"
-  assumes cap_swap_ioports[wp]:
-  "\<lbrace>valid_ioports and cte_wp_at (weak_derived c) a and cte_wp_at (weak_derived c') b\<rbrace>
+  assumes cap_swap_valid_arch[wp]:
+  "\<lbrace>valid_arch_state and cte_wp_at (weak_derived c) a and cte_wp_at (weak_derived c') b\<rbrace>
      cap_swap c a c' b
-   \<lbrace>\<lambda>rv (s::'state_ext state). valid_ioports s\<rbrace>"
+   \<lbrace>\<lambda>rv (s::'state_ext state). valid_arch_state s\<rbrace>"
   assumes cap_swap_vms[wp]:
     "\<And>c a c' b.
       \<lbrace>valid_machine_state :: 'state_ext state \<Rightarrow> bool\<rbrace>
@@ -401,7 +396,7 @@ lemma cap_derive_not_null_helper2:
      derive_cap slot cap
    \<lbrace>\<lambda>rv s. rv \<noteq> cap.NullCap \<longrightarrow> Q rv s\<rbrace>, -"
   apply (drule cap_derive_not_null_helper)
-  apply (erule hoare_post_imp_R)
+  apply (erule hoare_strengthen_postE_R)
   apply simp
   done
 
@@ -441,13 +436,15 @@ lemma decode_cnode_inv_wf[wp]:
                           derive_cap_zobjrefs derive_cap_objrefs_iszombie
                             | wp (once) hoare_drop_imps)+ )[1]
               apply (wp whenE_throwError_wp | wpcw)+
+            apply (rename_tac dest_slot y src_slot)
             apply simp
-            apply (rule_tac Q="\<lambda>src_cap. valid_cap src_cap and ex_cte_cap_wp_to is_cnode_cap x
+            apply (rule_tac Q'="\<lambda>src_cap. valid_cap src_cap and ex_cte_cap_wp_to is_cnode_cap dest_slot
                                        and zombies_final and valid_objs
-                                       and real_cte_at src_slot and real_cte_at x
+                                       and real_cte_at src_slot and real_cte_at dest_slot
                                        and cte_wp_at (\<lambda>c. c = src_cap) src_slot
-                                       and cte_wp_at ((=) cap.NullCap) x"
+                                       and cte_wp_at ((=) cap.NullCap) dest_slot"
                        in hoare_post_imp)
+             apply (rename_tac src_cap s)
              apply (clarsimp simp: cte_wp_at_caps_of_state all_rights_def)
              apply (simp add: cap_master_update_cap_data weak_derived_update_cap_data
                               cap_asid_update_cap_data
@@ -455,7 +452,7 @@ lemma decode_cnode_inv_wf[wp]:
              apply (strengthen cap_badge_update_cap_data)
              apply simp
              apply (frule (1) caps_of_state_valid_cap)
-             apply (case_tac "is_zombie r")
+             apply (case_tac "is_zombie src_cap")
               apply (clarsimp simp add: valid_cap_def2 update_cap_data_def
                                         is_cap_simps
                               split: if_split_asm)
@@ -491,8 +488,8 @@ lemma decode_cnode_inv_wf[wp]:
     apply (simp add: decode_cnode_invocation_def
                      unlessE_def whenE_def
                split del: if_split)
-    apply (wp get_cap_wp hoare_vcg_all_lift_R | simp add: )+
-     apply (rule_tac Q'="\<lambda>rv. invs and cte_wp_at (\<lambda>_. True) rv" in hoare_post_imp_R)
+    apply (wp get_cap_wp hoare_vcg_all_liftE_R | simp add: )+
+     apply (rule_tac Q'="\<lambda>rv. invs and cte_wp_at (\<lambda>_. True) rv" in hoare_strengthen_postE_R)
       apply (wp lsfco_cte_at)
      apply (clarsimp simp: cte_wp_valid_cap invs_valid_objs has_cancel_send_rights_ep_cap)+
    \<comment> \<open>Rotate\<close>
@@ -500,11 +497,12 @@ lemma decode_cnode_inv_wf[wp]:
                     whenE_def unlessE_def)
    apply (rule hoare_pre)
     apply (wp get_cap_wp ensure_empty_stronger | simp)+
-      apply (rule_tac Q'="\<lambda>rv s. real_cte_at rv s \<and> real_cte_at x s
+      apply (rename_tac dest_slot src_slot)
+      apply (rule_tac Q'="\<lambda>rv s. real_cte_at rv s \<and> real_cte_at dest_slot s
                               \<and> real_cte_at src_slot s
                               \<and> ex_cte_cap_wp_to is_cnode_cap rv s
-                              \<and> ex_cte_cap_wp_to is_cnode_cap x s
-                              \<and> invs s" in hoare_post_imp_R)
+                              \<and> ex_cte_cap_wp_to is_cnode_cap dest_slot s
+                              \<and> invs s" in hoare_strengthen_postE_R)
        apply wp+
       apply (clarsimp simp: cte_wp_at_caps_of_state
                      dest!: real_cte_at_cte del: impI)
@@ -690,7 +688,7 @@ lemma cap_swap_not_recursive:
    \<lbrace>\<lambda>rv s. card (not_recursive_cspaces s) < n\<rbrace>"
   apply (cases "p1 = p2", simp_all)
   apply (simp add: cap_swap_def set_cdt_def when_def)
-  apply (rule hoare_vcg_precond_imp)
+  apply (rule hoare_weaken_pre)
    apply (wp | simp)+
       apply (rule not_recursive_set_cap_doesn't_grow)
      apply (wp not_recursive_set_cap_shrinks set_cap_cte_wp_at' get_cap_wp hoare_vcg_disj_lift)
@@ -712,31 +710,9 @@ lemma cap_swap_fd_not_recursive:
    by (wpsimp wp: cap_swap_not_recursive get_cap_wp)
 
 
-lemma set_mrs_typ_at [wp]:
-  "\<lbrace>\<lambda>s. P (typ_at T p s)\<rbrace> set_mrs p' b m \<lbrace>\<lambda>rv s. P (typ_at T p s)\<rbrace>"
-  apply (simp add: set_mrs_def bind_assoc set_object_def get_object_def)
-  apply (cases b)
-   apply simp
-   apply wp
-   apply clarsimp
-   apply (drule get_tcb_SomeD)
-   apply (clarsimp simp: obj_at_def)
-  apply (clarsimp simp: zipWithM_x_mapM split_def
-             split del: if_split)
-  apply (wp mapM_wp')
-  apply clarsimp
-  apply (drule get_tcb_SomeD)
-  apply (clarsimp simp: obj_at_def)
-  done
-
-
 lemma cte_wp_and:
   "cte_wp_at (P and Q) c s = (cte_wp_at P c s \<and> cte_wp_at Q c s)"
   by (auto simp: cte_wp_at_def)
-
-
-crunch cte_wp_at[wp]: get_mrs "cte_wp_at P c"
-  (wp: crunch_wps simp: crunch_simps)
 
 
 lemmas cte_wp_and' = cte_wp_and [unfolded pred_conj_def]
@@ -900,12 +876,12 @@ context CNodeInv_AI begin
 lemma preemption_point_not_recursive_cspaces[wp]:
   "preemption_point \<lbrace>\<lambda>s. P (not_recursive_cspaces s)\<rbrace>"
   unfolding preemption_point_def
-  by (wpsimp wp: OR_choiceE_weak_wp alternative_valid hoare_drop_imp)
+  by (wpsimp wp: OR_choiceE_weak_wp hoare_drop_imp)
 
 lemma preemption_point_caps_of_state[wp]:
   "preemption_point \<lbrace>\<lambda>s. P (caps_of_state s)\<rbrace>"
   unfolding preemption_point_def
-  by (wpsimp wp: OR_choiceE_weak_wp alternative_valid hoare_drop_imp)
+  by (wpsimp wp: OR_choiceE_weak_wp hoare_drop_imp)
 
 lemma rec_del_termination:
   "All (rec_del_dom :: rec_del_call \<times> 'state_ext state \<Rightarrow> bool)"
@@ -1059,7 +1035,8 @@ lemmas rec_del_preservation[crunch_rules] =
 end
 
 
-crunch typ_at: cap_swap_for_delete "\<lambda>s. P (typ_at T p s)"
+crunch cap_swap_for_delete
+  for typ_at: "\<lambda>s. P (typ_at T p s)"
 
 lemma cap_swap_valid_cap:
   "\<lbrace>valid_cap c\<rbrace> cap_swap_for_delete x y \<lbrace>\<lambda>_. valid_cap c\<rbrace>"
@@ -1079,7 +1056,8 @@ lemma cap_swap_cte_at:
 
 context CNodeInv_AI begin
 
-crunch typ_at: rec_del "\<lambda>s::'state_ext state. P (typ_at T p s)"
+crunch rec_del
+  for typ_at: "\<lambda>s::'state_ext state. P (typ_at T p s)"
   (ignore: preemption_point wp: preemption_point_inv)
 
 lemma rec_del_cte_at:
@@ -1092,7 +1070,7 @@ end
 lemma dom_valid_cap[wp]:
   "\<lbrace>valid_cap c\<rbrace> do_machine_op f \<lbrace>\<lambda>_. valid_cap c\<rbrace>"
   apply (simp add: do_machine_op_def split_def)
-  apply (wp select_wp)
+  apply wp
   apply simp
   done
 
@@ -1100,7 +1078,7 @@ lemma dom_valid_cap[wp]:
 lemma dom_cte_at:
   "\<lbrace>cte_at c\<rbrace> do_machine_op f \<lbrace>\<lambda>_. cte_at c\<rbrace>"
   apply (simp add: do_machine_op_def split_def)
-  apply (wp select_wp)
+  apply wp
   apply (simp add: cte_at_cases)
   done
 
@@ -1425,9 +1403,11 @@ lemma cap_swap_valid_objs[wp]:
   done
 
 
-crunch aligned[wp]: cap_swap "pspace_aligned"
+crunch cap_swap
+  for aligned[wp]: "pspace_aligned"
 
-crunch disctinct[wp]: cap_swap "pspace_distinct"
+crunch cap_swap
+  for disctinct[wp]: "pspace_distinct"
 
 
 lemma cap_swap_iflive[wp]:
@@ -1513,7 +1493,7 @@ lemma cap_swap_fd_caps_of_state[wp]:
    apply (simp add: fun_upd_def id_def[symmetric] cong: if_cong)
   apply (clarsimp simp: cte_wp_at_caps_of_state)
   apply (erule rsubst[where P=P])
-  apply (clarsimp intro!: ext)
+  apply fastforce
   done
 
 
@@ -1738,13 +1718,16 @@ lemma cap_swap_fd_reply_masters[wp]:
   done
 
 
-crunch refs_of[wp]: cap_swap "\<lambda>s. P (state_refs_of s)"
+crunch cap_swap
+  for refs_of[wp]: "\<lambda>s. P (state_refs_of s)"
   (ignore: set_cap simp: state_refs_of_pspaceI)
 
-crunch hyp_refs_of[wp]: cap_swap "\<lambda>s. P (state_hyp_refs_of s)"
+crunch cap_swap
+  for hyp_refs_of[wp]: "\<lambda>s. P (state_hyp_refs_of s)"
   (ignore: set_cap simp: state_refs_of_pspaceI)
 
-crunch cur_tcb[wp]: cap_swap "cur_tcb"
+crunch cap_swap
+  for cur_tcb[wp]: "cur_tcb"
 
 
 lemma copy_of_cte_refs:
@@ -1802,9 +1785,11 @@ lemma cap_swap_global_refs[wp]:
   done
 
 
-crunch arch[wp]: cap_swap "\<lambda>s. P (arch_state s)"
+crunch cap_swap
+  for arch[wp]: "\<lambda>s. P (arch_state s)"
 
-crunch irq_node[wp]: cap_swap "\<lambda>s. P (interrupt_irq_node s)"
+crunch cap_swap
+  for irq_node[wp]: "\<lambda>s. P (interrupt_irq_node s)"
 
 
 lemma valid_reply_caps_of_stateD:
@@ -1819,7 +1804,8 @@ lemma valid_reply_caps_of_stateD':
   by (fastforce simp: valid_reply_caps_def has_reply_cap_def
                       is_reply_cap_to_def cte_wp_at_caps_of_state)
 
-crunch interrupt_states[wp]: cap_swap "\<lambda>s. P (interrupt_states s)"
+crunch cap_swap
+  for interrupt_states[wp]: "\<lambda>s. P (interrupt_states s)"
 
 
 lemma weak_derived_cap_irqs:
@@ -1843,11 +1829,14 @@ lemma cap_swap_irq_handlers[wp]:
   done
 
 
-crunch vspace_objs [wp]: cap_swap "valid_vspace_objs"
+crunch cap_swap
+  for vspace_objs[wp]: "valid_vspace_objs"
 
-crunch valid_global_objs [wp]: cap_swap "valid_global_objs"
+crunch cap_swap
+  for valid_global_objs[wp]: "valid_global_objs"
 
-crunch valid_global_vspace_mappings [wp]: cap_swap "valid_global_vspace_mappings"
+crunch cap_swap
+  for valid_global_vspace_mappings[wp]: "valid_global_vspace_mappings"
 
 context CNodeInv_AI begin
 
@@ -1859,7 +1848,7 @@ lemma cap_swap_valid_arch_caps[wp]:
   apply (simp add: cap_swap_def)
   apply (rule hoare_pre)
    apply (subst bind_assoc[symmetric],
-          rule hoare_seq_ext [rotated],
+          rule bind_wp_fwd,
           rule swap_of_caps_valid_arch_caps)
    apply (wp | simp split del: if_split)+
   done
@@ -1867,13 +1856,17 @@ lemma cap_swap_valid_arch_caps[wp]:
 end
 
 
-crunch v_ker_map[wp]: cap_swap "valid_kernel_mappings"
+crunch cap_swap
+  for v_ker_map[wp]: "valid_kernel_mappings"
 
-crunch eq_ker_map[wp]: cap_swap "equal_kernel_mappings"
+crunch cap_swap
+  for eq_ker_map[wp]: "equal_kernel_mappings"
 
-crunch only_idle [wp]: cap_swap only_idle
+crunch cap_swap
+  for only_idle[wp]: only_idle
 
-crunch pspace_in_kernel_window[wp]: cap_swap "pspace_in_kernel_window"
+crunch cap_swap
+  for pspace_in_kernel_window[wp]: "pspace_in_kernel_window"
 
 
 lemma cap_swap_valid_ioc[wp]:
@@ -1889,16 +1882,27 @@ lemma cap_swap_valid_ioc[wp]:
   done
 
 
-crunch machine_state[wp]: cap_swap "\<lambda>s. P(machine_state s)"
+crunch cap_swap
+  for machine_state[wp]: "\<lambda>s. P(machine_state s)"
 
-crunch valid_irq_states[wp]: cap_swap "valid_irq_states"
+crunch cap_swap
+  for valid_irq_states[wp]: "valid_irq_states"
 
-crunch pspace_respects_device_region[wp]: cap_swap pspace_respects_device_region
+crunch cap_swap
+  for pspace_respects_device_region[wp]: pspace_respects_device_region
 
 lemma cap_refs_respects_device_region_original_cap[wp]:
   "cap_refs_respects_device_region
                 (s\<lparr>is_original_cap := ocp\<rparr>) = cap_refs_respects_device_region s"
   by (simp add:cap_refs_respects_device_region_def)
+
+lemma cap_swap_aobj_at:
+  "arch_obj_pred P' \<Longrightarrow>
+  \<lbrace>\<lambda>s. P (obj_at P' pd s)\<rbrace> cap_swap c a c' b \<lbrace>\<lambda>r s. P (obj_at P' pd s)\<rbrace>"
+  unfolding cap_swap_def set_cdt_def by (wpsimp wp: set_cap.aobj_at)
+
+crunch cap_swap
+  for valid_cur_fpu[wp]: valid_cur_fpu
 
 context CNodeInv_AI begin
 lemma cap_swap_cap_refs_respects_device_region[wp]:
@@ -1935,11 +1939,6 @@ lemma cap_swap_cap_refs_respects_device_region[wp]:
   apply fastforce
   done
 
-lemma cap_swap_aobj_at:
-  "arch_obj_pred P' \<Longrightarrow>
-  \<lbrace>\<lambda>s. P (obj_at P' pd s)\<rbrace> cap_swap c (a, b) c' (aa, ba) \<lbrace>\<lambda>r s. P (obj_at P' pd s)\<rbrace>"
-  unfolding cap_swap_def set_cdt_def by (wpsimp wp: set_cap.aobj_at)
-
 lemma cap_swap_invs[wp]:
   "\<And>c' a c b.
   \<lbrace>invs and ex_cte_cap_wp_to (appropriate_cte_cap c') a
@@ -1953,7 +1952,7 @@ lemma cap_swap_invs[wp]:
     K (a \<noteq> b \<and> \<not> is_master_reply_cap c \<and> \<not> is_master_reply_cap c')\<rbrace>
    cap_swap c a c' b \<lbrace>\<lambda>rv. invs :: 'state_ext state \<Rightarrow> bool\<rbrace>"
   unfolding invs_def valid_state_def valid_pspace_def
-  apply (wp cap_swap_replies cap_swap_reply_masters valid_arch_state_lift_aobj_at
+  apply (wp cap_swap_replies cap_swap_reply_masters
             cap_swap_typ_at valid_irq_node_typ cap_swap_aobj_at
          | simp
          | erule disjE
@@ -2054,21 +2053,19 @@ lemma rec_del_delete_cases:
   done
   done
 
-
 lemma cap_delete_deletes:
   notes hoare_pre [wp_pre del]
   shows
-  "\<And>p.
+    "\<And>p.
     \<lbrace>\<top> :: 'state_ext state \<Rightarrow> bool\<rbrace>
       cap_delete p
     \<lbrace>\<lambda>rv. cte_wp_at (\<lambda>c. c = cap.NullCap) p\<rbrace>,-"
   subgoal for p
-  unfolding cap_delete_def
-  using rec_del_delete_cases[where sl=p and ex=True]
-  apply (simp add: validE_R_def)
-  apply wp
-  apply simp
-  done
+    unfolding cap_delete_def
+    using rec_del_delete_cases[where sl=p and ex=True]
+    apply (simp add: validE_R_def)
+    apply wp
+    done
   done
 
 end
@@ -2373,11 +2370,13 @@ lemma empty_slot_emptyable[wp]:
   done
 
 
-crunch emptyable[wp]: blocked_cancel_ipc "emptyable sl"
-  (ignore: set_thread_state wp: emptyable_lift sts_st_tcb_at_cases static_imp_wp)
+crunch blocked_cancel_ipc
+  for emptyable[wp]: "emptyable sl"
+  (ignore: set_thread_state wp: emptyable_lift sts_st_tcb_at_cases hoare_weak_lift_imp)
 
-crunch emptyable[wp]: cancel_signal "emptyable sl"
-  (ignore: set_thread_state wp: emptyable_lift sts_st_tcb_at_cases static_imp_wp)
+crunch cancel_signal
+  for emptyable[wp]: "emptyable sl"
+  (ignore: set_thread_state wp: emptyable_lift sts_st_tcb_at_cases hoare_weak_lift_imp)
 
 
 lemma cap_delete_one_emptyable[wp]:
@@ -2397,15 +2396,17 @@ declare thread_set_Pmdb [wp]
 lemma reply_cancel_ipc_emptyable[wp]:
   "\<lbrace>invs and emptyable sl and valid_mdb\<rbrace> reply_cancel_ipc ptr \<lbrace>\<lambda>_. emptyable sl\<rbrace>"
   apply (simp add: reply_cancel_ipc_def)
-  apply (wp select_wp select_inv hoare_drop_imps | simp add: Ball_def)+
+  apply (wp select_inv hoare_drop_imps | simp add: Ball_def)+
     apply (wp hoare_vcg_all_lift hoare_convert_imp thread_set_Pmdb
               thread_set_invs_trivial thread_set_emptyable thread_set_cte_at
          | simp add: tcb_cap_cases_def descendants_of_cte_at)+
   done
 
-crunch emptyable[wp]: cancel_ipc "emptyable sl"
+crunch cancel_ipc
+  for emptyable[wp]: "emptyable sl"
 
-crunch emptyable[wp]: update_restart_pc "emptyable sl"
+crunch update_restart_pc
+  for emptyable[wp]: "emptyable sl"
   (rule: emptyable_lift)
 
 lemma suspend_emptyable[wp]:
@@ -2416,10 +2417,12 @@ lemma suspend_emptyable[wp]:
       apply (wpsimp wp: set_thread_state_cte_wp_at)+
   done
 
-crunch emptyable[wp]: do_machine_op "emptyable sl"
+crunch do_machine_op
+  for emptyable[wp]: "emptyable sl"
   (rule: emptyable_lift)
 
-crunch emptyable[wp]: set_irq_state "emptyable sl"
+crunch set_irq_state
+  for emptyable[wp]: "emptyable sl"
   (rule: emptyable_lift)
 
 
@@ -2445,7 +2448,8 @@ lemma finalise_cap_not_reply_master:
 end
 
 
-crunch cte_at_pres[wp]: empty_slot "cte_at sl"
+crunch empty_slot
+  for cte_at_pres[wp]: "cte_at sl"
 
 
 lemma cte_wp_at_emptyableD:
@@ -2513,7 +2517,7 @@ lemma rec_del_invs:
       rec_del args
     \<lbrace>\<lambda>rv. invs :: 'state_ext state \<Rightarrow> bool\<rbrace>"
   apply (rule validE_valid)
-  apply (rule hoare_post_impErr)
+  apply (rule hoare_strengthen_postE)
   apply (rule hoare_pre)
     apply (rule use_spec)
     apply (rule rec_del_invs')
@@ -2713,26 +2717,21 @@ lemma cap_swap_fd_rvk_prog:
 lemmas empty_slot_rvk_prog' = empty_slot_rvk_prog[unfolded o_def]
 
 
-crunch rvk_prog: cancel_ipc "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
+crunch cancel_ipc
+  for rvk_prog: "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
   (simp: crunch_simps o_def unless_def is_final_cap_def tcb_cap_cases_def
-     wp: hoare_drop_imps empty_slot_rvk_prog' select_wp
+     wp: hoare_drop_imps empty_slot_rvk_prog'
          thread_set_caps_of_state_trivial)
 
-crunch rvk_prog: cancel_all_ipc "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
+crunch suspend
+  for rvk_prog: "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
   (simp: crunch_simps o_def unless_def is_final_cap_def
-     wp: crunch_wps empty_slot_rvk_prog' select_wp)
+     wp: crunch_wps empty_slot_rvk_prog')
 
-crunch rvk_prog: cancel_all_signals "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
+crunch deleting_irq_handler
+  for rvk_prog: "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
   (simp: crunch_simps o_def unless_def is_final_cap_def
-     wp: crunch_wps empty_slot_rvk_prog' select_wp)
-
-crunch rvk_prog: suspend "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
-  (simp: crunch_simps o_def unless_def is_final_cap_def
-     wp: crunch_wps empty_slot_rvk_prog' select_wp)
-
-crunch rvk_prog: deleting_irq_handler "\<lambda>s. revoke_progress_ord m (\<lambda>x. option_map cap_to_rpo (caps_of_state s x))"
-  (simp: crunch_simps o_def unless_def is_final_cap_def
-     wp: crunch_wps empty_slot_rvk_prog' select_wp)
+     wp: crunch_wps empty_slot_rvk_prog')
 
 locale CNodeInv_AI_3 = CNodeInv_AI_2 state_ext_t
   for state_ext_t :: "'state_ext::state_ext itself" +
@@ -2823,7 +2822,7 @@ function(sequential) red_zombie_will_fail :: "cap \<Rightarrow> bool"
 
 
 termination red_zombie_will_fail
-  by (rule red_zombie_will_fail.termination [OF Wellfounded.wf_empty])
+  by (rule red_zombie_will_fail.termination [OF wf_on_bot])
 
 
 context CNodeInv_AI_3 begin
@@ -2841,7 +2840,7 @@ lemma rec_del_emptyable:
       rec_del args
     \<lbrace>\<lambda>rv. emptyable (slot_rdcall args) :: 'state_ext state \<Rightarrow> bool\<rbrace>, -"
   apply (rule validE_validE_R)
-  apply (rule hoare_post_impErr)
+  apply (rule hoare_strengthen_postE)
   apply (rule hoare_pre)
     apply (rule use_spec)
     apply (rule rec_del_invs')
@@ -2859,7 +2858,7 @@ lemma reduce_zombie_cap_to:
       rec_del (ReduceZombieCall cap slot exp)
     \<lbrace>\<lambda>rv (s::'state_ext state). \<not> exp \<longrightarrow> ex_cte_cap_wp_to (\<lambda>cp. cap_irqs cp = {}) slot s\<rbrace>, -"
   apply (rule validE_validE_R)
-  apply (rule hoare_post_impErr)
+  apply (rule hoare_strengthen_postE)
     apply (rule hoare_pre)
      apply (rule use_spec)
      apply (rule rec_del_invs')
@@ -3009,7 +3008,7 @@ proof (induct rule: cap_revoke_induct)
   show ?case
     apply (subst cap_revoke_simps)
     apply (wp "1.hyps")
-           apply (wp x p hoare_drop_imps select_wp)+
+           apply (wp x p hoare_drop_imps)+
      apply simp_all
     done
 qed
@@ -3033,7 +3032,7 @@ proof (induct rule: cap_revoke_induct)
   show ?case
     apply (subst cap_revoke_simps)
     apply (wp "1.hyps")
-           apply (wp x p hoare_drop_imps select_wp)+
+           apply (wp x p hoare_drop_imps)+
      apply (simp_all add: y)
     done
 qed
@@ -3075,7 +3074,8 @@ lemma cap_revoke_mdb_stuff3:
   apply simp
   done
 
-crunch typ_at[wp]: cancel_badged_sends "\<lambda>s. P (typ_at T p s)"
+crunch cancel_badged_sends
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
   (wp: crunch_wps simp: crunch_simps filterM_mapM unless_def
    ignore: without_preemption filterM set_object clearMemory)
 
@@ -3109,7 +3109,7 @@ lemma duplicate_creation:
      set_cap cap p'
   \<lbrace>\<lambda>rv s. cte_wp_at (\<lambda>cap. \<not> is_final_cap' cap s) p s\<rbrace>"
   apply (rule hoare_gen_asm)
-  apply (rule hoare_post_imp [where Q="\<lambda>rv. cte_wp_at (\<lambda>c. gen_obj_refs c = gen_obj_refs cap) p
+  apply (rule hoare_post_imp[where Q'="\<lambda>rv. cte_wp_at (\<lambda>c. gen_obj_refs c = gen_obj_refs cap) p
                                         and cte_wp_at ((=) cap) p'"])
    apply (clarsimp simp: cte_wp_at_def)
    apply (case_tac "\<exists>x. x \<in> obj_refs cap \<and> x \<in> obj_refs capa")
@@ -3298,15 +3298,18 @@ lemma cap_move_if_unsafe [wp]:
 end
 
 
-crunch arch[wp]: cap_move "\<lambda>s. P (arch_state s)"
+crunch cap_move
+  for arch[wp]: "\<lambda>s. P (arch_state s)"
 
-crunch irq_node[wp]: cap_move "\<lambda>s. P (interrupt_irq_node s)"
+crunch cap_move
+  for irq_node[wp]: "\<lambda>s. P (interrupt_irq_node s)"
 
 lemma cap_range_NullCap:
   "cap_range cap.NullCap = {}"
   by (simp add: cap_range_def)
 
-crunch interrupt_states[wp]: cap_move "\<lambda>s. P (interrupt_states s)"
+crunch cap_move
+  for interrupt_states[wp]: "\<lambda>s. P (interrupt_states s)"
 
 
 lemma cap_move_irq_handlers[wp]:
@@ -3378,7 +3381,7 @@ lemma cap_move_valid_arch_caps[wp]:
   apply (simp add: cap_move_def)
   apply (rule hoare_pre)
    apply (subst bind_assoc[symmetric],
-          rule hoare_seq_ext [rotated],
+          rule bind_wp_fwd,
           rule swap_of_caps_valid_arch_caps)
    apply (wp | simp)+
   apply (clarsimp elim!: cte_wp_at_weakenE)
@@ -3464,7 +3467,8 @@ lemma cap_move_src_slot_Null:
   by (wp set_cdt_cte_wp_at set_cap_cte_wp_at' | simp)+
 
 
-crunch pred_tcb_at[wp]: cap_move "pred_tcb_at proj P t"
+crunch cap_move
+  for pred_tcb_at[wp]: "pred_tcb_at proj P t"
 
 lemmas (in CNodeInv_AI_5) cap_revoke_cap_table[wp]
   = cap_table_at_lift_valid [OF cap_revoke_typ_at]
@@ -3473,7 +3477,8 @@ lemmas appropriate_cte_cap_simps = appropriate_cte_cap_def [split_simps cap.spli
 
 context CNodeInv_AI_5 begin
 
-crunch inv [wp]: is_final_cap "P"
+crunch is_final_cap
+  for inv[wp]: "P"
 
 lemma is_final_cap_is_final[wp]:
   "\<lbrace>\<top>\<rbrace> is_final_cap cap \<lbrace>\<lambda>rv s. rv = is_final_cap' cap s\<rbrace>"
@@ -3524,7 +3529,8 @@ lemma tcb_cap_valid_is_original_cap[simp]:
   by (simp add: tcb_cap_valid_def)
 
 
-crunch tcb_cap_valid[wp]: cap_move "tcb_cap_valid cap p"
+crunch cap_move
+  for tcb_cap_valid[wp]: "tcb_cap_valid cap p"
 
 
 context CNodeInv_AI_5 begin
@@ -3588,14 +3594,6 @@ lemma invoke_cnode_invs[wp]:
   done
 
 end
-
-crunch pred_tcb_at[wp]: cap_move "pred_tcb_at proj P t"
-
-
-(* FIXME: rename, move *)
-lemma omgwtfbbq[simp]:
-  "(\<forall>x. y \<noteq> x) = False"
-  by clarsimp
 
 
 lemma corres_underlying_lift_ex1:

@@ -18,15 +18,15 @@ These properties are phrased over seL4's
 [abstract specification](../../spec/abstract/) and this proof builds on
 top of the [Abstract Spec Invariant Proof](../invariant-abstract/).
 
-  [1]: https://ts.data61.csiro.au/publications/nictaabstracts/Sewell_WGMAK_11.abstract "seL4 Enforces Integrity"
+  [1]: https://trustworthy.systems/publications/nictaabstracts/Sewell_WGMAK_11.abstract "seL4 Enforces Integrity"
 
 
 Building
 --------
 
-To build from the `l4v/` directory, run:
+To build for the ARM architecture from the `l4v/` directory, run:
 
-    ./isabelle/bin/isabelle build -d . -v -b Access
+    L4V_ARCH=ARM ./run_tests Access
 
 
 Important Theories
@@ -35,4 +35,3 @@ Important Theories
 The top-level theory where these two properties are proved for the
 kernel is [`Syscall_AC`](Syscall_AC.thy); the bottom-level theory where
 the properties are defined is [`Access`](Access.thy).
-

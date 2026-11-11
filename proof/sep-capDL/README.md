@@ -23,16 +23,16 @@ and the [system initialiser](../../sys-init/) specification.
 This separation logic is described in the [ICFEM '13 paper][Boyton_13]
 and Andrew Boyton's PhD thesis.
 
-  [Boyton_13]: https://ts.data61.csiro.au/publications/nictaabstracts/Boyton_ABFGGKLS_13.abstract "Formally Verified System Initialisation"
-  [Klein_KB_12]: https://ts.data61.csiro.au/publications/nictaabstracts/Klein_KB_12.abstract "Mechanised separation algebra"
+  [Boyton_13]: https://trustworthy.systems/publications/nictaabstracts/Boyton_ABFGGKLS_13.abstract "Formally Verified System Initialisation"
+  [Klein_KB_12]: https://trustworthy.systems/publications/nictaabstracts/Klein_KB_12.abstract "Mechanised separation algebra"
 
 
 Building
 --------
 
-To build from the `l4v/` directory, run:
+To build for the ARM architecture from the `l4v/` directory, run:
 
-        ./isabelle/bin/isabelle build -d . -v -b SepDSpec
+        L4V_ARCH=ARM ./run_tests SepDSpec
 
 
 Important Theories

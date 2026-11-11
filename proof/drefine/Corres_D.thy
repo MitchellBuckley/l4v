@@ -11,7 +11,7 @@
  *)
 
 theory Corres_D
-imports StateTranslationProofs_DR
+imports StateTranslationProofs_DR Lib.Corres_Method
 begin
 
 lemma truncate_state_unit[simp]: "truncate_state s = s" by simp
@@ -84,7 +84,7 @@ lemma corres_free_return:
 
 lemma corres_free_set_object:
   "\<lbrakk> \<forall> s s'. s = transform s' \<and> P s \<and> P' s' \<longrightarrow>
-             s = transform ((\<lambda>s. s \<lparr>kheap := kheap s (ptr \<mapsto> obj)\<rparr>) s')\<rbrakk> \<Longrightarrow>
+             s = transform ((\<lambda>s. s \<lparr>kheap := (kheap s)(ptr \<mapsto> obj)\<rparr>) s')\<rbrakk> \<Longrightarrow>
   dcorres dc P P' (return a) (set_object ptr obj )"
   by (clarsimp simp: corres_underlying_def put_def return_def modify_def bind_def get_def
                      set_object_def get_object_def in_monad)
@@ -145,7 +145,7 @@ lemma  corres_split_keep_pfx:
   assumes y: "\<And>rv rv'. r' rv rv' \<Longrightarrow> corres_underlying sr nf nf' r (P and (Q rv)) (P' and (Q' rv')) (b rv) (d rv')"
   assumes    "\<lbrace>P\<rbrace> a \<lbrace>\<lambda>x. P and (Q x)\<rbrace>" "\<lbrace>P'\<rbrace> c \<lbrace>\<lambda>x. P' and (Q' x)\<rbrace>"
   shows      "corres_underlying sr nf nf' r P P' (a >>= (\<lambda>rv. b rv)) (c >>= (\<lambda>rv'. d rv'))"
-  using assms by (rule corres_split')
+  using assms by (rule corres_underlying_split)
 
 (* Following 2 lemmas allows you to get rid of the get function and move the prefix outside *)
 
@@ -212,7 +212,7 @@ lemma dcorres_get:
           \<Longrightarrow> dcorres r ((=) s) ((=) s') (f s) (f' s')"
   shows "dcorres r P P' (do s\<leftarrow>get;f s od) (do s'\<leftarrow> get; f' s' od)"
   apply (rule dcorres_expand_pfx)
-  apply (rule_tac r'="\<lambda>r r'. s=r \<and> s'=r'" and P="%x. (=) s" and P'="%x. (=) s'" in corres_underlying_split)
+  apply (rule_tac r'="\<lambda>r r'. s=r \<and> s'=r'" and Q="%x. (=) s" and Q'="%x. (=) s'" in corres_split_forwards')
     apply (clarsimp simp: corres_underlying_def get_def)
     apply wp+
   apply (drule A)
@@ -227,23 +227,24 @@ lemma dcorres_gets_the:
   apply (simp add:gets_the_def)
   apply (simp add: gets_def)
   apply (subst bind_assoc)+
-    apply (rule corres_split_keep_pfx
-      [where r'="\<lambda>s s'. s = transform s'\<and> P s \<and> P' s'" and Q="\<lambda>x s. x = s" and Q'="\<lambda>x s. x = s "])
-    apply (clarsimp simp: corres_underlying_def get_def)
+  apply (rule corres_split_keep_pfx[where r'="\<lambda>s s'. s = transform s'\<and> P s \<and> P' s'"
+                                      and Q="\<lambda>x s. x = s" and Q'="\<lambda>x s. x = s "])
+     apply (clarsimp simp: corres_underlying_def get_def)
     apply (simp add: assert_opt_def)
-      apply (case_tac "g' xa = None")
-    apply (clarsimp split:option.splits simp:corres_free_fail)
-      apply (subgoal_tac "\<exists>obj. g x \<noteq> None")
-      apply (clarsimp split:option.splits)
-      apply (rule_tac Q="(=)(transform xa)" and Q'="(=) xa" in corres_guard_imp)
-    apply (simp add: A)+
-  using B
-  apply (wp|clarsimp)+
-done
+    apply (rename_tac x)
+    apply (case_tac "g' x = None")
+     apply (clarsimp split:option.splits simp:corres_free_fail)
+    apply (subgoal_tac "\<exists>obj. g (transform x) \<noteq> None")
+     apply (clarsimp split:option.splits)
+     apply (rule_tac Q="(=) (transform x)" and Q'="(=) x" in corres_guard_imp)
+       apply (simp add: A)+
+    using B
+    apply (wp|clarsimp)+
+  done
 
 lemma wpc_helper_dcorres:
   "dcorres r Q Q' f f'
-   \<Longrightarrow> wpc_helper (P, P') (Q, {s. Q' s}) (dcorres r P (\<lambda>s. s \<in> P') f f')"
+   \<Longrightarrow> wpc_helper (P, P', P'') (Q, Q', Q'') (dcorres r P P' f f')"
   apply (clarsimp simp: wpc_helper_def)
   apply (erule corres_guard_imp)
    apply simp
@@ -272,7 +273,7 @@ lemma hoare_mapM_idempotent: "\<lbrakk> \<And> a R. \<lbrace> R \<rbrace> x a \<
   apply atomize
   apply (erule_tac x=a in allE)
   apply (erule_tac x=R in allE)
-  apply (rule hoare_seq_ext)
+  apply (rule bind_wp)
    apply wp
   apply assumption
   done
@@ -306,6 +307,10 @@ lemma dcorres_returnOk:
   "r a b \<Longrightarrow>
   dcorres (dc \<oplus> r) \<top> \<top> (returnOk a) (returnOk b)"
  by (clarsimp simp:corres_underlying_def return_def returnOk_def)
+
+lemma dcorres_return:
+  "r a b \<Longrightarrow> dcorres (r) (\<lambda>_. True) (\<lambda>_. True) (return a) (return b)"
+  by (clarsimp simp:return_def corres_underlying_def)
 
 lemma split_return_throw_thingy:
   "\<lbrakk> \<And>s. \<lbrace>(=) s\<rbrace> g \<lbrace>\<lambda>rv s'. s' = s \<and> rvP rv\<rbrace>,\<lbrace>\<lambda>ft. (=) s\<rbrace>;
@@ -407,7 +412,7 @@ lemma dcorres_symb_exec_r_catch:
       apply (case_tac x)
         apply (simp add:throwError_def)+
         apply (simp add:catch_def)+
-done
+  done
 
 lemma dcorres_symb_exec_r:
   "\<lbrakk>\<And>rv. dcorres r P (Q' rv) h (g rv); \<lbrace>P'\<rbrace> f \<lbrace>\<lambda>r. Q' r\<rbrace>;
@@ -415,12 +420,11 @@ lemma dcorres_symb_exec_r:
   \<Longrightarrow> dcorres r P P' h (f>>=g)"
   apply (rule corres_dummy_return_pl)
   apply (rule corres_guard_imp)
-    apply (rule corres_split_deprecated[where R="\<lambda>rv. P" and R'="\<lambda>rv. Q' rv" and r' = dc])
-       apply simp
-       defer
-      apply wp
-     apply simp+
-  apply (clarsimp simp:valid_def corres_underlying_def return_def)
+    apply (rule corres_split[where R="\<lambda>rv. P" and R'="\<lambda>rv. Q' rv" and r' = dc])
+       apply (clarsimp simp:valid_def corres_underlying_def return_def)
+      apply simp
+     apply wp
+    apply simp+
   done
 
 lemma dcorres_symb_exec_r_strong:
@@ -428,14 +432,14 @@ lemma dcorres_symb_exec_r_strong:
     \<And>cs. \<lbrace>\<lambda>ps. P' ps \<and> transform ps = cs\<rbrace> f \<lbrace>\<lambda>r s. transform s = cs\<rbrace>\<rbrakk>
   \<Longrightarrow> dcorres r P P' h (f>>=g)"
   apply (rule corres_dummy_return_pl)
-    apply (rule corres_guard_imp)
-       apply (rule corres_split_deprecated[where R="\<lambda>rv. P" and P'=P' and R'="\<lambda>rv. Q' rv" and r' = dc])
+  apply (rule corres_guard_imp)
+    apply (rule corres_split[where R="\<lambda>rv. P" and P'=P' and R'="\<lambda>rv. Q' rv" and r' = dc])
+       defer
        apply (unfold K_bind_def)
       apply (assumption)
-     defer
      apply wp
     apply simp+
-  apply (clarsimp simp:valid_def corres_underlying_def return_def)
+   apply (clarsimp simp:valid_def corres_underlying_def return_def)
   done
 
 lemma dcorres_symb_exec_r_catch':
@@ -455,7 +459,7 @@ lemma dcorres_symb_exec_r_catch':
         apply (simp add:throwError_def)+
         apply (simp add:catch_def)
       apply simp+
-done
+  done
 
 lemma dcorres_to_wp:
   "dcorres dc \<top> Q (return x) g \<Longrightarrow> \<lbrace>\<lambda>s. Q s \<and> transform s = cs\<rbrace>g\<lbrace>\<lambda>r s. transform s = cs\<rbrace>"
@@ -618,7 +622,7 @@ lemma dcorres_rhs_noop_below:
      \<lbrace> P \<rbrace> f \<lbrace> \<lambda>_. Q \<rbrace>; \<lbrace> P' \<rbrace> g \<lbrace> \<lambda>_. Q' \<rbrace> \<rbrakk>
    \<Longrightarrow> dcorres anyrel P P' (f :: unit k_monad) (g >>= (\<lambda>_. m))"
   apply (rule corres_add_noop_lhs2)
-  apply (rule corres_underlying_split)
+  apply (rule corres_split_forwards')
   apply (assumption | clarsimp)+
   done
 
@@ -626,13 +630,14 @@ lemma dcorres_rhs_noop_above: "\<lbrakk> dcorres anyrel P P' (return ()) m; dcor
               \<lbrace> P \<rbrace> return () \<lbrace> \<lambda>_. Q \<rbrace>; \<lbrace> P' \<rbrace> m \<lbrace> \<lambda>_. Q' \<rbrace> \<rbrakk>
             \<Longrightarrow> dcorres anyrel' P P' f (m >>= (\<lambda>_. g))"
   apply (rule corres_add_noop_lhs)
-  apply (rule corres_underlying_split)
+  apply (rule corres_split_forwards')
   apply (assumption | clarsimp)+
   done
 
 lemmas dcorres_rhs_noop_below_True = dcorres_rhs_noop_below[OF _ _ hoare_TrueI hoare_TrueI]
 lemmas dcorres_rhs_noop_above_True = dcorres_rhs_noop_above[OF _ _ hoare_TrueI hoare_TrueI]
 
+\<comment> \<open>FIXME: remove\<close>
 declare hoare_TrueI[simp]
 
 lemma dcorres_dc_rhs_noop_below_gen:
@@ -641,7 +646,7 @@ lemma dcorres_dc_rhs_noop_below_gen:
      \<lbrace> P \<rbrace> f \<lbrace> Q \<rbrace>; \<lbrace> P' \<rbrace> g \<lbrace> Q' \<rbrace> \<rbrakk>
    \<Longrightarrow> dcorres dc P P' f (g >>= m)"
   apply (rule corres_add_noop_lhs2)
-  apply (rule corres_underlying_split)
+  apply (rule corres_split_forwards')
   apply (assumption | clarsimp)+
   done
 

@@ -13,7 +13,7 @@ sig
   val gen_umm_types_file : string -> string -> theory -> theory
   val do_cpp : {error_detail : int, cpp_path : string option} ->
                {includes : string list, filename : string} -> string * bool
-  val install_C_file : (((bool option * bool option) * bool option) * string) *
+  val install_C_file : ((((bool option * bool option) * bool option) * bool option) * string) *
                        additional_options list option ->
                        theory -> theory
   val interactive_install : string -> theory -> theory
@@ -66,7 +66,6 @@ structure C_Includes = Theory_Data
 (struct
    type T = string list
    val empty = []
-   val extend = I
    val merge = Library.merge (op =)
 end);
 
@@ -79,7 +78,6 @@ structure C_Installs = Theory_Data
 (struct
    type T = install_data list
    val empty = []
-   val extend = I
    val merge = Library.merge (op =)
 end);
 val installed_C_files = C_Installs.get
@@ -147,7 +145,9 @@ fun get_Csyntax thy s = let
   val cpp_option =
       case Config.get_global thy cpp_path of
           "" => NONE
-        | s => SOME s
+        | s => SOME (if Path.is_absolute (Path.explode s)
+                     then s
+                     else Path.implode (Path.append (Resources.master_directory thy) (Path.explode s)))
   val cpp_error_count = Config.get_global thy report_cpp_errors
   val (ast0, _) =
       StrictCParser.parse
@@ -180,10 +180,10 @@ fun define_function_names fninfo thy = let
     val b = Binding.name cname
     val ((_, (_, th)), lthy) =
         lthy
-        |> Local_Theory.open_target |> snd
+        |> Local_Theory.begin_nested |> snd
         |>Local_Theory.define ((b, NoSyn),
                               ((Thm.def_binding b, []), mk_int_numeral n))
-    val lthy' = Local_Theory.close_target lthy
+    val lthy' = Local_Theory.end_nested lthy
     val morph  = Proof_Context.export_morphism lthy lthy'
     val th'     = Morphism.thm morph th
 
@@ -213,7 +213,7 @@ end
 
 fun define_global_initializers globloc msgpfx name_munger mungedb cse globs thy = let
   open ProgramAnalysis Absyn
-  val lthy = Named_Target.init globloc thy
+  val lthy = Named_Target.init [] globloc thy
   val globinits = let
     val inittab = get_globinits cse
     fun foldthis (gnm : MString.t, gty) defs = let
@@ -294,7 +294,7 @@ in
   recurse (Binaryset.empty String.compare) slist
 end
 
-fun install_C_file0 (((((memsafe),ctyps),cdefs),s),statetylist_opt) thy = let
+fun install_C_file0 ((((((memsafe),ctyps),cdefs),no_modifies),s),statetylist_opt) thy = let
   val _ = setup_feedback_thy thy
   val {base = localename,...} = OS.Path.splitBaseExt (OS.Path.file s)
   val _ = not (Long_Name.is_qualified localename) orelse
@@ -364,12 +364,12 @@ in
             state {owners=owners,gstate_ty=gstate_ty,mstate_ty=mstate_ty} thy
       val loc_b = Binding.name (suffix HPInter.globalsN localename)
       val (globloc, ctxt) =
-          Expression.add_locale loc_b loc_b ([], []) globs thy
+          Expression.add_locale loc_b loc_b [] ([], []) globs thy
       val thy = Local_Theory.exit_global ctxt
-      val _ = Output.state ("Created locale for globals (" ^ Binding.print loc_b ^
+      val _ = Output.state ["Created locale for globals (" ^ Binding.print loc_b ^
                        ")- with " ^ Int.toString (length globs) ^
-                       " globals elements")
-      val _ = app (fn e => Output.state ("-- " ^ HPInter.asm_to_string (Syntax.string_of_term ctxt) e))
+                       " globals elements"]
+      val _ = app (fn e => Output.state ["-- " ^ HPInter.asm_to_string (Syntax.string_of_term ctxt) e])
                   globs
       val mungedb = mk_mungedb vdecls
       val thy = CalculateState.store_mungedb (s, mungedb) thy
@@ -447,9 +447,9 @@ in
                                             globs
                                             thy
       val thy =
-          if not (Symtab.is_empty (get_defined_functions cse)) then
+          if not (Symtab.is_empty (get_defined_functions cse)) andalso not (o2b no_modifies) then
             Modifies_Proofs.prove_all_modifies_goals thy cse toTranslateP styargs loc2
-          else thy (* like this is ever going to happen *)
+          else thy
     in
       C_Installs.map (fn ss =>
         {c_filename = s, locale_names = [globloc, loc2],
@@ -479,7 +479,7 @@ fun install_C_file args thy =
 
 (* for interactive debugging/testing *)
 fun interactive_install s thy =
-  install_C_file ((((NONE, NONE), NONE), s), NONE) thy
+  install_C_file (((((NONE, NONE), NONE), NONE), s), NONE) thy
   handle TYPE (s,tys,tms) =>
          (Feedback.informStr (0, s ^ "\n" ^
                    Int.toString (length tms) ^ " term(s): " ^
@@ -527,6 +527,7 @@ val defsN = "c_defs"
 val mtypN = "machinety"
 val ghosttypN = "ghostty"
 val rootsN = "roots"
+val no_modifiesN = "no_modifies"
 
 local
   structure P = Parse
@@ -536,17 +537,19 @@ fun new_include s thy = C_Includes.map (fn sl => mk_thy_relative thy s::sl) thy
 
 val _ = Outer_Syntax.command @{command_keyword "new_C_include_dir"}
                             "add a directory to the include path"
-                            (P.text >> (Toplevel.theory o new_include))
+                            (P.embedded >> (Toplevel.theory o new_include))
 
 val file_inclusion = let
   val typoptions =
-      P.reserved mtypN |-- (P.$$$ "=" |-- P.text >> MachineState) ||
-      P.reserved ghosttypN |-- (P.$$$ "=" |-- P.text >> GhostState) ||
-      P.reserved rootsN |-- (P.$$$ "=" |-- (P.$$$ "[" |-- P.enum1 "," P.text --| P.$$$ "]") >> CRoots)
+      P.reserved mtypN |-- (P.$$$ "=" |-- P.embedded >> MachineState) ||
+      P.reserved ghosttypN |-- (P.$$$ "=" |-- P.embedded >> GhostState) ||
+      P.reserved rootsN |-- (P.$$$ "=" |-- (P.$$$ "[" |-- P.enum1 "," P.embedded --| P.$$$ "]") >> CRoots)
 in
     ((Scan.option (P.$$$ memsafeN)) --
      (Scan.option (P.$$$ typesN)) --
-     (Scan.option (P.$$$ defsN)) -- P.text --
+     (Scan.option (P.$$$ defsN)) --
+     (Scan.option (P.$$$ no_modifiesN)) --
+     P.embedded --
      (Scan.option
           (P.$$$ "[" |-- P.enum1 "," typoptions --| P.$$$ "]"))) >>
     (Toplevel.theory o install_C_file)
@@ -562,7 +565,7 @@ val _ =
     Outer_Syntax.command
       @{command_keyword "install_C_types"}
       "install types from a C file"
-      (P.text >> (Toplevel.theory o install_C_types))
+      (P.embedded >> (Toplevel.theory o install_C_types))
 
 end
 

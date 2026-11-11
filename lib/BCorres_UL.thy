@@ -6,7 +6,7 @@
 
 theory BCorres_UL
 imports
-  NonDetMonadVCG
+  Monads.Nondet_VCG
   Crunch_Instances_NonDet
 begin
 
@@ -17,12 +17,12 @@ definition bcorres_underlying where
   "bcorres_underlying t f g \<equiv> \<forall>s. s_bcorres_underlying t f g s"
 
 lemma wpc_helper_bcorres:
-  "bcorres_underlying t f g \<Longrightarrow>  wpc_helper (P, P') (Q, Q') (bcorres_underlying t f g)"
-  by (simp add: wpc_helper_def)
+  "bcorres_underlying t f g \<Longrightarrow>  wpc_helper P Q (bcorres_underlying t f g)"
+  by (simp add: wpc_helper_def split: prod.split)
 
 lemma wpc_helper_s_bcorres:
-  "s_bcorres_underlying t f g s \<Longrightarrow>  wpc_helper (P, P') (Q, Q') (s_bcorres_underlying t f g s)"
-  by (simp add: wpc_helper_def)
+  "s_bcorres_underlying t f g s \<Longrightarrow>  wpc_helper P Q (s_bcorres_underlying t f g s)"
+  by (simp add: wpc_helper_def split: prod.split)
 
 wpc_setup "\<lambda>f. bcorres_underlying t f g" wpc_helper_bcorres
 wpc_setup "\<lambda>f. s_bcorres_underlying t f g s" wpc_helper_bcorres
@@ -267,10 +267,15 @@ lemma gets_the_bcorres_underlying[wp]:
   "(\<And>s. f' (t s) = f s) \<Longrightarrow> bcorres_underlying t (gets_the f) (gets_the f')"
   by (wpsimp simp: gets_the_def)
 
+lemma maybeM_bcorres_underlying[wp]:
+  "\<lbrakk>\<And>x. y = Some x \<Longrightarrow> bcorres_underlying t (f x) (f' x)\<rbrakk> \<Longrightarrow> bcorres_underlying t (maybeM f y) (maybeM f' y)"
+  by (wpsimp simp: maybeM_def)
+
 ML \<open>
 structure CrunchBCorresInstance : CrunchInstance =
 struct
   val name = "bcorres";
+  val prefix_name_scheme = false;
   type extra = term;
   val eq_extra = ae_conv;
   fun parse_extra ctxt extra
@@ -298,7 +303,7 @@ structure CrunchBCorres : CRUNCH = Crunch(CrunchBCorresInstance);
 \<close>
 
 setup \<open>
-  add_crunch_instance "bcorres" (CrunchBCorres.crunch_x, CrunchBCorres.crunch_ignore_add_del)
+  add_crunch_instance "bcorres" (CrunchBCorres.crunch_x, CrunchBCorres.crunch_ignore_add_dels)
 \<close>
 
 end

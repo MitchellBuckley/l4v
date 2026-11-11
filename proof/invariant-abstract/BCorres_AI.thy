@@ -10,6 +10,8 @@ imports
   "Lib.BCorres_UL"
 begin
 
+unbundle l4v_word_context (* because of Lib.BCorres_UL *)
+
 abbreviation "bcorres \<equiv> bcorres_underlying truncate_state"
 
 abbreviation "s_bcorres \<equiv> s_bcorres_underlying truncate_state"
@@ -48,11 +50,9 @@ lemma OR_choiceE_bcorres[wp]:
   done
 
 crunch_ignore (bcorres)
-  (add: NonDetMonad.bind gets modify get put do_extended_op empty_slot_ext mapM_x "when"
+  (add: Nondet_Monad.bind gets modify get put do_extended_op empty_slot_ext mapM_x "when"
         select unless mapM catch bindE liftE whenE alternative cap_swap_ext
         cap_insert_ext cap_move_ext liftM create_cap_ext
-        possible_switch_to reschedule_required set_priority
-        set_thread_state_ext tcb_sched_action timer_tick
         lookup_error_on_failure getActiveIRQ
         gets_the liftME zipWithM_x unlessE mapME_x handleE forM_x)
 
@@ -61,18 +61,19 @@ lemma bcorres_select_ext[wp]:
   by (clarsimp simp: select_ext_def bind_def gets_def return_def select_def assert_def get_def
                      select_switch_unit_def bcorres_underlying_def s_bcorres_underlying_def fail_def)
 
-context Arch begin
+context Arch begin arch_global_naming
 
-crunch (bcorres)bcorres[wp]: arch_post_cap_deletion truncate_state
+crunch arch_post_cap_deletion
+  for (bcorres) bcorres[wp]: truncate_state
 
 end
 
-requalify_facts
-  Arch.arch_post_cap_deletion_bcorres
+arch_requalify_facts
+  arch_post_cap_deletion_bcorres
 
-crunch (bcorres) bcorres[wp]:
+crunch
   set_original, set_object, set_cap, set_irq_state, deleted_irq_handler, get_cap,set_cdt, empty_slot
-  truncate_state
+  for (bcorres) bcorres[wp]: truncate_state
   (ignore: maskInterrupt)
 
 lemma get_cap_det:
@@ -117,28 +118,32 @@ lemma is_final_cap_bcorres[wp]:
 lemma get_tcb_truncate[simp]: "get_tcb a (truncate_state s) = get_tcb a s"
   by (simp add: get_tcb_def)
 
-crunch (bcorres) bcorres[wp]:
+lemma set_tcb_queue_bcorres[wp]:
+  "bcorres (set_tcb_queue a b c) (set_tcb_queue a b c)"
+  by (wpsimp simp: set_tcb_queue_def cong: if_cong)
+
+crunch
   cancel_all_ipc, cancel_all_signals, unbind_maybe_notification, unbind_notification, bind_notification
-  truncate_state
+  for (bcorres) bcorres[wp]: truncate_state
   (simp: gets_the_def ignore: gets_the)
 
 lemma fast_finalise_bcorres[wp]:
   "bcorres (fast_finalise a b) (fast_finalise a b)"
   by (cases a; wpsimp)
 
-crunch (bcorres) bcorres[wp]: get_irq_slot truncate_state (simp: gets_def)
+crunch get_irq_slot
+  for (bcorres) bcorres[wp]: truncate_state (simp: gets_def)
 
 lemma throw_on_false_bcorres[wp]:
   "bcorres f f' \<Longrightarrow>  bcorres (throw_on_false e f) (throw_on_false e f')"
   by (simp add: throw_on_false_def | wp)+
 
-crunch_ignore (bcorres) (add: getActiveIRQ)
-
 lemma preemption_point_bcorres[wp]:
   "bcorres preemption_point preemption_point"
   unfolding preemption_point_def by wpsimp
 
-crunch (bcorres) bcorres[wp]: cap_swap_for_delete truncate_state
+crunch cap_swap_for_delete
+  for (bcorres) bcorres[wp]: truncate_state
 
 lemma gets_the_get_tcb_bcorres[wp]:
   "bcorres (gets_the (get_tcb a)) (gets_the (get_tcb a)) "

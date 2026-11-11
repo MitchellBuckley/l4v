@@ -1,4 +1,5 @@
 (*
+ * Copyright 2023, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  * Copyright 2020, Data61, CSIRO (ABN 41 687 119 230)
  *
@@ -9,6 +10,8 @@ theory VSpace_C
 imports TcbAcc_C CSpace_C PSpace_C TcbQueue_C
 begin
 
+unbundle l4v_word_context
+
 autocorres
   [ skip_heap_abs, skip_word_abs,
     scope = handleVMFault,
@@ -16,7 +19,7 @@ autocorres
     c_locale = kernel_all_substitute
   ] "../c/build/$L4V_ARCH/kernel_all.c_pp"
 
-context begin interpretation Arch . (*FIXME: arch_split*)
+context begin interpretation Arch . (*FIXME: arch-split*)
 
 lemma ccorres_name_pre_C:
   "(\<And>s. s \<in> P' \<Longrightarrow> ccorres_underlying sr \<Gamma> r xf arrel axf P {s} hs f g)
@@ -47,9 +50,6 @@ lemma ccorres_flip_Guard:
 end
 
 context kernel_m begin
-
-local_setup
-  \<open>AutoCorresModifiesProofs.new_modifies_rules "../c/build/$L4V_ARCH/kernel_all.c_pp"\<close>
 
 lemma pageBitsForSize_le:
   "pageBitsForSize x \<le> 30"
@@ -83,7 +83,7 @@ lemma checkVPAlignment_ccorres:
        apply simp
       apply simp
      apply simp
-    apply (simp split: if_split add: to_bool_def)
+    apply (simp split: if_split)
    apply (clarsimp simp: mask_def unlessE_def throwError_def split: if_split)
    apply (rule ccorres_guard_imp)
      apply (rule ccorres_return_C)
@@ -91,7 +91,7 @@ lemma checkVPAlignment_ccorres:
       apply simp
      apply simp
     apply simp
-   apply (simp split: if_split add: to_bool_def)
+   apply (simp split: if_split)
   apply (clarsimp split: if_split)
   apply (simp add: word_less_nat_alt)
   apply (rule order_le_less_trans, rule pageBitsForSize_le)
@@ -251,12 +251,13 @@ lemma handleVMFault_ccorres:
     prefer 3 apply simp
    apply (simp add: handleVMFault_def handleVMFault'_def liftE_bindE condition_const
                     ucast_ucast_mask bind_assoc)
-   apply (rule corres_split_deprecated[OF _ read_stval_ccorres[ac]], drule sym, clarsimp)
-      apply (wpc; simp add: vm_fault_type_from_H_def vm_fault_defs_C
-                            true_def false_def bind_assoc)
-           apply (rule returnVMFault_corres;
-                  clarsimp simp: exception_defs mask_twice lift_rv_def mask_def vmFaultTypeFSR_def)+
-     apply (wpsimp simp: mask_def | terminates_trivial)+
+   apply (rule corres_split[OF read_stval_ccorres[ac]])
+      apply terminates_trivial
+     apply (drule sym, clarsimp)
+     apply (corres_cases; simp add: vm_fault_type_from_H_def vm_fault_defs_C bind_assoc)
+          apply (rule returnVMFault_corres;
+                 clarsimp simp: exception_defs mask_twice lift_rv_def mask_def vmFaultTypeFSR_def)+
+     apply wpsimp+
   done
 
 lemma unat_asidLowBits [simp]:
@@ -277,7 +278,7 @@ lemma leq_asid_bits_shift:
   apply (simp add: mask_def)
   apply (simp add: upper_bits_unset_is_l2p_64 [symmetric])
   apply (simp add: asid_bits_def word_bits_def)
-  apply (erule_tac x="n+9" in allE) (*asid_low_bits*)
+  apply (erule_tac x="9+n" in allE) (*asid_low_bits*)
   apply (simp add: linorder_not_less)
   apply (drule test_bit_size)
   apply (simp add: word_size)
@@ -344,11 +345,11 @@ lemma corres_symb_exec_unknown_r:
   assumes "\<And>rv. corres_underlying sr nf nf' r P P' a (c rv)"
   shows "corres_underlying sr nf nf' r P P' a (unknown >>= c)"
   apply (simp add: unknown_def)
-  apply (rule corres_symb_exec_r[OF assms]; wp select_inv non_fail_select)
+  apply (rule corres_symb_exec_r[OF assms]; wp select_inv)
   done
 
 lemma isPageTablePTE_def2:
-  "isPageTablePTE pte = (\<exists>ppn global user. pte = PageTablePTE ppn global user)"
+  "isPageTablePTE pte = (\<exists>ppn global. pte = PageTablePTE ppn global)"
   by (simp add: isPageTablePTE_def split: pte.splits)
 
 lemma getPPtrFromHWPTE_spec':
@@ -382,7 +383,7 @@ lemma isPTEPageTable_spec':
                         cpte_relation pte cpte \<longrightarrow>
              \<acute>ret__unsigned_long = from_bool (isPageTablePTE pte) \<rbrace>"
   by vcg
-     (auto simp: from_bool_def cpte_relation_def isPageTablePTE_def2 Let_def
+     (auto simp: cpte_relation_def isPageTablePTE_def2 Let_def
                  readable_from_vm_rights_def writable_from_vm_rights_def bit_simps
            split: bool.split if_split pte.splits vmrights.splits)
 
@@ -405,7 +406,7 @@ lemma isPTEPageTable_corres:
   apply (drule rf_sr_cpte_relation)
   apply (drule (1) cmap_relation_ko_atD)
   apply (clarsimp simp: typ_heap_simps)
-  apply (cases pte; simp add: readable_from_vm_rights0 isPageTablePTE_def from_bool_def
+  apply (cases pte; simp add: readable_from_vm_rights0 isPageTablePTE_def
                               cpte_relation_def writable_from_vm_rights_def)
   done
 
@@ -718,7 +719,7 @@ lemma findVSpaceForASID_ccorres:
     apply clarsimp
     apply (rule_tac P="valid_arch_state' and _" and P'=UNIV in ccorres_from_vcg_throws)
     apply (rule allI, rule conseqPre, vcg)
-    apply (clarsimp simp: throwError_def return_def bindE_def NonDetMonad.lift_def
+    apply (clarsimp simp: throwError_def return_def bindE_def Nondet_Monad.lift_def
                           EXCEPTION_NONE_def EXCEPTION_LOOKUP_FAULT_def
                           lookup_fault_lift_invalid_root asid_wf_table_guard)
     apply (frule rf_sr_asidTable_None[where asid=asid, THEN iffD2],
@@ -850,22 +851,6 @@ lemma ccorres_abstract_known:
   apply simp
   done
 
-lemma setObject_modify:
-  fixes v :: "'a :: pspace_storable" shows
-  "\<lbrakk> obj_at' (P :: 'a \<Rightarrow> bool) p s; updateObject v = updateObject_default v;
-         (1 :: machine_word) < 2 ^ objBits v \<rbrakk>
-    \<Longrightarrow> setObject p v s
-      = modify (ksPSpace_update (\<lambda>ps. ps (p \<mapsto> injectKO v))) s"
-  apply (clarsimp simp: setObject_def split_def exec_gets obj_at'_def lookupAround2_known1
-                        assert_opt_def updateObject_default_def bind_assoc)
-  apply (simp add: projectKO_def alignCheck_assert)
-  apply (simp add: project_inject objBits_def)
-  apply (clarsimp simp only: objBitsT_koTypeOf[symmetric] koTypeOf_injectKO)
-  apply (frule(2) in_magnitude_check[where s'=s])
-  apply (simp add: magnitudeCheck_assert in_monad)
-  apply (simp add: simpler_modify_def)
-  done
-
 lemma ccorres_name_pre_C:
   "(\<And>s. s \<in> P' \<Longrightarrow> ccorres_underlying sr \<Gamma> r xf arrel axf P {s} hs f g)
   \<Longrightarrow> ccorres_underlying sr \<Gamma> r xf arrel axf P P' hs f g"
@@ -883,7 +868,7 @@ lemma addrFromKPPtr_spec:
    \<lbrace>\<acute>ret__unsigned_long = addrFromKPPtr (ptr_val (pptr_' s))\<rbrace>"
   apply vcg
   apply (simp add: addrFromKPPtr_def kernelELFBaseOffset_def
-                   kernelELFBase_def kernelELFPAddrBase_def)
+                   kernelELFBase_def kernelELFPAddrBase_def mask_def pptrTop_def)
   done
 
 lemma isValidVTableRoot_def2:
@@ -910,16 +895,15 @@ lemma setVMRoot_ccorres:
       apply (subst will_throw_and_catch)
        apply (simp split: capability.split arch_capability.split option.split)
        apply (fastforce simp: isCap_simps)
-      apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState[unfolded o_def])
+      apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState)
       apply (rule ccorres_rhs_assoc)+
       apply (rule ccorres_h_t_valid_riscvKSGlobalPT)
       apply csymbr
       apply ccorres_rewrite
       apply (subst bind_return_unit)
       apply (ctac (no_vcg) add: setVSpaceRoot_ccorres)
-       apply (simp flip: dc_def)
        apply (rule ccorres_return_void_C)
-      apply (rule hoare_post_taut[where P=\<top>])
+      apply (rule wp_post_taut)
      apply (simp add: catch_def bindE_bind_linearise bind_assoc liftE_def)
      apply csymbr
      apply csymbr
@@ -940,27 +924,27 @@ lemma setVMRoot_ccorres:
                      in ccorres_gen_asm2)
         apply simp
         apply (rule ccorres_Cond_rhs_Seq)
-         apply (simp add: whenE_def throwError_def dc_def[symmetric], ccorres_rewrite)
+         apply (simp add: whenE_def throwError_def, ccorres_rewrite)
          apply (rule ccorres_rhs_assoc)
          apply (rule ccorres_h_t_valid_riscvKSGlobalPT)
          apply csymbr
-         apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState[unfolded comp_def])
+         apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState)
          apply (rule ccorres_add_return2)
          apply (ctac (no_vcg) add: setVSpaceRoot_ccorres)
           apply (rule ccorres_return_void_C)
-         apply (rule hoare_post_taut[where P=\<top>])
-        apply (simp add: whenE_def returnOk_def flip: dc_def)
+         apply (rule wp_post_taut)
+        apply (simp add: whenE_def returnOk_def)
         apply (csymbr)
         apply (ctac (no_vcg) add: setVSpaceRoot_ccorres)
-       apply (rule ccorres_cond_true_seq, simp add: dc_def[symmetric], ccorres_rewrite)
+       apply (rule ccorres_cond_true_seq, simp, ccorres_rewrite)
        apply (rule ccorres_rhs_assoc)
        apply (rule ccorres_h_t_valid_riscvKSGlobalPT)
        apply csymbr
-       apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState[unfolded comp_def])
+       apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState)
        apply (rule ccorres_add_return2)
        apply (ctac (no_vcg) add: setVSpaceRoot_ccorres)
         apply (rule ccorres_return_void_C)
-       apply (rule hoare_post_taut[where P=\<top>])
+       apply (rule wp_post_taut)
       apply (simp, rule wp_post_tautE)
      apply clarsimp
      apply (vcg)
@@ -969,8 +953,8 @@ lemma setVMRoot_ccorres:
    apply vcg
   apply (clarsimp simp: Collect_const_mem)
   apply (rule conjI)
-   apply (frule cte_at_tcb_at_32', drule cte_at_cte_wp_atD)
-   apply (clarsimp simp: cte_level_bits_def tcbVTableSlot_def)
+   apply (frule cte_at_tcb_at_2p_cteSizeBits, drule cte_at_cte_wp_atD)
+   apply (clarsimp simp: cteSizeBits_cte_level_bits tcbVTableSlot_def)
    apply (rule_tac x="cteCap cte" in exI)
    apply (rule conjI, erule cte_wp_at_weakenE', simp)
    apply (clarsimp simp: invs_cicd_no_0_obj' invs_cicd_arch_state' isCap_simps)
@@ -980,15 +964,10 @@ lemma setVMRoot_ccorres:
   apply (clarsimp simp: isCap_simps isValidVTableRoot_def2)
   apply (clarsimp simp: cap_get_tag_isCap_ArchObject2)
   by (clarsimp simp: cap_get_tag_isCap_ArchObject[symmetric]
-                        cap_lift_page_table_cap cap_to_H_def
-                        cap_page_table_cap_lift_def isCap_simps
-                        to_bool_def mask_def isZombieTCB_C_def Let_def
-                 elim!: ccap_relationE
-                 split: if_split_asm cap_CL.splits)
-
-lemma ccorres_seq_IF_False:
-  "ccorres_underlying sr \<Gamma> r xf arrel axf G G' hs a (IF False THEN x ELSE y FI ;; c) = ccorres_underlying sr \<Gamma> r xf arrel axf G G' hs a (y ;; c)"
-  by simp
+                     cap_lift_page_table_cap cap_to_H_def
+                     cap_page_table_cap_lift_def isCap_simps isZombieTCB_C_def Let_def
+              elim!: ccap_relationE
+              split: if_split_asm cap_CL.splits)
 
 (* FIXME x64: needed? *)
 lemma ptrFromPAddr_mask6_simp[simp]:
@@ -1020,12 +999,12 @@ lemma setRegister_ccorres:
        (asUser thread (setRegister reg val))
        (Call setRegister_'proc)"
   apply (cinit' lift: thread_' reg_' w_')
-   apply (simp add: asUser_def dc_def[symmetric] split_def split del: if_split)
+   apply (simp add: asUser_def split_def)
    apply (rule ccorres_pre_threadGet)
    apply (rule ccorres_Guard)
    apply (simp add: setRegister_def simpler_modify_def exec_select_f_singleton)
-   apply (rule_tac P="\<lambda>tcb. (atcbContextGet o tcbArch) tcb = rv"
-                in threadSet_ccorres_lemma2 [unfolded dc_def])
+   apply (rule_tac P="\<lambda>tcb. (atcbContextGet o tcbArch) tcb = uc"
+                in threadSet_ccorres_lemma2)
     apply vcg
    apply (clarsimp simp: setRegister_def HaskellLib_H.runState_def
                          simpler_modify_def typ_heap_simps)
@@ -1053,33 +1032,31 @@ lemma msgRegisters_ccorres:
   apply (simp add: Arrays.update_def n_msgRegisters_def nth_Cons' split: if_split)
   done
 
-(* usually when we call setMR directly, we mean to only set a registers, which will
-   fit in actual registers *)
+(* usually when we call setMR directly, we mean to only set a single message register
+   which will fit in actual registers *)
 lemma setMR_as_setRegister_ccorres:
-  notes dc_simp[simp del]
-  shows
   "ccorres (\<lambda>rv rv'. rv' = of_nat offset + 1) ret__unsigned_'
       (tcb_at' thread and K (TCB_H.msgRegisters ! offset = reg \<and> offset < length msgRegisters))
-      (UNIV \<inter> \<lbrace>\<acute>reg___unsigned_long = val\<rbrace>
-            \<inter> \<lbrace>\<acute>offset = of_nat offset\<rbrace>
-            \<inter> \<lbrace>\<acute>receiver = tcb_ptr_to_ctcb_ptr thread\<rbrace>) hs
+      (\<lbrace>\<acute>reg___unsigned_long = val\<rbrace>
+       \<inter> \<lbrace>\<acute>offset = of_nat offset\<rbrace>
+       \<inter> \<lbrace>\<acute>receiver = tcb_ptr_to_ctcb_ptr thread\<rbrace>) hs
     (asUser thread (setRegister reg val))
     (Call setMR_'proc)"
   apply (rule ccorres_grab_asm)
-  apply (cinit' lift:  reg___unsigned_long_' offset_' receiver_')
-   apply (clarsimp simp: n_msgRegisters_def length_of_msgRegisters)
+  apply (cinit' lift: reg___unsigned_long_' offset_' receiver_')
+   apply (clarsimp simp: length_msgRegisters)
    apply (rule ccorres_cond_false)
    apply (rule ccorres_move_const_guards)
    apply (rule ccorres_add_return2)
    apply (ctac add: setRegister_ccorres)
      apply (rule ccorres_from_vcg_throws[where P'=UNIV and P=\<top>])
      apply (rule allI, rule conseqPre, vcg)
-     apply (clarsimp simp: dc_def return_def)
-    apply (rule hoare_post_taut[of \<top>])
+     apply (clarsimp simp: return_def)
+    apply (rule hoare_TrueI[of \<top>])
    apply (vcg exspec=setRegister_modifies)
-  apply (clarsimp simp: n_msgRegisters_def length_of_msgRegisters not_le conj_commute)
+  apply (clarsimp simp: length_msgRegisters n_msgRegisters_def not_le conj_commute)
   apply (subst msgRegisters_ccorres[symmetric])
-   apply (clarsimp simp: n_msgRegisters_def length_of_msgRegisters unat_of_nat_eq)
+   apply (clarsimp simp: n_msgRegisters_def unat_of_nat_eq)
   apply (clarsimp simp: word_less_nat_alt word_le_nat_alt unat_of_nat_eq not_le[symmetric])
   done
 
@@ -1133,44 +1110,6 @@ lemma setMessageInfo_ccorres:
    apply vcg
   apply (simp add: RISCV64_H.msgInfoRegister_def RISCV64.msgInfoRegister_def
                    Kernel_C.msgInfoRegister_def Kernel_C.a1_def)
-  done
-
-lemma performPageGetAddress_ccorres:
-  "ccorres (K (K \<bottom>) \<currency> dc) (liftxf errstate id (K ()) ret__unsigned_long_')
-      \<top>
-      (UNIV \<inter> {s. vbase_ptr_' s = Ptr ptr}) []
-      (liftE (performPageInvocation (PageGetAddr ptr)))
-      (Call performPageGetAddress_'proc)"
-  apply (simp only: liftE_liftM ccorres_liftM_simp)
-  apply (cinit lift: vbase_ptr_')
-   apply csymbr
-   apply (rule ccorres_pre_getCurThread)
-   apply (clarsimp simp: setMRs_def zipWithM_x_mapM_x mapM_x_Nil length_of_msgRegisters
-                         zip_singleton msgRegisters_unfold mapM_x_singleton)
-   apply (ctac add: setRegister_ccorres)
-     apply csymbr
-     apply (rule ccorres_add_return2)
-     apply (rule ccorres_rhs_assoc2)
-     apply (rule ccorres_split_nothrow_novcg[where r'=dc and xf'=xfdc])
-         apply (unfold setMessageInfo_def)
-         apply ctac
-           apply (simp only: fun_app_def)
-           apply (ctac add: setRegister_ccorres)
-          apply wp
-         apply vcg
-        apply ceqv
-       apply (rule_tac P=\<top> and P'=UNIV in ccorres_from_vcg_throws)
-        apply (rule allI, rule conseqPre, vcg)
-        apply (clarsimp simp: return_def)
-      apply wp
-     apply (simp add: guard_is_UNIV_def)
-    apply wp
-   apply vcg
-  apply (auto simp: RISCV64_H.fromPAddr_def message_info_to_H_def mask_def
-                    RISCV64_H.msgInfoRegister_def RISCV64.msgInfoRegister_def
-                    Kernel_C.msgInfoRegister_def
-                    word_sle_def word_sless_def Kernel_C.a1_def
-                    kernel_all_global_addresses.msgRegisters_def fupdate_def)
   done
 
 lemma ccorres_pre_getObject_pte:
@@ -1299,7 +1238,6 @@ lemma unmapPage_ccorres:
   apply (rule ccorres_gen_asm)
   apply (cinit lift: page_size_' asid___unsigned_long_' vptr_' pptr___unsigned_long_')
    apply (simp add: ignoreFailure_liftM)
-   apply (fold dc_def)
    apply (ctac add: findVSpaceForASID_ccorres)
       apply (rename_tac vspace find_ret)
       apply (rule ccorres_liftE_Seq)
@@ -1309,9 +1247,9 @@ lemma unmapPage_ccorres:
         apply (simp (no_asm) add: split_def del: Collect_const)
         apply (rule ccorres_split_unless_throwError_cond[where Q=\<top> and Q'=\<top>])
            apply (clarsimp simp: of_nat_pageBitsForSize split: if_split)
-          apply (simp add: throwError_def flip: dc_def)
+          apply (simp add: throwError_def)
           apply (rule ccorres_return_void_C)
-         apply (simp add: dc_def[symmetric])
+         apply simp
          apply (rule ccorres_rhs_assoc2, rule ccorres_rhs_assoc2,
                 rule ccorres_rhs_assoc2, rule ccorres_rhs_assoc2)
          apply (subst bindE_assoc[symmetric])
@@ -1320,15 +1258,14 @@ lemma unmapPage_ccorres:
              apply (rule checkMappingPPtr_pte_ccorres[simplified])
              apply (rule conseqPre, vcg exspec=isPTEPageTable_spec')
              apply (clarsimp simp: cpte_relation_def Let_def pte_lift_def isPagePTE_def
-                                   typ_heap_simps isPageTablePTE_def bit_simps from_bool_def
+                                   typ_heap_simps isPageTablePTE_def bit_simps
                             split: if_split_asm pte.split_asm)
             apply (rule ceqv_refl)
            apply (simp add: unfold_checkMapping_return liftE_bindE
-                            Collect_const[symmetric] dc_def[symmetric]
                        del: Collect_const)
            apply csymbr
            apply (rule ccorres_split_nothrow_novcg)
-               apply (simp add: dc_def[symmetric] ptr_add_assertion_def split_def)
+               apply (simp add: ptr_add_assertion_def split_def)
                apply ccorres_rewrite
                apply (rule storePTE_Basic_ccorres)
                apply (simp add: cpte_relation_def Let_def)
@@ -1347,7 +1284,7 @@ lemma unmapPage_ccorres:
        apply wpsimp
       apply (vcg exspec=lookupPTSlot_modifies)
      apply ccorres_rewrite
-     apply (simp add: throwError_def flip: dc_def)
+     apply (simp add: throwError_def)
      apply (rule ccorres_return_void_C)
     apply wp
    apply (vcg exspec=findVSpaceForASID_modifies)
@@ -1427,7 +1364,7 @@ lemma performPageInvocationUnmap_ccorres:
           apply simp
          apply simp
         apply simp
-       apply (simp add: asidInvalid_def flip: dc_def)
+       apply (simp add: asidInvalid_def)
        apply (rule ccorres_return_Skip)
       apply ceqv
      apply (simp add: liftM_def)
@@ -1442,7 +1379,6 @@ lemma performPageInvocationUnmap_ccorres:
          apply csymbr
          apply csymbr
          apply (rule ccorres_move_c_guard_cte)
-         apply (rule ccorres_add_return2)
          apply (ctac add: ccorres_updateCap)
            apply (rule ccorres_rel_imp[where xf'=ret__unsigned_long_' and
                                              r'="\<lambda>_ x. x = SCAST(32 signed \<rightarrow> 64) EXCEPTION_NONE"])
@@ -1585,7 +1521,7 @@ lemma setCTE_asidpool':
   "\<lbrace> ko_at' (ASIDPool pool) p \<rbrace> setCTE c p' \<lbrace>\<lambda>_. ko_at' (ASIDPool pool) p\<rbrace>"
   apply (clarsimp simp: setCTE_def)
   apply (simp add: setObject_def split_def)
-  apply (rule hoare_seq_ext [OF _ hoare_gets_post])
+  apply (rule bind_wp [OF _ hoare_gets_sp])
   apply (clarsimp simp: valid_def in_monad)
   apply (frule updateObject_type)
   apply (clarsimp simp: obj_at'_def)
@@ -1700,7 +1636,6 @@ lemma page_table_at'_array_assertion_strong[unfolded ptTranslationBits_def, simp
   shows "array_assertion (pte_Ptr pt) (Suc (unat (2^(ptTranslationBits-1) + of_nat n::machine_word)))
                          (hrs_htd (t_hrs_' (globals s')))"
   using assms
-  using assms
   by (fastforce intro: page_table_at'_array_assertion
                 simp: unat_add_simple ptTranslationBits_def word_bits_def unat_of_nat)
 
@@ -1721,7 +1656,7 @@ proof -
   show ?thesis
     apply (cinit lift: newLvl1pt_' simp: ptIndex_maxPTLevel_pptrBase ptTranslationBits_def)
      apply (rule ccorres_pre_gets_riscvKSGlobalPT_ksArchState, rename_tac globalPT)
-     apply (rule ccorres_rel_imp[where r=dc, OF _ dc_simp])
+     apply (rule ccorres_rel_imp[where r=dc, simplified])
      apply (clarsimp simp: whileAnno_def objBits_simps bit_simps RISCV64.pptrBase_def mask_def)
      apply (rule ccorres_h_t_valid_riscvKSGlobalPT)
      apply csymbr
@@ -1815,7 +1750,7 @@ lemma performASIDPoolInvocation_ccorres:
            apply wp
           apply simp
           apply vcg
-         apply (rule hoare_strengthen_post[where Q="\<lambda>_. \<top>"], wp)
+         apply (rule hoare_strengthen_post[where Q'="\<lambda>_. \<top>"], wp)
          apply (clarsimp simp: typ_at'_def ko_wp_at'_def obj_at'_def)
         apply wp
        apply simp

@@ -14,13 +14,13 @@ theory Arch_A
 imports TcbAcc_A
 begin
 
-context Arch begin global_naming X64_A
+context Arch begin arch_global_naming (A)
 
 definition "page_bits \<equiv> pageBits"
 
 definition
-  updateIRQState :: "irq \<Rightarrow> X64IRQState \<Rightarrow> ('a abstract_state_scheme, unit) nondet_monad" where
-  "updateIRQState irq irqState \<equiv> do
+  update_irq_state :: "irq \<Rightarrow> X64IRQState \<Rightarrow> ('a abstract_state_scheme, unit) nondet_monad" where
+  "update_irq_state irq irqState \<equiv> do
      irq_states \<leftarrow> gets (x64_irq_state o arch_state);
      modify (\<lambda>s. s \<lparr>arch_state := (arch_state s) \<lparr>x64_irq_state := irq_states (irq := irqState)\<rparr>\<rparr>)
   od"
@@ -31,13 +31,13 @@ definition
     IssueIRQHandlerIOAPIC irq dest src ioapic pin level polarity vector \<Rightarrow> without_preemption (do
       do_machine_op $ ioapicMapPinToVector ioapic pin level polarity vector;
       irq_state \<leftarrow> return $ IRQIOAPIC (ioapic && mask 5) (pin && mask 5) (level && 1) (polarity && 1) True;
-      updateIRQState irq irq_state;
+      update_irq_state irq irq_state;
       set_irq_state IRQSignal (IRQ irq);
       cap_insert (IRQHandlerCap (IRQ irq)) src dest
     od) |
     IssueIRQHandlerMSI irq dest src bus dev func handle \<Rightarrow> without_preemption (do
       irq_state \<leftarrow> return $ IRQMSI (bus && mask 8) (dev && mask 5) (func && mask 3) (handle && mask 32);
-      updateIRQState irq irq_state;
+      update_irq_state irq irq_state;
       set_irq_state IRQSignal (IRQ irq);
       cap_insert (IRQHandlerCap (IRQ irq)) src dest
     od)
@@ -47,7 +47,10 @@ text \<open>Switch to a thread's virtual address space context.\<close>
 
 definition
   arch_switch_to_thread :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad" where
-  "arch_switch_to_thread t \<equiv> set_vm_root t"
+  "arch_switch_to_thread t \<equiv> do
+     set_vm_root t;
+     lazy_fpu_restore t
+   od"
 
 definition
    arch_switch_to_idle_thread :: "(unit,'z::state_ext) s_monad" where
@@ -55,6 +58,9 @@ definition
      thread \<leftarrow> gets idle_thread;
      set_vm_root thread
    od"
+
+definition arch_prepare_next_domain :: "(unit,'z::state_ext) s_monad" where
+  "arch_prepare_next_domain \<equiv> switch_local_fpu_owner None"
 
 definition
   arch_activate_idle_thread :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad" where
@@ -133,7 +139,7 @@ where
 text \<open>The Page capability confers the authority to map, unmap and flush the
   memory page.\<close>
 definition
-perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s_monad" where
+perform_page_invocation :: "page_invocation \<Rightarrow> (data list,'z::state_ext) s_monad" where
 "perform_page_invocation iv \<equiv> case iv of
     PageMap cap ct_slot entries vspace \<Rightarrow> do
       set_cap cap ct_slot;
@@ -144,25 +150,23 @@ perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s
       asid \<leftarrow> case cap of
                   ArchObjectCap (PageCap _ _ _ _ _ (Some (as, _))) \<Rightarrow> return as
                 | _ \<Rightarrow> fail;
-      invalidate_page_structure_cache_asid (addrFromPPtr vspace) asid
+      invalidate_page_structure_cache_asid (addrFromPPtr vspace) asid;
+      return []
     od
   | PageUnmap cap ct_slot \<Rightarrow>
       (case cap of
-        PageCap dev base rights map_type sz mapped \<Rightarrow>
-            (case mapped of
+        PageCap dev base rights map_type sz mapped \<Rightarrow> do
+            case mapped of
               Some _ \<Rightarrow> (case map_type of
                           VMVSpaceMap \<Rightarrow> perform_page_invocation_unmap cap ct_slot
                         | _ \<Rightarrow> fail)
-            | None \<Rightarrow> return ())
+            | None \<Rightarrow> return ();
+            return []
+        od
       | _ \<Rightarrow> fail)
 \<^cancel>\<open>| PageIOMap asid cap ct_slot entries \<Rightarrow> undefined\<close>
-  | PageGetAddr ptr \<Rightarrow> do
-      paddr \<leftarrow> return $ fromPAddr $ addrFromPPtr ptr;
-      ct \<leftarrow> gets cur_thread;
-      msg_transferred \<leftarrow> set_mrs ct Nothing [paddr];
-      msg_info \<leftarrow> return $ MI msg_transferred 0 0 0;
-      set_message_info ct msg_info
-    od"
+  | PageGetAddr ptr \<Rightarrow>
+      return [addrFromPPtr ptr]"
 
 text \<open>PageTable capabilities confer the authority to map and unmap page tables.\<close>
 definition
@@ -286,7 +290,7 @@ definition
           InvokePageTable oper \<Rightarrow> arch_no_return $ perform_page_table_invocation oper
         | InvokePageDirectory oper \<Rightarrow> arch_no_return $ perform_page_directory_invocation oper
         | InvokePDPT oper \<Rightarrow> arch_no_return $ perform_pdpt_invocation oper
-        | InvokePage oper \<Rightarrow> arch_no_return $ perform_page_invocation oper
+        | InvokePage oper \<Rightarrow> perform_page_invocation oper
         | InvokeASIDControl oper \<Rightarrow> arch_no_return $ perform_asid_control_invocation oper
         | InvokeASIDPool oper \<Rightarrow> arch_no_return $ perform_asid_pool_invocation oper
         | InvokeIOPort oper \<Rightarrow> perform_io_port_invocation oper

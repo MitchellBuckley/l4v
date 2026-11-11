@@ -15,14 +15,11 @@ begin
 abbreviation "up_aligned_area ptr sz \<equiv> {ptr..(ptr && ~~ mask sz) + (2 ^ sz - 1)}"
 abbreviation "down_aligned_area ptr sz \<equiv> {(ptr && ~~ mask sz) + (2 ^ sz - 1) .. ptr}"
 
-context begin interpretation Arch .
-requalify_facts
-  global_refs_kheap
+arch_requalify_facts
   valid_vspace_obj_default
-requalify_consts
-  clearMemory
+
+arch_requalify_consts
   clearMemoryVM
-end
 
 declare global_refs_kheap[simp]
 
@@ -36,8 +33,8 @@ end
 
 
 lemma default_object_tcbE:
-  "\<lbrakk> default_object ty dev us = TCB tcb; ty \<noteq> Untyped;
-   \<lbrakk> tcb = default_tcb; ty = Structures_A.TCBObject \<rbrakk> \<Longrightarrow> R \<rbrakk> \<Longrightarrow> R"
+  "\<lbrakk> default_object ty dev us d = TCB tcb; ty \<noteq> Untyped;
+   \<lbrakk> tcb = default_tcb d; ty = Structures_A.TCBObject \<rbrakk> \<Longrightarrow> R \<rbrakk> \<Longrightarrow> R"
   unfolding default_object_def by (cases ty, auto)
 
 
@@ -49,20 +46,19 @@ locale Retype_AI_slot_bits =
 
 
 lemma (in Retype_AI_slot_bits) obj_bits_cong:
-  "\<lbrakk>a = a1; c=c1\<rbrakk> \<Longrightarrow> obj_bits (default_object a b c)
-    = obj_bits (default_object a1 b1 c1)"
+  "\<lbrakk>a = a1; c=c1\<rbrakk> \<Longrightarrow> obj_bits (default_object a b c d) = obj_bits (default_object a1 b1 c1 d1)"
   by (simp add: default_object_def arch_kobj_size_cong
          split: if_splits apiobject_type.splits)
 
 lemma (in Retype_AI_slot_bits) obj_bits_api_default_object:
-  "\<lbrakk> ty \<noteq> Untyped\<rbrakk> \<Longrightarrow> obj_bits_api ty us = obj_bits (default_object ty dev us)"
+  "\<lbrakk> ty \<noteq> Untyped\<rbrakk> \<Longrightarrow> obj_bits_api ty us = obj_bits (default_object ty dev us d)"
   unfolding obj_bits_api_def default_object_def
   by (cases ty)
      (simp_all add: slot_bits_def2 arch_kobj_size_cong wf_empty_bits)
 
 
 lemma obj_bits_api_default_CapTableObject:
-  "obj_bits (default_object Structures_A.apiobject_type.CapTableObject dev us)
+  "obj_bits (default_object Structures_A.apiobject_type.CapTableObject dev us d)
   = cte_level_bits + us"
   by (simp add: default_object_def wf_empty_bits)
 
@@ -77,7 +73,7 @@ context Retype_AI_slot_bits begin
 lemma obj_bits_api_def2:
   "obj_bits_api type obj_size_bits =
    (case type of Structures_A.Untyped \<Rightarrow> obj_size_bits
-           | _ \<Rightarrow> obj_bits (default_object type False obj_size_bits))"
+           | _ \<Rightarrow> obj_bits (default_object type False obj_size_bits default_domain))"
   by (simp add: obj_bits_api_def default_object_def
                 wf_empty_bits dom_empty_cnode ex_with_length
                 slot_bits_def2
@@ -86,7 +82,7 @@ lemma obj_bits_api_def2:
 lemma obj_bits_api_def3:
   "obj_bits_api type obj_size_bits =
    (if type = Structures_A.Untyped then obj_size_bits
-     else obj_bits (default_object type False obj_size_bits))"
+     else obj_bits (default_object type False obj_size_bits default_domain))"
   by (simp add: obj_bits_api_def default_object_def
                 wf_empty_bits dom_empty_cnode ex_with_length
                 slot_bits_def2
@@ -95,18 +91,18 @@ lemma obj_bits_api_def3:
 lemma obj_bits_api_def4:
   "obj_bits_api type obj_size_bits =
    (if type = Structures_A.Untyped then obj_size_bits
-     else obj_bits (default_object type True obj_size_bits))"
+     else obj_bits (default_object type True obj_size_bits default_domain))"
   by (simp add: obj_bits_api_def default_object_def arch_kobj_size_cong
                 wf_empty_bits dom_empty_cnode ex_with_length
                 slot_bits_def2
          split: apiobject_type.split)
 
 lemma obj_bits_dev_irr:
-  "ty \<noteq> Untyped \<Longrightarrow> obj_bits (default_object ty dev us) = obj_bits_api ty us"
+  "ty \<noteq> Untyped \<Longrightarrow> obj_bits (default_object ty dev us d) = obj_bits_api ty us"
   by (simp add: obj_bits_api_def3 cong: obj_bits_cong)
 
 lemma default_obj_range:
-  "ty \<noteq> Untyped \<Longrightarrow> obj_range p (default_object ty dev us) = {p..p + 2 ^ (obj_bits_api ty us) - 1}"
+  "ty \<noteq> Untyped \<Longrightarrow> obj_range p (default_object ty dev us d) = {p..p + 2 ^ (obj_bits_api ty us) - 1}"
   by (simp add: obj_range_def obj_bits_dev_irr)
 end
 
@@ -277,8 +273,7 @@ lemma range_cover_le_n_less:
 
 lemma unat_of_nat_n :"unat ((of_nat n):: 'a :: len word) = n"
   using range_cover_n_less
-  apply (simp add:unat_of_nat)
-  done
+  by (simp add:unat_of_nat)
 
 
 lemma unat_of_nat_n_shift:
@@ -354,38 +349,36 @@ lemma range_cover_subset:
       apply (simp add:unat_of_nat_minus_1)
       done
     show "ptr + of_nat p * 2 ^ sbit + 2 ^ sbit - 1 \<le> ptr + of_nat n * 2 ^ sbit - 1"
+      using cover
       apply (subst decomp)
       apply (simp add:add.assoc[symmetric])
       apply (simp add:p_assoc_help)
       apply (rule order_trans[OF word_plus_mono_left word_plus_mono_right])
          apply (rule word_plus_mono_right)
           apply (rule word_mult_le_mono1[OF word_of_nat_le])
-          apply (insert n_less not_0 pointer)
+            apply (insert n_less not_0 pointer)
             apply (simp add:unat_of_nat_minus_1)
            apply (rule p2_gt_0[THEN iffD2])
-           using cover
            apply (simp add:word_bits_def range_cover_def)
-          using cover
           apply (simp only: word_bits_def[symmetric] unat_power_lower range_cover_def)
           apply (clarsimp simp: unat_of_nat_minus_1 )
           apply (rule nat_less_power_trans2[OF range_cover.range_cover_le_n_less(2),OF cover])
-          apply (simp add:unat_of_nat_m1 less_imp_le)
-         using cover
+           apply (simp add:unat_of_nat_m1 less_imp_le)
+          apply (simp add:range_cover_def)
+         apply (rule word_plus_mono_right_split[where sz = sz])
+          using range_cover.range_cover_compare[OF cover,where p = "unat (of_nat n - (1 :: 'a :: len word))"]
+          apply (clarsimp simp:unat_of_nat_m1)
          apply (simp add:range_cover_def)
-        apply (rule word_plus_mono_right_split[where sz = sz])
-        using range_cover.range_cover_compare[OF cover,where p = "unat (of_nat n - (1 :: 'a :: len word))"]
-        apply (clarsimp simp:unat_of_nat_m1)
-       using cover
-       apply (simp add:range_cover_def)
-      apply (rule olen_add_eqv[THEN iffD2])
-      apply (subst add.commute[where a = "2^sbit - 1"])
-     apply (subst p_assoc_help[symmetric])
-     apply (rule is_aligned_no_overflow)
-     apply (insert cover)
-     apply (clarsimp simp:range_cover_def)
-     apply (erule aligned_add_aligned[OF _  is_aligned_mult_triv2])
-       apply (simp add:range_cover_def)+
-   done
+        apply (rule olen_add_eqv[THEN iffD2])
+        apply (subst add.commute[where a = "2^sbit - 1"])
+        apply (subst p_assoc_help[symmetric])
+        apply (rule is_aligned_no_overflow)
+        apply (insert cover)
+        apply (clarsimp simp:range_cover_def)
+        apply (erule aligned_add_aligned[OF _  is_aligned_mult_triv2])
+        apply (simp add:range_cover_def)+
+      using is_aligned_add is_aligned_mult_triv2 is_aligned_no_overflow'
+      by blast
   qed
 
 lemma range_cover_rel:
@@ -480,7 +473,7 @@ proof -
       show "x \<in> {x .. x + (2 ^ obj_bits ko - 1)}"
       proof (rule base_member_set)
         from vp show "is_aligned x (obj_bits ko)" using ps'
-          by (auto elim!: valid_pspaceE pspace_alignedE)
+          by (auto elim!: valid_pspaceE)
         show "obj_bits ko < len_of TYPE(machine_word_len)"
           by (rule valid_pspace_obj_sizes [OF _ ranI, unfolded word_bits_def]) fact+
       qed
@@ -562,8 +555,8 @@ lemma mdb_cte_at_no_descendants:
 
 lemma caps_of_state_foldr:
   assumes tyun: "ty \<noteq> Untyped"
-  fixes s sz ptr us addrs dev
-  defines "s' \<equiv> (s\<lparr>kheap := foldr (\<lambda>p ps. ps(p \<mapsto> default_object ty dev us))
+  fixes s sz ptr us addrs dev d
+  defines "s' \<equiv> (s\<lparr>kheap := foldr (\<lambda>p ps. ps(p \<mapsto> default_object ty dev us d))
                   addrs (kheap s)\<rparr>)"
   shows
   "caps_of_state s' =
@@ -600,10 +593,10 @@ lemma caps_of_state_foldr:
 
 
 lemma null_filter_caps_of_state_foldr:
-  fixes s sz ptr us addrs dev
+  fixes s sz ptr us addrs dev d
   assumes tyun: "ty \<noteq> Untyped"
     and nondom: "\<forall>x \<in> set addrs. x \<notin> dom (kheap s)"
-  defines "s' \<equiv> (s\<lparr>kheap := foldr (\<lambda>p ps. ps(p \<mapsto> default_object ty dev us))
+  defines "s' \<equiv> (s\<lparr>kheap := foldr (\<lambda>p ps. ps(p \<mapsto> default_object ty dev us d))
                   addrs (kheap s)\<rparr>)"
   shows
   "null_filter (caps_of_state s') =
@@ -818,7 +811,8 @@ lemma range_cover_subset_not_empty:
     apply (fastforce simp:range_cover_def)+
   done
 
-crunch global_refs[wp]: retype_region "\<lambda>s. P (global_refs s)"
+crunch retype_region
+  for global_refs[wp]: "\<lambda>s. P (global_refs s)"
   (simp: crunch_simps)
 
 locale Retype_AI_retype_region_ret =
@@ -870,7 +864,8 @@ done
 
 end
 
-crunch valid_pspace: do_machine_op "valid_pspace"
+crunch do_machine_op
+  for valid_pspace: "valid_pspace"
 
 
 lemma do_machine_op_return_foo:
@@ -890,13 +885,13 @@ abbreviation(input)
        and valid_pspace and valid_mdb and valid_idle and only_idle
        and if_unsafe_then_cap and valid_reply_caps
        and valid_reply_masters and valid_global_refs and valid_arch_state
-       and valid_irq_node and valid_irq_handlers and valid_vspace_objs
+       and valid_cur_fpu and valid_irq_node and valid_irq_handlers and valid_vspace_objs
        and valid_irq_states and valid_global_objs
        and valid_arch_caps and valid_kernel_mappings
        and valid_asid_map and valid_global_vspace_mappings
        and pspace_in_kernel_window and cap_refs_in_kernel_window
        and pspace_respects_device_region and cap_refs_respects_device_region
-       and cur_tcb and valid_ioc and valid_machine_state and valid_ioports"
+       and cur_tcb and valid_ioc and valid_machine_state"
 
 
 lemma all_invs_but_equal_kernel_mappings_restricted_eq:
@@ -916,11 +911,12 @@ locale Retype_AI_dmo_eq_kernel_restricted =
       \<lbrace>\<lambda>rv s. equal_kernel_mappings (kheap_update (f (kheap s)) s)\<rbrace>"
 
 
-crunch only_idle[wp]: do_machine_op "only_idle"
-crunch valid_global_refs[wp]: do_machine_op "valid_global_refs"
-crunch global_mappings[wp]: do_machine_op "valid_global_vspace_mappings"
-crunch valid_kernel_mappings[wp]: do_machine_op "valid_kernel_mappings"
-crunch cap_refs_in_kernel_window[wp]: do_machine_op "cap_refs_in_kernel_window"
+crunch do_machine_op
+  for only_idle[wp]: "only_idle"
+crunch do_machine_op
+  for valid_global_refs[wp]: "valid_global_refs"
+crunch do_machine_op
+  for cap_refs_in_kernel_window[wp]: "cap_refs_in_kernel_window"
 
 
 locale Retype_AI_post_retype_invs =
@@ -984,7 +980,7 @@ lemma non_disjoing_subset: "\<lbrakk>A \<subseteq> B; A \<inter> C \<noteq> {}\<
 
 lemma pspace_no_overlap_same_type:
   "\<lbrakk>pspace_no_overlap S s; ko_at k p s; a_type ko = a_type k\<rbrakk>
-    \<Longrightarrow> pspace_no_overlap S (kheap_update (\<lambda>_. (kheap s(p \<mapsto> ko))) s)"
+    \<Longrightarrow> pspace_no_overlap S (kheap_update (\<lambda>_. (kheap s)(p \<mapsto> ko)) s)"
   unfolding pspace_no_overlap_def
   by (clarsimp simp: obj_at_def obj_bits_T)
 
@@ -1032,8 +1028,7 @@ lemma unsafe_rep2:
   apply (subst P_null_filter_caps_of_cte_wp_at, simp)+
   apply (simp add: null_filter_same [where cps="caps_of_state s" for s, OF cte_wp_at_not_Null])
   apply (fastforce simp: if_unsafe_then_cap2_def cte_wp_at_caps_of_state
-                        if_unsafe_then_cap_def ex_cte_cap_wp_to_def
-                intro!: ext)
+                        if_unsafe_then_cap_def ex_cte_cap_wp_to_def)
   done
 
 
@@ -1114,10 +1109,10 @@ lemma valid_mdb_rep2:
    apply (rule arg_cong2 [where f="(\<and>)"])
     apply (simp add: reply_caps_mdb_def
                 del: split_paired_Ex split_paired_All)
-    apply (fastforce intro!: iffI elim!: allEI exEI
+    apply (fastforce elim!: allEI exEI
                   simp del: split_paired_Ex split_paired_All)
    apply (rule arg_cong2 [where f="(\<and>)"])
-    apply (fastforce simp: reply_masters_mdb_def intro!: iffI elim!: allEI
+    apply (fastforce simp: reply_masters_mdb_def elim!: allEI
                  simp del: split_paired_All split: if_split_asm)
    apply (fastforce simp: valid_arch_mdb_null_filter[simplified null_filter_def])
   apply (rule arg_cong[where f=All, OF ext])+
@@ -1169,18 +1164,11 @@ lemma obj_at_kheap_trans_state[simp]:"obj_at P ptr (kheap_update f (trans_state 
 lemma retype_region_obj_at:
   assumes tyunt: "ty \<noteq> Structures_A.apiobject_type.Untyped"
   shows "\<lbrace>\<top>\<rbrace> retype_region ptr n us ty dev
-  \<lbrace>\<lambda>r s. \<forall>x \<in> set (retype_addrs ptr ty n us). obj_at (\<lambda>ko. ko = default_object ty dev us) x s\<rbrace>"
+  \<lbrace>\<lambda>r s. \<forall>x \<in> set (retype_addrs ptr ty n us). obj_at (\<lambda>ko. ko = default_object ty dev us (cur_domain s)) x s\<rbrace>"
   using tyunt unfolding retype_region_def
   apply (simp only: return_bind bind_return foldr_upd_app_if fun_app_def K_bind_def)
   apply wp
-  apply (simp only: obj_at_kheap_trans_state)
-  apply wp
-  apply (simp only: simp_thms if_True)
-  apply (rule ballI)
-  apply (subst retype_addrs_fold)
-  apply simp
-  apply (unfold obj_at_def)
-  apply clarsimp
+  apply (clarsimp simp: retype_addrs_fold obj_at_def)
   done
 
 
@@ -1229,7 +1217,7 @@ lemma retype_region_cur_tcb[wp]:
   supply
     is_aligned_neg_mask_eq[simp del]
     is_aligned_neg_mask_weaken[simp del]
-  apply (rule hoare_post_imp [where Q="\<lambda>rv s. \<exists>tp. tcb_at tp s \<and> cur_thread s = tp"])
+  apply (rule hoare_post_imp[where Q'="\<lambda>rv s. \<exists>tp. tcb_at tp s \<and> cur_thread s = tp"])
    apply (simp add: cur_tcb_def)
   apply (wpsimp wp: hoare_vcg_ex_lift retype_region_obj_at_other3 simp: retype_region_def)
   apply (auto simp: cur_tcb_def cong: if_cong)
@@ -1264,19 +1252,19 @@ lemma retype_addrs_range_subset:
 context Retype_AI_slot_bits begin
 
 lemma retype_addrs_obj_range_subset:
-  "\<lbrakk>  p \<in> set (retype_addrs ptr ty n us);
-      range_cover ptr sz (obj_bits (default_object ty dev us)) n;
-  ty \<noteq> Untyped \<rbrakk>
-  \<Longrightarrow> obj_range p (default_object ty dev us) \<subseteq> {ptr..(ptr && ~~ mask sz) + (2^sz - 1)}"
-  by(simp add: obj_range_def obj_bits_api_default_object[symmetric]
+  "\<lbrakk> p \<in> set (retype_addrs ptr ty n us);
+     range_cover ptr sz (obj_bits (default_object ty dev us d)) n;
+     ty \<noteq> Untyped \<rbrakk>
+   \<Longrightarrow> obj_range p (default_object ty dev us d') \<subseteq> {ptr..(ptr && ~~ mask sz) + (2^sz - 1)}"
+  by (simp add: obj_range_def obj_bits_api_default_object[symmetric]
                 retype_addrs_range_subset p_assoc_help[symmetric]
            del: atLeastatMost_subset_iff)
 
 lemma retype_addrs_obj_range_subset_strong:
   "\<lbrakk> p \<in> set (retype_addrs ptr ty n us);
-    range_cover ptr sz (obj_bits_api ty us) n;
-  ty \<noteq> Untyped \<rbrakk>
-   \<Longrightarrow> obj_range p (default_object ty dev us) \<subseteq>  {ptr..ptr + of_nat n * 2 ^ obj_bits_api ty us - 1}"
+     range_cover ptr sz (obj_bits_api ty us) n;
+     ty \<noteq> Untyped \<rbrakk>
+   \<Longrightarrow> obj_range p (default_object ty dev us d) \<subseteq>  {ptr..ptr + of_nat n * 2 ^ obj_bits_api ty us - 1}"
   unfolding obj_range_def
   apply (frule retype_addrs_obj_range_subset)
    apply (simp add:obj_bits_dev_irr)
@@ -1295,51 +1283,48 @@ lemma retype_addrs_obj_range_subset_strong:
     have unat_of_nat_m1: "unat (of_nat n - (1::machine_word)) < n"
       using not_0 n_less
        by (simp add:unat_of_nat_minus_1)
-    have decomp:"of_nat n * 2 ^ obj_bits_api ty us = of_nat (n - 1) * 2 ^ (obj_bits (default_object ty dev us))
-      + (2 :: machine_word) ^ obj_bits (default_object ty dev us)"
+    have decomp:"of_nat n * 2 ^ obj_bits_api ty us = of_nat (n - 1) * 2 ^ (obj_bits (default_object ty dev us d))
+      + (2 :: machine_word) ^ obj_bits (default_object ty dev us d)"
       apply (simp add:distrib_right[where b = "1::'a::len word",simplified,symmetric])
       using not_0 n_less
       apply (simp add: unat_of_nat_minus_1 obj_bits_api_def3 tyunt cong: obj_bits_cong)
       done
-    show  "p + 2 ^ obj_bits (default_object ty dev us) - 1 \<le> ptr + of_nat n * 2 ^ obj_bits_api ty us - 1"
+    show  "p + 2 ^ obj_bits (default_object ty dev us d) - 1 \<le> ptr + of_nat n * 2 ^ obj_bits_api ty us - 1"
+      using cover
       apply (subst decomp)
       apply (simp add:add.assoc[symmetric])
       apply (simp add:p_assoc_help)
       apply (rule order_trans[OF word_plus_mono_left word_plus_mono_right])
-       using mem_p not_0
+         using mem_p not_0
          apply (clarsimp simp: retype_addrs_def ptr_add_def shiftl_t2n tyunt
                                obj_bits_dev_irr)
          apply (rule word_plus_mono_right)
           apply (rule word_mult_le_mono1[OF word_of_nat_le])
-          using n_less not_0
+            using n_less not_0
             apply (simp add:unat_of_nat_minus_1)
            apply (rule p2_gt_0[THEN iffD2])
-           using cover
            apply (simp add: word_bits_def range_cover_def obj_bits_dev_irr tyunt)
           apply (simp only: word_bits_def[symmetric])
           using not_0 n_less
           apply (clarsimp simp: unat_of_nat_minus_1 obj_bits_dev_irr tyunt)
           apply (subst unat_power_lower)
-            using cover
-            apply (simp add:range_cover_def)
+           apply (simp add:range_cover_def)
           apply (rule nat_less_power_trans2[OF range_cover.range_cover_le_n_less(2),OF cover, folded word_bits_def])
-          apply (simp add:unat_of_nat_m1 less_imp_le)
-         using cover
+           apply (simp add:unat_of_nat_m1 less_imp_le)
+          apply (simp add:range_cover_def word_bits_def)
+         apply (rule machine_word_plus_mono_right_split[where sz = sz])
+          using range_cover.range_cover_compare[OF cover,where p = "unat (of_nat n - (1::machine_word))"]
+          apply (clarsimp simp:unat_of_nat_m1)
          apply (simp add:range_cover_def word_bits_def)
-        apply (rule machine_word_plus_mono_right_split[where sz = sz])
-        using range_cover.range_cover_compare[OF cover,where p = "unat (of_nat n - (1::machine_word))"]
-        apply (clarsimp simp:unat_of_nat_m1)
-       using cover
-       apply (simp add:range_cover_def word_bits_def)
-      apply (rule olen_add_eqv[THEN iffD2])
-      apply (subst add.commute[where a = "2^(obj_bits (default_object ty dev us)) - 1"])
-     apply (subst p_assoc_help[symmetric])
-     apply (rule is_aligned_no_overflow)
-     apply (insert cover)
-     apply (clarsimp simp:range_cover_def)
-     apply (erule aligned_add_aligned[OF _  is_aligned_mult_triv2])
-       apply (simp add: obj_bits_dev_irr range_cover_def tyunt)+
-   done
+        apply (rule olen_add_eqv[THEN iffD2])
+        apply (subst add.commute[where a = "2^(obj_bits (default_object ty dev us d)) - 1"])
+        apply (subst p_assoc_help[symmetric])
+        apply (rule is_aligned_no_overflow)
+        apply (insert cover)
+        apply (clarsimp simp:range_cover_def)
+        apply (erule aligned_add_aligned[OF _  is_aligned_mult_triv2])
+        apply (simp add: obj_bits_dev_irr range_cover_def tyunt)+
+      by (meson is_aligned_add is_aligned_mult_triv2 is_aligned_no_overflow')
   qed
 
 
@@ -1360,9 +1345,9 @@ lemma pspace_no_overlap_retype_addrs_empty:
   and tyv: "ty \<noteq> Structures_A.apiobject_type.Untyped"
   and cover: "range_cover ptr sz (obj_bits_api ty us) n"
   and oab: "obj_bits_api ty us \<le> sz"
-  shows "{x..x + (2 ^ obj_bits (default_object ty dev us) - 1)} \<inter> {y..y + (2 ^ obj_bits ko - 1)} = {}"
+  shows "{x..x + (2 ^ obj_bits (default_object ty dev us d) - 1)} \<inter> {y..y + (2 ^ obj_bits ko - 1)} = {}"
 proof -
-  have "{x..x + (2 ^ obj_bits (default_object ty dev us) - 1)} \<subseteq> {ptr..(ptr && ~~ mask sz) + (2 ^ sz - 1)}"
+  have "{x..x + (2 ^ obj_bits (default_object ty dev us d) - 1)} \<subseteq> {ptr..(ptr && ~~ mask sz) + (2 ^ sz - 1)}"
    by (subst obj_bits_api_default_object [OF tyv, symmetric],
       rule retype_addrs_mem_subset_ptr_bits) fact+
 
@@ -1379,7 +1364,7 @@ lemma valid_obj_default_object:
   assumes tyunt: "ty \<noteq> Untyped"
   and      tyct: "ty = CapTableObject \<Longrightarrow> us < word_bits - cte_level_bits \<and> 0 < us"
   and      arch: "valid_arch_tcb default_arch_tcb s"
-  shows "valid_obj ptr (default_object ty dev us) s"
+  shows "valid_obj ptr (default_object ty dev us d) s"
   unfolding valid_obj_def default_object_def
   apply (cases ty)
        apply (simp add: tyunt)
@@ -1402,22 +1387,21 @@ lemma valid_obj_default_object:
 
 lemma usable_range_subseteq:
   "\<lbrakk>cap_aligned cap;is_untyped_cap cap\<rbrakk> \<Longrightarrow> usable_untyped_range cap \<subseteq> untyped_range cap"
-  apply (clarsimp simp:is_cap_simps cap_aligned_def split:if_splits)
+  apply (clarsimp simp: is_cap_simps cap_aligned_def split: if_splits)
   apply (erule order_trans[OF is_aligned_no_wrap'])
    apply (erule of_nat_power)
-   apply (simp add:word_bits_def)+
- done
-
+   apply (simp add: word_bits_def)+
+  done
 
 lemma usable_range_emptyD:
   "\<lbrakk>cap_aligned cap;is_untyped_cap cap ;usable_untyped_range cap = {}\<rbrakk> \<Longrightarrow> 2 ^ cap_bits cap \<le> free_index_of cap"
   apply (clarsimp simp:is_cap_simps not_le free_index_of_def cap_aligned_def split:if_splits)
-  apply (drule(1) of_nat_power [where 'a=machine_word_len, folded word_bits_def])
-  apply (drule word_plus_mono_right[OF _ is_aligned_no_overflow[unfolded p_assoc_help],rotated])
-   apply simp
-  apply (simp add:p_assoc_help)
+   apply (drule(1) of_nat_power [where 'a=machine_word_len, folded word_bits_def])
+   apply (drule word_plus_mono_right[OF _ is_aligned_no_overflow[unfolded p_assoc_help],rotated])
+    apply simp
+   apply (simp add: p_assoc_help)
+  apply (metis More_Word.of_nat_power is_aligned_no_wrap' not_le word_bits_def)
   done
-
 
 locale Retype_AI_valid_untyped_helper =
   fixes state_ext_t :: "'state_ext::state_ext itself"
@@ -1434,7 +1418,7 @@ locale Retype_AI_valid_untyped_helper =
         valid_pspace s \<rbrakk>
       \<Longrightarrow> valid_cap c
            (s\<lparr>kheap := \<lambda>x. if x \<in> set (retype_addrs ptr ty n us)
-                             then Some (default_object ty dev us)
+                             then Some (default_object ty dev us (cur_domain s))
                              else kheap s x\<rparr>)"
 
 
@@ -1461,7 +1445,7 @@ locale retype_region_proofs =
       and  mem :  "caps_no_overlap ptr sz s"
       and cover: "range_cover ptr sz (obj_bits_api ty us) n"
       and dev: "\<exists>slot. cte_wp_at (\<lambda>c.  {ptr..(ptr && ~~ mask sz) + (2 ^ sz - 1)} \<subseteq> cap_range c \<and> cap_is_device c = dev) slot s"
-  defines "ps \<equiv> (\<lambda>x. if x \<in> set (retype_addrs ptr ty n us) then Some (default_object ty dev us)
+  defines "ps \<equiv> (\<lambda>x. if x \<in> set (retype_addrs ptr ty n us) then Some (default_object ty dev us (cur_domain s))
                        else kheap s x)"
       and "s' \<equiv> kheap_update (\<lambda>y. ps) s"
 
@@ -1511,8 +1495,9 @@ end
 context retype_region_proofs_gen begin
 
 lemma psp_dist:
-  shows         "pspace_distinct s'"
+  shows "pspace_distinct s'"
 proof -
+  define cur_d where "cur_d = cur_domain s"
   have distinct:"pspace_distinct s"
     apply (rule valid_pspaceE)
     apply (rule vp)
@@ -1537,8 +1522,8 @@ proof -
       apply (auto simp: range_cover_def word_bits_def)
       done
     ultimately have
-      "{x..x + (2 ^ obj_bits (default_object ty dev us) - 1)} \<inter>
-       {y..y + (2 ^ obj_bits (default_object ty dev us) - 1)} = {}"
+      "{x..x + (2 ^ obj_bits (default_object ty dev us cur_d) - 1)} \<inter>
+       {y..y + (2 ^ obj_bits (default_object ty dev us cur_d) - 1)} = {}"
       using xne tyunt cover
       apply -
       apply (rule aligned_neq_into_no_overlap)
@@ -1550,7 +1535,7 @@ proof -
     fix x y ko'
     assume xne: "x \<noteq> y" and xv: "x \<in> set (retype_addrs ptr ty n us)"
         and yv: "y \<notin> set (retype_addrs ptr ty n us)" and  "kheap s y = Some ko'"
-    have "{x..x + (2 ^ obj_bits (default_object ty dev us) - 1)} \<inter> {y..y + (2 ^ obj_bits ko' - 1)} = {}"
+    have "{x..x + (2 ^ obj_bits (default_object ty dev us cur_d) - 1)} \<inter> {y..y + (2 ^ obj_bits ko' - 1)} = {}"
       apply (rule pspace_no_overlap_retype_addrs_empty [OF orth])
       apply fact+
       apply (insert cover tyunt)
@@ -1559,6 +1544,7 @@ proof -
   }note inter' = this
   show ?thesis
     unfolding pspace_distinct_def s'_def ps_def
+    apply (fold cur_d_def)
     apply (clarsimp split: if_split_asm option.splits
               simp del: Int_atLeastAtMost)
     apply (intro conjI impI allI)
@@ -1586,7 +1572,7 @@ lemma psp_al:
 proof (clarsimp split: if_split_asm)
   fix x
   assume "x \<in> set (retype_addrs ptr ty n us)"
-  thus "is_aligned x (obj_bits (default_object ty dev us))"
+  thus "is_aligned x (obj_bits (default_object ty dev us (cur_domain s)))"
     apply -
     apply (drule retype_addrs_aligned)
     apply (insert cover tyunt)
@@ -1695,7 +1681,8 @@ lemma cte_retype:
 
 lemma iflive_s: "if_live_then_nonz_cap s" by (rule valid_pspaceE [OF vp])
 
-lemma default_object_not_live: "\<not> live (default_object ty dev us)"
+lemma default_object_not_live:
+  "\<not> live (default_object ty dev us d)"
   apply (cases ty, simp_all add: tyunt default_object_def default_tcb_not_live default_arch_object_not_live)
   apply (simp add: live_def default_ep_def default_notification_def default_ntfn_def)+
   done
@@ -1883,7 +1870,7 @@ lemma only_idle:
   apply (clarsimp simp: only_idle_def)
   apply (clarsimp simp: s'_def pred_tcb_at_def obj_at_def ps_def split: if_split_asm)
   apply (simp add: default_object_def tyunt split: Structures_A.apiobject_type.splits)
-  apply (simp add: default_tcb_def)
+  apply (clarsimp simp: default_tcb_def)
   done
 
 lemma valid_irq_states:
@@ -1913,7 +1900,7 @@ locale retype_region_proofs_invs
   fixes region_in_kernel_window :: "machine_word set \<Rightarrow> 'state_ext state \<Rightarrow> bool"
   assumes valid_global_refs: "valid_global_refs s \<Longrightarrow> valid_global_refs s'"
   assumes valid_arch_state: "valid_arch_state s \<Longrightarrow> valid_arch_state s'"
-  assumes valid_vspace_objs': "valid_vspace_objs s \<Longrightarrow> valid_vspace_objs s'"
+  assumes valid_vspace_objs': "\<lbrakk> invs s; valid_vspace_objs s \<rbrakk> \<Longrightarrow> valid_vspace_objs s'"
   assumes valid_cap:
     "(s::'state_ext state) \<turnstile> cap \<and>
         untyped_range cap \<inter> {ptr .. (ptr && ~~ mask sz) + 2 ^ sz - 1} = {}
@@ -1928,7 +1915,7 @@ lemma use_retype_region_proofs':
   assumes x: "\<And>s. \<lbrakk> retype_region_proofs s ty us ptr sz n dev; P s \<rbrakk>
    \<Longrightarrow> Q (retype_addrs ptr ty n us) (s\<lparr>kheap :=
            \<lambda>x. if x \<in> set (retype_addrs ptr ty n us)
-             then Some (default_object ty dev us)
+             then Some (default_object ty dev us (cur_domain s))
              else kheap s x\<rparr>)"
   assumes y: "\<And>x s f. Q x (trans_state f s) = Q x s"
   shows
@@ -2066,10 +2053,12 @@ lemmas retype_region_arch_objs = use_retype_region_proofs
          simplified]
 
 
-crunch irq_node[wp]: retype_region "\<lambda>s. P (interrupt_irq_node s)"
+crunch retype_region
+  for irq_node[wp]: "\<lambda>s. P (interrupt_irq_node s)"
   (simp: crunch_simps)
 
-crunch interrupt_states[wp]: retype_region "\<lambda>s. P (interrupt_states s)"
+crunch retype_region
+  for interrupt_states[wp]: "\<lambda>s. P (interrupt_states s)"
   (simp: crunch_simps)
 
 
@@ -2120,14 +2109,9 @@ lemma retype_region_cte_at_other:
   unfolding retype_region_def
   apply (simp only: foldr_upd_app_if fun_app_def K_bind_def)
   apply wp
-      apply (simp only: cte_wp_at_trans_state)
-      apply wp+
-  apply (subst retype_addrs_fold)
-  apply clarsimp
-  apply (clarsimp simp: cte_wp_at_cases del: disjCI)
-  apply (erule disjEI)
-   apply (auto dest!: pspace_no_overlapD1[OF _ _ cover])
-done
+  apply (clarsimp simp: cte_wp_at_cases retype_addrs_fold del: disjCI)
+  apply (auto dest!: pspace_no_overlapD1[OF _ _ cover])
+  done
 
 
 lemma retype_cte_wp_at:
@@ -2166,13 +2150,6 @@ lemma swp_clearMemoryVM [simp]:
 
 
 (* FIXME: move *)
-lemma bind_assoc_reverse:
-  "(do x \<leftarrow> A; _ \<leftarrow> B x; C x od) =
-   (do x \<leftarrow> do x \<leftarrow> A; _ \<leftarrow> B x; return x od; C x od)"
-by (simp only: bind_assoc return_bind)
-
-
-(* FIXME: move *)
 lemmas do_machine_op_bind =
     submonad_bind [OF submonad_do_machine_op submonad_do_machine_op
                       submonad_do_machine_op]
@@ -2192,11 +2169,6 @@ lemma ioc_more_swap[simp]: "
   done
 
 
-lemma is_final_cap'_more_update[simp]:
-  "is_final_cap' cap (trans_state f s) = is_final_cap' cap s"
-  by (simp add: is_final_cap'_def)
-
-
 lemma no_cap_to_obj_with_diff_ref_more_update[simp]:
   "no_cap_to_obj_with_diff_ref cap sl (trans_state f s) =
    no_cap_to_obj_with_diff_ref cap sl s"
@@ -2205,11 +2177,6 @@ lemma no_cap_to_obj_with_diff_ref_more_update[simp]:
 end
 
 (* FIXME: irq_state stuff moved from CNodeInv_AI, not clear it makes sense here. *)
-
-lemma cte_wp_at_irq_state_independent[intro!, simp]:
-  "is_final_cap' x (s\<lparr>machine_state := machine_state s\<lparr>irq_state := f (irq_state (machine_state s))\<rparr>\<rparr>)
-   = is_final_cap' x s"
-  by (simp add: is_final_cap'_def)
 
 
 lemma zombies_final_irq_state_independent[intro!, simp]:

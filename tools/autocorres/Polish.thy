@@ -255,8 +255,8 @@ lemma ucast_scast_same [polish, L2opt, simp]:
   done
 
 lemma [polish, L2opt, simp]:
-    "word_of_int (int x) = of_nat x"
-  by (clarsimp simp: word_of_nat)
+  "word_of_int (int x) = of_nat x"
+  by (fact of_int_of_nat_eq)
 
 (* Optimising "if" constructs. *)
 
@@ -475,9 +475,8 @@ lemma boringE_bind_K_bind [simp, polish]:
   done
 
 (* Misc *)
-
-declare pred_and_true_var [L2opt, polish]
-declare pred_and_true [L2opt, polish]
+declare pred_top_left_neutral [L2opt, polish]
+declare pred_top_right_neutral [L2opt, polish]
 
 lemmas [polish] = rel_simps eq_numeral_extra
 

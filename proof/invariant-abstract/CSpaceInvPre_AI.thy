@@ -8,35 +8,28 @@ theory CSpaceInvPre_AI
 imports ArchAcc_AI
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts
   table_cap_ref
   empty_table
 
-requalify_facts
+arch_requalify_facts
   empty_table_def
-
-end
-
 
 lemma set_cap_caps_of_state[wp]:
   "\<lbrace>\<lambda>s. P ((caps_of_state s) (ptr \<mapsto> cap))\<rbrace> set_cap cap ptr \<lbrace>\<lambda>rv s. P (caps_of_state s)\<rbrace>"
   apply (cases ptr)
   apply (clarsimp simp add: set_cap_def split_def)
-  apply (rule hoare_seq_ext [OF _ get_object_sp])
+  apply (rule bind_wp [OF _ get_object_sp])
   apply (case_tac obj; simp_all split del: if_split cong: if_cong bind_cong)
    apply (wpsimp wp: set_object_wp)
-   apply (clarsimp elim!: rsubst[where P=P]
+   apply (fastforce elim!: rsubst[where P=P]
                     simp: caps_of_state_cte_wp_at cte_wp_at_cases
-                          fun_upd_def[symmetric] wf_cs_upd obj_at_def
-                  intro!: ext)
-   apply blast
+                          fun_upd_def[symmetric] wf_cs_upd obj_at_def)
   apply (wpsimp wp: set_object_wp)
   apply (clarsimp simp: obj_at_def)
-  apply (safe elim!: rsubst[where P=P] intro!: ext)
-      apply (auto simp: caps_of_state_cte_wp_at cte_wp_at_cases,
-             auto simp: tcb_cap_cases_def split: if_split_asm)
+  apply (safe elim!: rsubst[where P=P];
+         rule ext; clarsimp simp: caps_of_state_cte_wp_at cte_wp_at_cases)
+      apply (auto simp: tcb_cap_cases_def split: if_split_asm)
   done
 
 lemmas gen_obj_refs_Int_not =
@@ -115,7 +108,7 @@ lemma wf_cs_ran_nonempty:
   "well_formed_cnode_n sz cs \<Longrightarrow> ran cs \<noteq> {}"
   apply (clarsimp simp: well_formed_cnode_n_def)
   apply (drule_tac f="\<lambda>S. replicate sz False \<in> S" in arg_cong)
-  apply (auto intro: ranI)
+  apply auto
   done
 
 lemma set_cap_obj_at_impossible:
@@ -143,8 +136,9 @@ lemma empty_table_caps_of:
   "empty_table S ko \<Longrightarrow> caps_of ko = {}"
   by (cases ko, simp_all add: empty_table_def caps_of_def cap_of_def)
 
-context begin interpretation Arch .
-lemma free_index_update_test_function_stuff[simp]:
+(* FIXME arch_split: exports properties of functions that are not necessarily in global context,
+   and then they get placed in the global simpset *)
+lemma (in Arch) free_index_update_test_function_stuff[simp]:
   "cap_asid (src_cap\<lparr>free_index := a\<rparr>) = cap_asid src_cap"
   "gen_obj_refs (src_cap\<lparr>free_index := a\<rparr>) = gen_obj_refs src_cap"
   "vs_cap_ref (src_cap\<lparr>free_index := a\<rparr>) = vs_cap_ref src_cap"
@@ -154,6 +148,9 @@ lemma free_index_update_test_function_stuff[simp]:
   by (auto simp: cap_asid_def free_index_update_def vs_cap_ref_def
                  is_cap_simps gen_obj_refs_def
           split: cap.splits arch_cap.splits)
-end
+
+requalify_facts Arch.free_index_update_test_function_stuff
+
+lemmas [simp] = free_index_update_test_function_stuff
 
 end

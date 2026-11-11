@@ -22,9 +22,11 @@ We use the C preprocessor to select a target architecture. Also, this file makes
 > import Data.Bits
 > import Data.Array
 > import Data.Helpers
+> import qualified Data.Word
 > import Foreign.Storable
 
-> import Control.Monad.State(State,liftM)
+> import Control.Monad.State(State)
+> import Control.Monad(liftM)
 
 \end{impdetails}
 
@@ -159,6 +161,13 @@ Functions for getting and setting registers.
 > newContext = Arch.newContext
 
 
+\subsubsection{Time}
+
+Time values are always 64 bit, independent of the architecture.
+
+> type Ticks = Data.Word.Word64
+
+
 \subsubsection{Miscellaneous}
 
 The "mask" function is a trivial function which, given a number of bits, returns a word with that number of low-order bits set.
@@ -166,4 +175,8 @@ The "mask" function is a trivial function which, given a number of bits, returns
 > mask :: (Bits w, Num w) => Int -> w
 > mask bits = bit bits - 1
 
+This marker is used for functions such as machine operations and assertions that
+have no Haskell definition and are instead defined only directly in Isabelle.
 
+> isabelleOp :: a
+> isabelleOp = error "unimplemented -- defined in Isabelle"

@@ -162,7 +162,7 @@ lemma c_guard_mono:
   apply clarsimp
   apply(drule_tac p=p in field_tag_sub)
   apply(clarsimp simp: field_lvalue_def field_offset_def field_offset_untyped_def typ_uinfo_t_def)
-  apply(metis (mono_tags, hide_lams) export_size_of subsetD typ_uinfo_t_def)
+  apply(metis (mono_tags) export_size_of subsetD typ_uinfo_t_def)
   done
 
 lemma c_guard_NULL_fl:
@@ -192,22 +192,37 @@ lemma c_guard_ptr_aligned_fl:
   apply(simp add: c_guard_def field_lvalue_def field_offset_def field_offset_untyped_def typ_uinfo_t_def)
   done
 
-(* StrictC guard separation syntax translations *)
+(* StrictC guard separation notation *)
 
-(* FIXME: make these abbreviations *)
-syntax
-  "_sep_map" :: "'a::c_type ptr \<Rightarrow> 'a \<Rightarrow> heap_assert" ("_ \<mapsto> _" [56,51] 56) (* FIXME: clashes with map update *)
-  "_sep_map_any" :: "'a::c_type ptr \<Rightarrow> heap_assert" ("_ \<mapsto> -" [56] 56)
-  "_sep_map'" :: "'a::c_type ptr \<Rightarrow> 'a \<Rightarrow> heap_assert" ("_ \<hookrightarrow>  _" [56,51] 56)
-  "_sep_map'_any" :: "'a::c_type ptr \<Rightarrow> heap_assert" ("_ \<hookrightarrow> -" [56] 56)
-  "_tagd" :: "'a::c_type ptr \<Rightarrow> heap_assert" ("\<turnstile>\<^sub>s _" [99] 100)
+abbreviation sep_map_c :: "'a::c_type ptr \<Rightarrow> 'a \<Rightarrow> heap_assert" ("_ \<mapsto> _" [56,51] 56) where
+  "p \<mapsto> v \<equiv> p \<mapsto>\<^sup>i\<^bsub>c_guard\<^esub> v"
 
-translations
-  "p \<mapsto> v" == "p \<mapsto>\<^sup>i\<^sub>(CONST c_guard) v"
-  "p \<mapsto> -" == "p \<mapsto>\<^sup>i\<^sub>(CONST c_guard) -"
-  "p \<hookrightarrow> v" == "p \<hookrightarrow>\<^sup>i\<^sub>(CONST c_guard) v"
-  "p \<hookrightarrow> -" == "p \<hookrightarrow>\<^sup>i\<^sub>(CONST c_guard) -"
-  "\<turnstile>\<^sub>s p" == "CONST c_guard \<turnstile>\<^sub>s\<^sup>i p"
+abbreviation sep_map_any_c :: "'a::c_type ptr \<Rightarrow> heap_assert" ("_ \<mapsto> -" [56] 56) where
+  "p \<mapsto> - \<equiv> p \<mapsto>\<^sup>i\<^bsub>c_guard\<^esub> -"
+
+abbreviation sep_map'_c :: "'a::c_type ptr \<Rightarrow> 'a \<Rightarrow> heap_assert" ("_ \<hookrightarrow>  _" [56,51] 56) where
+  "p \<hookrightarrow> v \<equiv> p \<hookrightarrow>\<^sup>i\<^bsub>c_guard\<^esub> v"
+
+abbreviation sep_map'_any_c :: "'a::c_type ptr \<Rightarrow> heap_assert" ("_ \<hookrightarrow> -" [56] 56) where
+  "p \<hookrightarrow> - \<equiv> p \<hookrightarrow>\<^sup>i\<^bsub>c_guard\<^esub> -"
+
+abbreviation tagd_c :: "'a::c_type ptr \<Rightarrow> heap_assert" ("\<turnstile>\<^sub>s _" [99] 100) where
+  "\<turnstile>\<^sub>s p \<equiv> c_guard \<turnstile>\<^sub>s\<^sup>i p"
+
+(* Shadow Separation.C_seplog_syntax *)
+bundle C_seplog_syntax
+begin
+
+unbundle Separation.C_seplog_syntax
+
+notation sep_map_c ("_ \<mapsto> _" [56,51] 56)
+notation sep_map_any_c ("_ \<mapsto> -" [56] 56)
+notation sep_map'_c ("_ \<hookrightarrow>  _" [56,51] 56)
+notation sep_map'_any_c ("_ \<hookrightarrow> -" [56] 56)
+notation tagd_c ("\<turnstile>\<^sub>s _" [99] 100)
+
+end
+
 
 term "x \<mapsto> y"
 term "(x \<mapsto> y \<and>\<^sup>* y \<mapsto> z) s"
@@ -452,5 +467,38 @@ proof -
 qed
 
 lemmas hoarep_Seq_nothrow = hoarep_Seq[OF empty_subsetI subset_refl]
+
+lemma intvl_nowrap:
+  "\<lbrakk>y \<noteq> 0; unat y + z \<le> 2 ^ len_of TYPE('a)\<rbrakk> \<Longrightarrow> x \<notin> {x + y ..+ z}" for x :: "'a :: len word"
+  apply clarsimp
+  apply (drule intvlD)
+  apply clarsimp
+  apply (simp add: unat_arith_simps)
+  apply (simp split: if_split_asm)
+  apply (simp add: unat_of_nat)
+  done
+
+lemma is_aligned_ptr_aligned:
+  fixes p :: "'a :: c_type ptr"
+  assumes al: "is_aligned (ptr_val p) n"
+  and  alignof: "align_of TYPE('a) = 2 ^ n"
+  shows "ptr_aligned p"
+  using al unfolding is_aligned_def ptr_aligned_def
+  by (simp add: alignof)
+
+lemma is_aligned_c_guard:
+  "is_aligned (ptr_val p) n
+    \<Longrightarrow> ptr_val p \<noteq> 0
+    \<Longrightarrow> align_of TYPE('a) = 2 ^ m
+    \<Longrightarrow> size_of TYPE('a) \<le> 2 ^ n
+    \<Longrightarrow> m \<le> n
+    \<Longrightarrow> c_guard (p :: 'a :: c_type ptr)"
+  apply (clarsimp simp: c_guard_def c_null_guard_def)
+  apply (rule conjI)
+   apply (rule is_aligned_ptr_aligned, erule(1) is_aligned_weaken, simp)
+  apply (erule is_aligned_get_word_bits, simp_all)
+  apply (rule intvl_nowrap[where x=0, simplified], simp)
+  apply (erule is_aligned_no_wrap_le, simp+)
+  done
 
 end

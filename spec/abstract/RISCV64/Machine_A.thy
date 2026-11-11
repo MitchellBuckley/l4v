@@ -11,7 +11,7 @@ imports
   "ExecSpec.MachineOps"
 begin
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
   The specification is written with abstract type names for object references, user pointers,
@@ -77,11 +77,11 @@ definition data_to_cptr :: "data \<Rightarrow> cap_ref"
 
 definition combine_ntfn_badges :: "data \<Rightarrow> data \<Rightarrow> data"
   where
-  "combine_ntfn_badges \<equiv> bitOR"
+  "combine_ntfn_badges \<equiv> semiring_bit_operations_class.or"
 
 definition combine_ntfn_msgs :: "data \<Rightarrow> data \<Rightarrow> data"
   where
-  "combine_ntfn_msgs \<equiv> bitOR"
+  "combine_ntfn_msgs \<equiv> semiring_bit_operations_class.or"
 
 
 text \<open>These definitions will be unfolded automatically in proofs.\<close>
@@ -184,8 +184,6 @@ datatype arch_fault
 
 end
 
-context begin interpretation Arch .
-  requalify_consts idle_thread_ptr
-end
+arch_requalify_consts (A) idle_thread_ptr
 
 end

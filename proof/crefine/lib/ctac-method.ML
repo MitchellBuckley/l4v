@@ -71,7 +71,6 @@ structure ctac_rules = Generic_Data
 (struct
     type T = thm list
     val empty = []
-    val extend = I
     val merge = Thm.merge_thms;
 end);
 
@@ -79,7 +78,6 @@ structure ctac_pre = Generic_Data
 (struct
     type T = thm list
     val empty = []
-    val extend = I
     val merge = Thm.merge_thms;
 end);
 
@@ -87,7 +85,6 @@ structure ctac_post = Generic_Data
 (struct
     type T = thm list
     val empty = []
-    val extend = I
     val merge = Thm.merge_thms;
 end);
 
@@ -126,7 +123,7 @@ fun ceqv_simpl_seq ctxt = Config.get ctxt (fst ceqv_simpl_sequence_pair)
 val setup =
   Attrib.setup @{binding "corres"} (Attrib.add_del ctac_add ctac_del)
     "correspondence rules"
-  #> Attrib.setup @{binding "corres_pre"}
+  #> Attrib.setup @{binding "ccorres_pre"}
     (Attrib.add_del ctac_pre_add ctac_pre_del)
     "correspondence preprocessing rules"
   #> Attrib.setup @{binding "corres_post"}
@@ -411,7 +408,7 @@ fun abstract_upds ctxt t = let
     val upds = inner (betapply (t, Bound 0)) |> List.rev
     val xs = map (dest_Const #> snd #> domain_type
             #> curry (op -->) sT #> pair "x") upds
-        |> Variable.variant_frees ctxt [] |> map Free
+        |> Variable.variant_names ctxt |> map Free
     val upd = Abs ("s", sT, fold (fn (u, x) => fn s => u $ (x $ Bound 0) $ s)
         (upds ~~ xs) (Bound 0))
   in (upd, xs) end
@@ -428,8 +425,8 @@ fun ceqv_restore_args_tac ctxt = SUBGOAL (fn (t, n) => case
       val proc = dest_Const i |> fst |> Long_Name.base_name
       val pinfo = Hoare.get_data ctxt |> #proc_info
       val params = Symtab.lookup pinfo proc |> the |> #params
-          |> filter (fn (v, _) => v = HoarePackage.In)
-      val new_upds = map (snd #> suffix Record.updateN #> Syntax.read_term ctxt
+          |> filter (fn (v, _, _) => v = HoarePackage.In)
+      val new_upds = map (#2 #> suffix Record.updateN #> Syntax.read_term ctxt
               #> dest_Const #> fst) params
           |> filter_out (member (op =) cnames)
 
@@ -442,7 +439,7 @@ fun ceqv_restore_args_tac ctxt = SUBGOAL (fn (t, n) => case
       val thm = infer_instantiate ctxt [(("f",0), Thm.cterm_of ctxt f),
               (("g",0), g)]
           @{thm ceqv_xpres_call_restore_argsI}
-          |> Drule.generalize ([], map (dest_Free #> fst) xs)
+          |> Drule.generalize (Names.empty, Names.make_set (map (dest_Free #> fst) xs))
     in resolve_tac ctxt [thm] n THEN simp_tac ctxt n end
   | _ => raise TERM("ceqv_restore_args_tac", [t]))
 
@@ -791,7 +788,7 @@ fun instantiate_xf_type ctxt tp which thms = let
     fun inst_type_vars thm = let
         val (Const ("Pure.all", _) $ Abs (_, tpv, _)) = nth (Thm.prems_of thm) which
     in
-        Thm.instantiate ([(dest_TVar tpv, ctp)], []) thm
+        Thm.instantiate (TVars.make [(dest_TVar tpv, ctp)], Vars.empty) thm
     end;
 in
     map inst_type_vars thms
@@ -1110,7 +1107,9 @@ fun shorten_names mp =
     mp -- Shorten_Names.shorten_names_preserve_new >> MethodExtras.then_all_new
 
 val corres_ctac_tactic = let
-    fun tac upds ctxt = Method.SIMPLE_METHOD' (corres_ctac (apply upds default_ctac_opts) ctxt);
+    fun tac upds ctxt
+      = Method.SIMPLE_METHOD' (corres_ctac (apply upds default_ctac_opts) ctxt
+                               THEN_ALL_NEW (fn _ => no_name_eta_tac ctxt));
 
     val option_args = Args.parens (P.list (Scan.first ctac_options))
     val opt_option_args = Scan.lift (Scan.optional option_args [])
@@ -1136,7 +1135,9 @@ val corres_abstract_args = corres_pre_abstract_args corres_pre_lift_tac_clift;
 val corres_abstract_init_args = corres_pre_abstract_args corres_pre_lift_tac_cinit;
 
 val corres_symb_rhs = let
-    fun tac upds ctxt = Method.SIMPLE_METHOD' (corres_symb_rhs_tac (apply upds default_csymbr_opts) ctxt);
+    fun tac upds ctxt
+      = Method.SIMPLE_METHOD' (corres_symb_rhs_tac (apply upds default_csymbr_opts) ctxt
+                               THEN_ALL_NEW (fn _ => no_name_eta_tac ctxt));
 
     val option_args = Args.parens (P.list (Scan.first csymbr_options))
     val opt_option_args = Scan.lift (Scan.optional option_args [])
@@ -1146,7 +1147,8 @@ in
 end;
 
 val corres_ceqv = let
-    fun tac upds ctxt = Method.SIMPLE_METHOD' (corres_solve_ceqv (#trace (apply upds default_ceqv_opts)) 0 ctxt);
+    fun tac upds ctxt
+      = Method.SIMPLE_METHOD' (corres_solve_ceqv (#trace (apply upds default_ceqv_opts)) 0 ctxt);
 
     val option_args = Args.parens (P.list (Scan.first ceqv_options))
     val opt_option_args = Scan.lift (Scan.optional option_args [])
@@ -1159,7 +1161,8 @@ end;
  * We should be able to get the xfs from the goal ... *)
 fun corres_boilerplate unfold_haskell_p = let
     fun tac (upds, xfs : string list) ctxt
-      = Method.SIMPLE_METHOD' (corres_boilerplate_tac (apply upds default_cinit_opts) unfold_haskell_p xfs ctxt)
+      = Method.SIMPLE_METHOD' (corres_boilerplate_tac (apply upds default_cinit_opts) unfold_haskell_p xfs ctxt
+                               THEN_ALL_NEW (fn _ => no_name_eta_tac ctxt))
 
     val var_lift_args = Args.$$$ liftoptN |-- Args.colon |--
                              Scan.repeat (Scan.unless (Scan.first boilerplate_modifiers) Args.name)

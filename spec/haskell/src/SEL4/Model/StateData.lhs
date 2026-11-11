@@ -63,15 +63,17 @@ The top-level kernel state structure is called "KernelState". It contains:
 >         gsCNodes :: Word -> (Maybe Int),
 >         gsUntypedZeroRanges :: Data.Set.Set (Word, Word),
 
-\item the cyclic domain schedule;
+\item the set of cyclic domain schedules; (0,0) is used as the end marker for an
+      individual schedule in the list.
 
 >         ksDomScheduleIdx :: Int,
->         ksDomSchedule :: [DomainSchedule],
+>         ksDomScheduleStart :: Int,
+>         ksDomSchedule :: [DomainScheduleItem],
 
 \item the active security domain and the number to ticks remaining before it changes;
 
 >         ksCurDomain :: Domain,
->         ksDomainTime :: Word,
+>         ksDomainTime :: Ticks,
 
 \item an array of ready queues, indexed by thread priority and domain (see "getQueue");
 
@@ -127,7 +129,7 @@ Note that there is no error-signalling mechanism available to functions in "Kern
 The ready queue is simply a list of threads that are ready to
 run. Each thread in this list is at the same priority level.
 
-> type ReadyQueue = [PPtr TCB]
+> type ReadyQueue = TcbQueue
 
 This is a standard Haskell singly-linked list independent of the
 thread control block structures. However, in a real implementation, it
@@ -153,7 +155,15 @@ replaces the previous one.
 > getCurThread = gets ksCurThread
 
 > setCurThread :: PPtr TCB -> Kernel ()
-> setCurThread tptr = modify (\ks -> ks { ksCurThread = tptr })
+> setCurThread tptr = do
+>     stateAssert idleThreadNotQueued "the idle thread cannot be in the ready queues"
+>     modify (\ks -> ks { ksCurThread = tptr })
+
+In many places, we would like to be able to use the fact that threads in the
+ready queues have runnable' thread state. We add an assertion that it does hold.
+
+> ready_qs_runnable :: KernelState -> Bool
+> ready_qs_runnable _ = True
 
 Similarly, these functions access the idle thread pointer, the ready queue for a given priority level (adjusted to account for the active security domain), the requested action of the scheduler, and the interrupt handler state.
 
@@ -203,14 +213,18 @@ These functions access and modify the current domain and the number of ticks rem
 
 > nextDomain :: Kernel ()
 > nextDomain = modify (\ks ->
->   let ksDomScheduleIdx' = (ksDomScheduleIdx ks + 1) `mod` length (ksDomSchedule ks) in
+>   let indexInc = ksDomScheduleIdx ks + 1 in
+>   let ksDomScheduleIdx' = if indexInc >= length (ksDomSchedule ks) ||
+>                              ksDomSchedule ks !! indexInc == domainEndMarker
+>                           then ksDomScheduleStart ks
+>                           else indexInc in
 >   let next = ksDomSchedule ks !! ksDomScheduleIdx'
 >   in ks { ksWorkUnitsCompleted = 0,
 >           ksDomScheduleIdx = ksDomScheduleIdx',
 >           ksCurDomain = dschDomain next,
 >           ksDomainTime = dschLength next })
 
-> getDomainTime :: Kernel Word
+> getDomainTime :: Kernel Ticks
 > getDomainTime = gets ksDomainTime
 
 > decDomainTime :: Kernel ()
@@ -228,12 +242,12 @@ A new kernel state structure contains an empty physical address space, a set of 
 >         gsCNodes = (\_ -> Nothing),
 >         gsUntypedZeroRanges = Data.Set.empty,
 >         ksDomScheduleIdx = 0,
+>         ksDomScheduleStart = 0,
 >         ksDomSchedule = [(0, 15), (2, 42), (1, 73)],
 >         ksCurDomain = 0,
 >         ksDomainTime = 15,
 >         ksReadyQueues =
->             funPartialArray (const [])
->                             ((0, 0), (fromIntegral numDomains, maxPriority)),
+>             funPartialArray (const emptyQueue) ((0, 0), (fromIntegral numDomains, maxPriority)),
 >         ksReadyQueuesL1Bitmap = funPartialArray (const 0) (0, fromIntegral numDomains),
 >         ksReadyQueuesL2Bitmap =
 >             funPartialArray (const 0)
@@ -259,7 +273,7 @@ The following function allows the machine monad to be directly accessed from ker
 
 The function "assert" is used to state that a predicate must be true at a given point. If it is not, the behaviour of the kernel is undefined. The Haskell model will not terminate in this case.
 
-> assert :: Monad m => Bool -> String -> m ()
+> assert :: MonadFail m => Bool -> String -> m ()
 > assert p e = if p then return () else fail $ "Assertion failed: " ++ e
 
 The function "stateAssert" is similar to "assert", except that it reads the current state. This is typically used for more complex assertions that cannot be easily expressed in Haskell; in this case, the asserted function is "const True" in Haskell but is replaced with something stronger in the Isabelle translation.
@@ -282,4 +296,12 @@ The function "findM" searches a list, returning the first item for which the giv
 >     r <- f x
 >     if r then return $ Just x else findM f xs
 
+Several asserts about ksReadyQueues
 
+> ksReadyQueues_asrt :: KernelState -> Bool
+> ksReadyQueues_asrt _ = True
+
+An assert that will say that the idle thread is not in a ready queue
+
+> idleThreadNotQueued :: KernelState -> Bool
+> idleThreadNotQueued _ = True

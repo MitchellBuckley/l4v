@@ -8,14 +8,12 @@ theory Deterministic_AI
 imports AInvs
 begin
 
-context begin interpretation Arch .
-requalify_facts
+arch_requalify_facts
   update_work_units_empty_fail
   reset_work_units_empty_fail
   set_domain_empty_fail
   thread_set_domain_empty_fail
   arch_post_cap_deletion_valid_list
-end
 
 lemmas [wp] =
   update_work_units_empty_fail
@@ -41,10 +39,8 @@ declare dxo_wp_weak[wp del]
 
  (*Some nasty hackery to get around lack of polymorphic type class operations*)
 
-lemma and_assoc: "(A and (B and C)) = (A and B and C)"
-  apply (rule ext)
-  apply simp
-done
+lemma and_assoc: "(A and (B and C)) = (A and B and C)" (* FIXME: eliminate *)
+  by (simp add: pred_conj_aci)
 
 lemma no_children_empty_desc:
   "(\<forall>c. m c \<noteq> Some slot) = (descendants_of slot m = {})"
@@ -369,6 +365,7 @@ lemma next_not_child_linearI:
      \<forall>q. p \<in> descendants_of q m \<longrightarrow> m q = m' q
      \<and> next_sib q t m = next_sib q t' m'; finite_depth m; finite_depth m'\<rbrakk>
     \<Longrightarrow> next_not_child p t' m' = next_not_child p t m"
+  supply subst_all [simp del]
   apply(induct rule: next_not_child_pinduct[where t=t and m=m])
    apply(simp)
    apply(case_tac "m slot")
@@ -1472,13 +1469,14 @@ lemma next_slot:
   done
 end
 
-crunch exst[wp]: set_cap "(\<lambda>s. P (exst s))" (wp: crunch_wps simp: crunch_simps)
+crunch set_cap
+  for exst[wp]: "(\<lambda>s. P (exst s))" (wp: crunch_wps simp: crunch_simps)
 
 lemma set_cap_caps_of_state3:
-  "\<lbrace>\<lambda>s. P (caps_of_state s (p \<mapsto> cap)) (cdt s)  (exst s) (is_original_cap s)\<rbrace>
+  "\<lbrace>\<lambda>s. P ((caps_of_state s) (p \<mapsto> cap)) (cdt s)  (exst s) (is_original_cap s)\<rbrace>
   set_cap cap p
   \<lbrace>\<lambda>rv s. P (caps_of_state s) (cdt s) (exst s) (is_original_cap s)\<rbrace>"
-  apply (rule_tac Q="\<lambda>rv s. \<exists>m mr t. P (caps_of_state s) m t mr
+  apply (rule_tac Q'="\<lambda>rv s. \<exists>m mr t. P (caps_of_state s) m t mr
                     \<and> (cdt s = m) \<and> (exst s = t) \<and> (is_original_cap s = mr)"
            in hoare_post_imp)
    apply simp
@@ -1506,12 +1504,10 @@ lemma set_cap_match: "(\<And>s x. P s = P (s\<lparr>kheap := x\<rparr>)) \<Longr
   apply wpsimp
   done
 
-crunches cap_insert_ext, empty_slot_ext, cap_swap_ext, create_cap_ext, set_thread_state_ext,
-         retype_region_ext
+crunch cap_insert_ext, empty_slot_ext, cap_swap_ext, create_cap_ext
   for all_but_exst[wp]:  "all_but_exst P"
   and (empty_fail) empty_fail[wp]
-  (ignore_del: cap_insert_ext empty_slot_ext cap_swap_ext create_cap_ext set_thread_state_ext
-               retype_region_ext)
+  (ignore_del: cap_insert_ext empty_slot_ext cap_swap_ext create_cap_ext)
 
 interpretation cap_insert_ext_extended: is_extended "cap_insert_ext a b c d e"
   by (unfold_locales; wp)
@@ -1945,7 +1941,6 @@ lemma next_not_child_no_parent:
    apply (drule_tac x="a" in meta_spec)
    apply (simp add: m'_def m''_def next_sib_def nnext nnext'' cong: if_weak_cong split: if_split_asm)
   apply (simp split del: if_split)
-  apply (thin_tac "\<And>a. \<lbrakk>False; Q a\<rbrakk> \<Longrightarrow> P a" for Q P)
   apply (simp add: m'_def m''_def next_sib_def nnext nnext'' cong: if_weak_cong split: if_split_asm | intro impI conjI)+
     apply (simp add: valid_list_2_def | drule after_in_list_in_list | clarsimp)+
     done
@@ -3108,7 +3103,8 @@ lemma (in mdb_empty_abs') next_slot:
   apply(fastforce split: if_split_asm)
   done
 
-crunch valid_list[wp]: post_cap_deletion,set_cap valid_list
+crunch post_cap_deletion,set_cap
+  for valid_list[wp]: valid_list
   (wp: crunch_wps)
 
 interpretation empty_slot_extended: is_extended "empty_slot_ext a b"
@@ -3124,7 +3120,7 @@ lemma empty_slot_valid_list[wp]:
   apply (simp add: empty_slot_def)
   apply (simp add: set_cdt_def update_cdt_list_def set_cdt_list_def
                    empty_slot_ext_def bind_assoc cong: if_cong)
-  apply (wp get_cap_wp static_imp_wp | wpc | wp (once) hoare_vcg_all_lift)+
+  apply (wp get_cap_wp hoare_weak_lift_imp | wpc | wp (once) hoare_vcg_all_lift)+
   apply (clarsimp simp del: fun_upd_apply)
   apply (frule mdb_empty_abs_simple.intro)
   apply(case_tac "cdt s sl")
@@ -3815,37 +3811,34 @@ lemma create_cap_valid_list[wp]:
   done
 
 
-crunch valid_list[wp]: set_extra_badge valid_list
+crunch set_extra_badge
+  for valid_list[wp]: valid_list
 
 lemmas transfer_caps_loop_ext_valid[wp] =
   transfer_caps_loop_pres[OF cap_insert_valid_list set_extra_badge_valid_list]
 
-crunch valid_list[wp]: tcb_sched_action,reschedule_required,set_thread_state_ext "valid_list"
-  (simp: unless_def ignore_del: tcb_sched_action reschedule_required set_thread_state_ext)
+crunch tcb_sched_action,reschedule_required
+  for valid_list[wp]: "valid_list"
+  (simp: unless_def)
 
-interpretation set_thread_state_ext_extended: is_extended "set_thread_state_ext a"
-  by (unfold_locales; wp)
-
-crunch all_but_exst[wp]: reschedule_required "all_but_exst P"
-  (ignore_del: reschedule_required)
-
-interpretation reschedule_required_ext_extended: is_extended "reschedule_required"
-  by (unfold_locales; wp)
-
-crunch valid_list[wp]: fast_finalise valid_list (wp: crunch_wps)
+crunch fast_finalise
+  for valid_list[wp]: valid_list (wp: crunch_wps)
 
 lemma cap_delete_one_valid_list[wp]: "\<lbrace>valid_list\<rbrace> cap_delete_one a \<lbrace>\<lambda>_.valid_list\<rbrace>"
   unfolding cap_delete_one_def by (wpsimp simp: unless_def)
 
-crunch valid_list[wp]: thread_set valid_list
+crunch thread_set
+  for valid_list[wp]: valid_list
 
 lemma reply_cancel_ipc_valid_list[wp]: "\<lbrace>valid_list\<rbrace> reply_cancel_ipc a \<lbrace>\<lambda>_. valid_list\<rbrace>"
   unfolding reply_cancel_ipc_def
-  by (wp select_wp hoare_drop_imps thread_set_mdb | simp)+
+  by (wp hoare_drop_imps thread_set_mdb | simp)+
 
-crunch all_but_exst[wp]: update_work_units "all_but_exst P"
+crunch update_work_units
+  for all_but_exst[wp]: "all_but_exst P"
 
-crunch all_but_exst[wp]: reset_work_units "all_but_exst P"
+crunch reset_work_units
+  for all_but_exst[wp]: "all_but_exst P"
 
 global_interpretation update_work_units_ext_extended: is_extended "update_work_units"
   by (unfold_locales; wp)
@@ -3856,7 +3849,7 @@ global_interpretation reset_work_units_ext_extended: is_extended "reset_work_uni
 lemma preemption_point_inv':
   "\<lbrakk>irq_state_independent_A P; \<And>f s. P (work_units_completed_update f s) = P s\<rbrakk> \<Longrightarrow> \<lbrace>P\<rbrace> preemption_point \<lbrace>\<lambda>_. P\<rbrace>"
   apply (intro impI conjI | simp add: preemption_point_def o_def
-       | wp hoare_post_imp[OF _ getActiveIRQ_wp] OR_choiceE_weak_wp alternative_wp[where P=P]
+       | wp hoare_post_imp[OF _ getActiveIRQ_wp] OR_choiceE_weak_wp
        | wpc | simp add: update_work_units_def reset_work_units_def)+
   done
 
@@ -3872,6 +3865,8 @@ locale Deterministic_AI_1 =
     "\<And>t. \<lbrace>valid_list\<rbrace> arch_get_sanitise_register_info t \<lbrace>\<lambda>_. valid_list\<rbrace>"
   assumes arch_post_modify_registers_valid_list[wp]:
     "\<And>t ptr. \<lbrace>valid_list\<rbrace> arch_post_modify_registers t ptr \<lbrace>\<lambda>_. valid_list\<rbrace>"
+  assumes arch_post_set_flags_valid_list[wp]:
+    "\<And>t fs. arch_post_set_flags t fs \<lbrace>valid_list\<rbrace>"
 
 
 context Deterministic_AI_1 begin
@@ -3882,7 +3877,8 @@ lemmas rec_del_valid_list[wp] = rec_del_preservation
       empty_slot_valid_list
       finalise_cap_valid_list]
 
-crunch valid_list[wp]: cap_delete valid_list
+crunch cap_delete
+  for valid_list[wp]: valid_list
   (wp: preemption_point_inv')
 
 end
@@ -3897,18 +3893,10 @@ lemma cap_revoke_valid_list[wp]:"\<lbrace>valid_list\<rbrace> cap_revoke a \<lbr
   apply (wp preemption_point_inv'|simp)+
   done
 
-crunch valid_list[wp]: ethread_set "valid_list"
-
 end
 
-crunch all_but_exst[wp]: ethread_set "all_but_exst P"
-
-crunch (empty_fail) empty_fail[wp]: ethread_set
-
-global_interpretation ethread_set_extended: is_extended "ethread_set a b"
-  by (unfold_locales; wp)
-
-crunch valid_list[wp]: cancel_badged_sends valid_list
+crunch cancel_badged_sends
+  for valid_list[wp]: valid_list
   (wp: crunch_wps preemption_point_inv' simp: crunch_simps filterM_mapM unless_def
    ignore: without_preemption filterM )
 
@@ -3922,69 +3910,38 @@ lemma invoke_cnode_valid_list[wp]:
 
 end
 
-crunches possible_switch_to
-  for all_but_exst[wp]: "all_but_exst P"
-  and valid_list[wp]: "valid_list"
+crunch possible_switch_to
+  for valid_list[wp]: "valid_list"
   and (empty_fail) empty_fail[wp]
-  (simp: ethread_get_def ignore_del: possible_switch_to)
 
-crunch valid_list[wp]: set_priority,set_mcpriority "valid_list"
-  (wp: crunch_wps ignore_del: set_priority)
+crunch set_priority,set_mcpriority
+  for valid_list[wp]: "valid_list"
 
-global_interpretation possible_switch_to_extended: is_extended "possible_switch_to a"
-  by (unfold_locales; wp)
+crunch set_priority,set_mcpriority
+  for (empty_fail) empty_fail[wp]
 
-crunch all_but_exst[wp]: set_priority "all_but_exst P"
-  (simp: ethread_get_def ignore_del: set_priority)
+crunch dec_domain_time
+  for (empty_fail) empty_fail[wp]
 
-crunch (empty_fail)empty_fail[wp]: set_priority,set_mcpriority
-
-global_interpretation set_priority_extended: is_extended "set_priority a b"
-  by (unfold_locales; wp)
-
-crunch all_but_exst[wp]: set_domain "all_but_exst P" (simp: ethread_get_def)
-
-global_interpretation set_domain_extended: is_extended "set_domain a b"
-  by (unfold_locales; wp)
-
-global_interpretation thread_set_domain_extended: is_extended "thread_set_domain a b"
-  by (unfold_locales; wp)
-
-crunch all_but_exst[wp]: dec_domain_time "all_but_exst P" (simp: ethread_get_def)
-
-crunch (empty_fail) empty_fail[wp]: dec_domain_time
-
-global_interpretation dec_domain_time_extended: is_extended "dec_domain_time"
-  by (unfold_locales; wp)
-
-crunch valid_list[wp]: update_restart_pc "valid_list"
+crunch update_restart_pc
+  for valid_list[wp]: "valid_list"
 
 context Deterministic_AI_1 begin
-crunch valid_list[wp]: invoke_tcb valid_list
+crunch invoke_tcb
+  for valid_list[wp]: valid_list
   (wp: mapM_x_wp' ignore: check_cap_at simp: check_cap_at_def)
 end
 
 lemma delete_objects_valid_list[wp]: "\<lbrace>valid_list\<rbrace> delete_objects ptr bits \<lbrace>\<lambda>_.valid_list\<rbrace>"
   unfolding delete_objects_def
-  apply (wp | simp add: detype_def detype_ext_def wrap_ext_det_ext_ext_def)+
+  apply (wp | simp add: detype_def)+
   done
 
 lemmas mapM_x_def_bak = mapM_x_def[symmetric]
 
-lemma retype_region_ext_valid_list_ext[wp]: "\<lbrace>valid_list\<rbrace> retype_region_ext a b \<lbrace>\<lambda>_.valid_list\<rbrace>"
-  by (wpsimp simp: retype_region_ext_def)
-
-global_interpretation retype_region_ext_extended: is_extended "retype_region_ext a b"
-  by (unfold_locales; wp)
-
-crunches timer_tick
+crunch timer_tick
   for valid_list[wp]: "valid_list"
-  and all_but_exst[wp]: "all_but_exst P"
   and (empty_fail) empty_fail[wp]
-  (ignore_del: timer_tick)
-
-global_interpretation timer_tick_extended: is_extended "timer_tick"
-  by (unfold_locales; wp)
 
 locale Deterministic_AI_2 = Deterministic_AI_1 +
   assumes arch_invoke_irq_handler_valid_list[wp]:
@@ -4007,11 +3964,14 @@ locale Deterministic_AI_2 = Deterministic_AI_1 +
     "\<lbrace>valid_list\<rbrace> handle_yield \<lbrace>\<lambda>_. valid_list\<rbrace>"
   assumes handle_hypervisor_fault_valid_list[wp]:
     "\<lbrace>valid_list\<rbrace> handle_hypervisor_fault thread fault \<lbrace>\<lambda>_. valid_list\<rbrace>"
+  assumes handle_spurious_irq_valid_list[wp]:
+    "handle_spurious_irq \<lbrace>valid_list\<rbrace>"
 
 
 context Deterministic_AI_2 begin
 
-crunch valid_list[wp]: invoke_irq_handler valid_list
+crunch invoke_irq_handler, maybe_handle_interrupt
+  for valid_list[wp]: valid_list
 
 lemma handle_event_valid_list[wp]:
   "\<lbrace>valid_list\<rbrace> handle_event e \<lbrace>\<lambda>_.valid_list\<rbrace>"
@@ -4167,8 +4127,8 @@ lemma next_slot_setD:
   (\<exists>p q. (slot \<in> descendants_of p m \<or> p = slot) \<and> q \<in> next_sib_set p t m \<and> next \<in> descendants_of q m \<union> {q})"
   apply(subst(asm) next_slot_set_def)
   apply(simp)
-  apply(induct_tac "next" slot rule: trancl.induct)
-    apply(assumption)
+  apply(induct "next" slot rule: trancl.induct)
+    apply simp
    apply(simp add: next_slot_def split: if_split_asm)
     apply(simp add: next_child_def valid_list_2_def descendants_of_def cdt_parent_defs)
     apply(case_tac "t b", simp, fastforce)

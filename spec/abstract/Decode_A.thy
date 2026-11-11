@@ -17,9 +17,7 @@ imports
   "ExecSpec.InvocationLabels_H"
 begin
 
-context begin interpretation Arch .
-
-requalify_consts
+arch_requalify_consts (A)
   ArchDefaultExtraRegisters
   check_valid_ipc_buffer
   is_valid_vtable_root
@@ -27,9 +25,6 @@ requalify_consts
   arch_data_to_obj_type
   arch_decode_invocation
   arch_check_irq
-
-end
-
 
 text \<open>
   This theory includes definitions describing how user arguments are
@@ -386,6 +381,14 @@ where
    odE"
 
 definition
+  decode_set_flags :: "data list \<Rightarrow> cap \<Rightarrow> (tcb_invocation,'z::state_ext) se_monad"
+where
+  "decode_set_flags args cap \<equiv> doE
+     whenE (length args < 2) $ throwError TruncatedMessage;
+     returnOk (SetFlags (obj_ref_of cap) (word_to_tcb_flags (args ! 0)) (word_to_tcb_flags (args ! 1)))
+   odE"
+
+definition
   decode_tcb_invocation ::
   "data \<Rightarrow> data list \<Rightarrow> cap \<Rightarrow> cslot_ptr \<Rightarrow> (cap \<times> cslot_ptr) list \<Rightarrow>
   (tcb_invocation,'z::state_ext) se_monad"
@@ -406,25 +409,63 @@ where
     | TCBBindNotification \<Rightarrow> decode_bind_notification cap excs
     | TCBUnbindNotification \<Rightarrow> decode_unbind_notification cap
     | TCBSetTLSBase \<Rightarrow> decode_set_tls_base args cap
+    | TCBSetFlags \<Rightarrow> decode_set_flags args cap
     | _ \<Rightarrow> throwError IllegalOperation"
 
-definition
-  decode_domain_invocation ::
-  "data \<Rightarrow> data list \<Rightarrow> (cap \<times> cslot_ptr) list \<Rightarrow>
-    ((obj_ref \<times> domain), 'z::state_ext) se_monad"
-where
-  "decode_domain_invocation label args excs \<equiv> doE
-     whenE (gen_invocation_type label \<noteq> DomainSetSet) $ throwError IllegalOperation;
+definition decode_domain_set ::
+  "data list \<Rightarrow> (cap \<times> cslot_ptr) list \<Rightarrow> (domain_invocation, 'z::state_ext) se_monad"
+  where
+  "decode_domain_set args excs \<equiv> doE
      domain \<leftarrow> (case args of
        x # xs \<Rightarrow> doE
-         whenE (unat x \<ge> num_domains) $ throwError $ InvalidArgument 0;
+         whenE (unat x \<ge> numDomains) $ throwError $ InvalidArgument 0;
          returnOk (ucast x)
        odE
        | _ \<Rightarrow> throwError TruncatedMessage);
      whenE (length excs = 0) $ throwError TruncatedMessage;
-     case (fst (hd excs)) of ThreadCap ptr \<Rightarrow> returnOk $ (ptr, domain)
+     case (fst (hd excs)) of ThreadCap ptr \<Rightarrow> returnOk $ InvokeDomainSet ptr domain
        | _ \<Rightarrow> throwError $ InvalidArgument 1
    odE"
+
+definition decode_domain_schedule_set_start ::
+  "data list \<Rightarrow> (domain_invocation, 'z::state_ext) se_monad"
+  where
+  "decode_domain_schedule_set_start args \<equiv> doE
+     whenE (length args = 0) $ throwError TruncatedMessage;
+     index \<leftarrow> returnOk $ unat (args ! 0);
+     sched \<leftarrow> liftE $ gets domain_list;
+     whenE (index \<ge> length sched) $ throwError $ RangeError 0 (of_nat (length sched - 1));
+     whenE (sched ! index = domain_end_marker) $ throwError $ InvalidArgument 0;
+     returnOk $ InvokeDomainScheduleSetStart index
+   odE"
+
+definition decode_domain_schedule_configure ::
+  "data list \<Rightarrow> (domain_invocation, 'z::state_ext) se_monad" where
+  "decode_domain_schedule_configure args \<equiv> doE
+     whenE (length args < 2 + timeArgLen) $ throwError TruncatedMessage;
+     index \<leftarrow> returnOk $ unat (args ! 0);
+     domain \<leftarrow> returnOk $ args ! 1;
+     duration \<leftarrow> returnOk $ parseTimeArg 2 args;
+     sched \<leftarrow> liftE $ gets domain_list;
+     \<comment> \<open>Item at @{term \<open>length sched - 1\<close>} is reserved to always be an end marker\<close>
+     whenE (index \<ge> length sched - 1) $ throwError $ RangeError 0 (of_nat (length sched - 2));
+     whenE (unat domain \<ge> numDomains) $ throwError $ RangeError 0 (of_nat (numDomains - 1));
+     whenE (duration > max_domain_duration) $ throwError $ InvalidArgument 2;
+     whenE (duration = 0 \<and> domain \<noteq> 0) $ throwError $ InvalidArgument 1;
+     start \<leftarrow> liftE $ gets domain_start_index;
+     whenE (index = start \<and> duration = 0) $ throwError $ InvalidArgument 2;
+     returnOk $ InvokeDomainScheduleConfigure index (ucast domain) (ucast duration)
+   odE"
+
+definition decode_domain_invocation ::
+  "data \<Rightarrow> data list \<Rightarrow> (cap \<times> cslot_ptr) list \<Rightarrow> (domain_invocation, 'z::state_ext) se_monad"
+  where
+  "decode_domain_invocation label args excs \<equiv>
+     case gen_invocation_type label of
+       DomainSetSet \<Rightarrow> decode_domain_set args excs
+     | DomainScheduleConfigure \<Rightarrow> decode_domain_schedule_configure args
+     | DomainScheduleSetStart \<Rightarrow> decode_domain_schedule_set_start args
+     | _ \<Rightarrow> throwError IllegalOperation"
 
 section "IRQ"
 
@@ -540,7 +581,7 @@ where
   whenE (node_offset < 0 \<or> node_offset > node_size - 1) $
     throwError $ RangeError 0 (of_nat (node_size - 1));
 
-  whenE (node_window < 1 \<or> node_window > 256) $ throwError $ RangeError 1 256;
+  whenE (node_window < 1 \<or> node_window > unat retypeFanOutLimit) $ throwError $ RangeError 1 retypeFanOutLimit;
 
   whenE (node_window < 1 \<or> node_window > node_size - node_offset) $
     throwError $ RangeError 1 (of_nat (node_size - node_offset));
@@ -607,7 +648,7 @@ where
   | ThreadCap ptr \<Rightarrow>
       liftME InvokeTCB $ decode_tcb_invocation label args cap slot excaps
   | DomainCap \<Rightarrow>
-      liftME (case_prod InvokeDomain) $ decode_domain_invocation label args excaps
+      liftME InvokeDomain $ decode_domain_invocation label args excaps
   | CNodeCap ptr bits _ \<Rightarrow>
       liftME InvokeCNode $ decode_cnode_invocation label args cap (map fst excaps)
   | UntypedCap dev ptr sz fi \<Rightarrow>

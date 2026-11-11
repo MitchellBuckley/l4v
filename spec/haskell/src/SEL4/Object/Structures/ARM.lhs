@@ -60,6 +60,9 @@ There are six ARM-specific capability types: the global ASID control capability,
 >     | VCPUCap {
 >         capVCPUPtr :: PPtr VCPU }
 #endif
+>     | SGISignalCap {
+>         capSGIIRQ :: Word,
+>         capSGITargetMask :: Word }
 #ifdef CONFIG_ARM_SMMU
 >     | IOSpaceCap {
 >         capIOSpaceModuleID :: Word16,
@@ -136,6 +139,7 @@ present on all platforms is stored here.
 > atcbContextGet :: ArchTCB -> UserContext
 > atcbContextGet = atcbContext
 
+
 \subsection{ASID Pools}
 
 An ASID pool is an array of pointers to page directories. This is used to implement virtual ASIDs on ARM; it is not accessed by the hardware.
@@ -169,6 +173,16 @@ ASIDs are mapped to address space roots by a global two-level table. The actual 
 > asidHighBitsOf :: ASID -> ASID
 > asidHighBitsOf asid = (asid `shiftR` asidLowBits) .&. mask asidHighBits
 
+
+\subsection{Time}
+
+> parseTimeArg :: Int -> [Word] -> Ticks
+> parseTimeArg i args = fromIntegral (args !! (i+1)) `shiftL` 32 + fromIntegral (args !! i)
+
+> timeArgLen :: Int
+> timeArgLen = 2
+
+
 #ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
 \subsection {VCPU}
 
@@ -176,13 +190,10 @@ ASIDs are mapped to address space roots by a global two-level table. The actual 
 
 > data GICVCPUInterface = VGICInterface {
 >                        vgicHCR :: Word,
->                        vgicVMCR :: Word, -- FIXME ARMHYP UNUSED?
+>                        vgicVMCR :: Word,
 >                        vgicAPR :: Word,
 >                        vgicLR :: Array Int VIRQ
 >                        }
->     deriving Show
-
-> data VirtTimer = VirtTimer { vtimerLastPCount :: Word64 }
 >     deriving Show
 
 > data VPPIEventIRQ = VPPIEventIRQ_VTimer
@@ -193,7 +204,6 @@ ASIDs are mapped to address space roots by a global two-level table. The actual 
 >                 ,vcpuVGIC :: GICVCPUInterface
 >                 ,vcpuRegs :: Array VCPUReg Word
 >                 ,vcpuVPPIMasked :: Array VPPIEventIRQ Bool
->                 ,vcpuVTimer :: VirtTimer
 >                 }
 >     deriving Show
 
@@ -207,15 +217,14 @@ makeObject specialised to VCPUs.
 >     VCPUObj {
 >           vcpuTCBPtr = Nothing
 >         , vcpuVGIC = VGICInterface {
->                           vgicHCR = vgicHCREN
+>                           vgicHCR = vgicHCREN .|. vgicHCRTALL0
 >                         , vgicVMCR = 0
 >                         , vgicAPR = 0
 >                         , vgicLR = vgicLR
 >                         }
 >         , vcpuRegs = funArray (const 0) // [(VCPURegSCTLR, sctlrDefault)
->                                            ,(VCPURegACTLR, actlrDefault)]
+>                                            ,(VCPURegCPACR, cpacrDefault)]
 >         , vcpuVPPIMasked = funArray (const False)
->         , vcpuVTimer = VirtTimer 0
 >         }
 
 #endif

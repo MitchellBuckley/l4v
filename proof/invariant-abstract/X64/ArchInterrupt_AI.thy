@@ -8,7 +8,7 @@ theory ArchInterrupt_AI
 imports Interrupt_AI
 begin
 
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
 primrec arch_irq_control_inv_valid_real :: "arch_irq_control_invocation \<Rightarrow> 'a::state_ext state \<Rightarrow> bool"
 where
@@ -20,8 +20,7 @@ where
                     real_cte_at dest_slot and
                     (\<lambda>s. ioapic < x64_num_ioapics (arch_state s)) and
                     K (minUserIRQ \<le> irq \<and> irq \<le> maxUserIRQ \<and>
-                       pin < ioapicIRQLines \<and> level < 2 \<and>
-                       polarity < 2))"
+                       level < 2 \<and> polarity < 2))"
 | "arch_irq_control_inv_valid_real (IssueIRQHandlerMSI irq dest_slot src_slot bus dev func handle)
       = (cte_wp_at ((=) NullCap) dest_slot and
                     cte_wp_at ((=) IRQControlCap) src_slot and
@@ -33,9 +32,9 @@ where
 defs arch_irq_control_inv_valid_def:
   "arch_irq_control_inv_valid \<equiv> arch_irq_control_inv_valid_real"
 
-named_theorems Interrupt_AI_asms
+clear_named_theorems Arch_assms (* accumulate assumptions for Interrupt_AI locale *)
 
-lemma (* decode_irq_control_invocation_inv *)[Interrupt_AI_asms]:
+lemma (* decode_irq_control_invocation_inv *)[Arch_assms]:
   "\<lbrace>P\<rbrace> decode_irq_control_invocation label args slot caps \<lbrace>\<lambda>rv. P\<rbrace>"
   apply (simp add: decode_irq_control_invocation_def Let_def arch_check_irq_def
                    arch_decode_irq_control_invocation_def whenE_def split del: if_split)
@@ -116,21 +115,21 @@ lemma arch_decode_irq_control_valid[wp]:
         split del: if_split
              cong: if_cong)
   apply (rule hoare_pre)
-   apply (wp ensure_empty_stronger hoare_vcg_const_imp_lift_R hoare_vcg_const_imp_lift
+   apply (wp ensure_empty_stronger hoare_vcg_const_imp_liftE_R hoare_vcg_const_imp_lift
           | simp add: cte_wp_at_eq_simp split del: if_split
           | wpc
-          | wp hoare_vcg_imp_lift_R[where P="\<lambda>rv s. \<not> x64_num_ioapics (arch_state s) - 1 < args ! 2"]
-          | wp hoare_vcg_imp_lift_R[where P="\<lambda>rv s. x64_num_ioapics (arch_state s) \<noteq> 0"]
+          | wp hoare_vcg_imp_liftE_R[where P="\<lambda>rv s. \<not> x64_num_ioapics (arch_state s) - 1 < args ! 2"]
+          | wp hoare_vcg_imp_liftE_R[where P="\<lambda>rv s. x64_num_ioapics (arch_state s) \<noteq> 0"]
           | wp (once) hoare_drop_imps)+
   apply ( safe; auto simp: word_le_not_less[symmetric] word_leq_minus_one_le
-                           ucast_id irq_plus_min_ge_min irq_plus_min_le_max ioapicIRQLines_def
+                           irq_plus_min_ge_min irq_plus_min_le_max ioapicIRQLines_def
                            minUserIRQ_def maxUserIRQ_def word_add_le_mono1 word_add_le_mono2
                            word_le_plus irq_ineq_one irq_ineq_two irq_ineq_three irq_ineq_four
         | cap_hammer | word_hammer)+
   done
 end
 
-lemma (* decode_irq_control_valid *)[Interrupt_AI_asms]:
+lemma (* decode_irq_control_valid *)[Arch_assms]:
   "\<lbrace>\<lambda>s. invs s \<and> (\<forall>cap \<in> set caps. s \<turnstile> cap)
         \<and> (\<forall>cap \<in> set caps. is_cnode_cap cap \<longrightarrow>
                 (\<forall>r \<in> cte_refs cap (interrupt_irq_node s). ex_cte_cap_wp_to is_cnode_cap r s))
@@ -145,7 +144,7 @@ lemma (* decode_irq_control_valid *)[Interrupt_AI_asms]:
                  | wp (once) hoare_drop_imps)+
   done
 
-lemma get_irq_slot_different_ARCH[Interrupt_AI_asms]:
+lemma get_irq_slot_different_ARCH[Arch_assms]:
   "\<lbrace>\<lambda>s. valid_global_refs s \<and> ex_cte_cap_wp_to is_cnode_cap ptr s\<rbrace>
       get_irq_slot irq
    \<lbrace>\<lambda>rv s. rv \<noteq> ptr\<rbrace>"
@@ -157,7 +156,7 @@ lemma get_irq_slot_different_ARCH[Interrupt_AI_asms]:
   apply (clarsimp simp: global_refs_def is_cap_simps cap_range_def)
   done
 
-lemma is_derived_use_interrupt_ARCH[Interrupt_AI_asms]:
+lemma is_derived_use_interrupt_ARCH[Arch_assms]:
   "(is_ntfn_cap cap \<and> interrupt_derived cap cap') \<longrightarrow> (is_derived m p cap cap')"
   apply (clarsimp simp: is_cap_simps)
   apply (clarsimp simp: interrupt_derived_def is_derived_def)
@@ -165,7 +164,7 @@ lemma is_derived_use_interrupt_ARCH[Interrupt_AI_asms]:
   apply (simp add: is_cap_simps is_pt_cap_def vs_cap_ref_def)
   done
 
-lemma maskInterrupt_invs_ARCH[Interrupt_AI_asms]:
+lemma maskInterrupt_invs_ARCH[Arch_assms]:
   "\<lbrace>invs and (\<lambda>s. \<not>b \<longrightarrow> interrupt_states s irq \<noteq> IRQInactive)\<rbrace>
    do_machine_op (maskInterrupt b irq)
    \<lbrace>\<lambda>rv. invs\<rbrace>"
@@ -175,15 +174,16 @@ lemma maskInterrupt_invs_ARCH[Interrupt_AI_asms]:
      valid_irq_states_but_def valid_irq_masks_but_def valid_machine_state_def cur_tcb_def valid_irq_states_def valid_irq_masks_def)
   done
 
-lemma no_cap_to_obj_with_diff_IRQHandler_ARCH[Interrupt_AI_asms]:
+lemma no_cap_to_obj_with_diff_IRQHandler_ARCH[Arch_assms]:
   "no_cap_to_obj_with_diff_ref (IRQHandlerCap irq) S = \<top>"
   by (rule ext, simp add: no_cap_to_obj_with_diff_ref_def
                           cte_wp_at_caps_of_state
                           obj_ref_none_no_asid)
 
-crunch valid_cap: do_machine_op "valid_cap cap"
+crunch do_machine_op
+  for valid_cap: "valid_cap cap"
 
-lemma (* set_irq_state_valid_cap *)[Interrupt_AI_asms]:
+lemma (* set_irq_state_valid_cap *)[Arch_assms]:
   "\<lbrace>valid_cap cap\<rbrace> set_irq_state IRQSignal irq \<lbrace>\<lambda>rv. valid_cap cap\<rbrace>"
   apply (clarsimp simp: set_irq_state_def)
   apply (wp do_machine_op_valid_cap)
@@ -192,11 +192,13 @@ lemma (* set_irq_state_valid_cap *)[Interrupt_AI_asms]:
          split del: if_split)
   done
 
-crunch valid_global_refs[Interrupt_AI_asms]: set_irq_state "valid_global_refs"
+crunch set_irq_state
+  for valid_global_refs[Arch_assms]: "valid_global_refs"
 
-crunch typ_at[wp]: arch_invoke_irq_handler "\<lambda>s. P (typ_at T p s)"
+crunch arch_invoke_irq_handler
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
 
-lemma invoke_irq_handler_invs'[Interrupt_AI_asms]:
+lemma invoke_irq_handler_invs'[Arch_assms]:
   assumes dmo_ex_inv[wp]: "\<And>f. \<lbrace>invs and ex_inv\<rbrace> do_machine_op f \<lbrace>\<lambda>rv::unit. ex_inv\<rbrace>"
   assumes cap_insert_ex_inv[wp]: "\<And>cap src dest.
   \<lbrace>ex_inv and invs and K (src \<noteq> dest)\<rbrace>
@@ -233,7 +235,7 @@ lemma invoke_irq_handler_invs'[Interrupt_AI_asms]:
     apply (wp valid_cap_typ [OF cap_delete_one_typ_at])
      apply (strengthen real_cte_tcb_valid)
      apply (wp real_cte_at_typ_valid [OF cap_delete_one_typ_at])
-     apply (rule_tac Q="\<lambda>rv s. is_ntfn_cap cap \<and> invs s
+     apply (rule_tac Q'="\<lambda>rv s. is_ntfn_cap cap \<and> invs s
                               \<and> cte_wp_at (is_derived (cdt s) prod cap) prod s"
                 in hoare_post_imp)
       apply (clarsimp simp: is_cap_simps is_derived_def cte_wp_at_caps_of_state)
@@ -252,13 +254,14 @@ lemma invoke_irq_handler_invs'[Interrupt_AI_asms]:
   done
 qed
 
-crunch device_state_inv[wp]: ioapicMapPinToVector "\<lambda>ms. P (device_state ms)"
+crunch ioapicMapPinToVector
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
 
-lemma updateIRQState_invs[wp]:
+lemma update_irq_state_invs[wp]:
   "\<lbrace>invs and K (irq \<le> maxIRQ)\<rbrace>
-   updateIRQState irq state
+   update_irq_state irq state
    \<lbrace>\<lambda>_. invs\<rbrace>"
-  apply (clarsimp simp: updateIRQState_def)
+  apply (clarsimp simp: update_irq_state_def)
   apply wp
   apply (clarsimp simp: invs_def valid_state_def valid_pspace_def valid_global_refs_def
                         global_refs_def valid_arch_state_def valid_vspace_objs_def
@@ -266,13 +269,8 @@ lemma updateIRQState_invs[wp]:
                         vs_lookup_pages1_def valid_table_caps_def empty_table_def second_level_tables_def
                         valid_global_objs_def valid_kernel_mappings_def valid_asid_map_def
                         valid_x64_irq_state_def valid_ioports_def all_ioports_issued_def
-                        issued_ioports_def Word_Lemmas.word_not_le[symmetric])
+                        issued_ioports_def word_not_le[symmetric] valid_cur_fpu_def is_tcb_cur_fpu_def)
   done
-
-lemma no_irq_ioapicMapPinToVector: "no_irq (ioapicMapPinToVector a b c d e)"
-  by (wp no_irq | clarsimp simp: no_irq_def ioapicMapPinToVector_def)+
-
-lemmas ioapicMapPinToVector_irq_masks = no_irq[OF no_irq_ioapicMapPinToVector]
 
 lemma dmo_ioapicMapPinToVector[wp]: "\<lbrace>invs\<rbrace> do_machine_op (ioapicMapPinToVector irq b c d e) \<lbrace>\<lambda>y. invs\<rbrace>"
   apply (wp dmo_invs)
@@ -284,7 +282,7 @@ lemma dmo_ioapicMapPinToVector[wp]: "\<lbrace>invs\<rbrace> do_machine_op (ioapi
   apply(erule (1) use_valid[OF _ ioapicMapPinToVector_irq_masks])
   done
 
-crunches updateIRQState
+crunch update_irq_state
   for real_cte_at[wp]: "real_cte_at x"
   and cte_wp_at[wp]: "\<lambda>s. P (cte_wp_at Q slot s)"
   and cdt[wp]: "\<lambda>s. P (cdt s)"
@@ -311,7 +309,7 @@ lemma arch_invoke_irq_control_invs[wp]:
                         maxUserIRQ_def maxIRQ_def order.trans
                         ex_cte_cap_to_cnode_always_appropriate_strg)
 
-lemma (* invoke_irq_control_invs *) [Interrupt_AI_asms]:
+lemma (* invoke_irq_control_invs *) [Arch_assms]:
   "\<lbrace>invs and irq_control_inv_valid i\<rbrace> invoke_irq_control i \<lbrace>\<lambda>rv. invs\<rbrace>"
   apply (cases i, simp_all)
   apply (rule hoare_pre)
@@ -325,9 +323,10 @@ lemma (* invoke_irq_control_invs *) [Interrupt_AI_asms]:
                          ex_cte_cap_to_cnode_always_appropriate_strg)
   by wp
 
-crunch device_state_inv[wp]: resetTimer "\<lambda>ms. P (device_state ms)"
+crunch resetTimer
+  for device_state_inv[wp]: "\<lambda>ms. P (device_state ms)"
 
-lemma resetTimer_invs_ARCH[Interrupt_AI_asms]:
+lemma resetTimer_invs_ARCH[Arch_assms]:
   "\<lbrace>invs\<rbrace> do_machine_op resetTimer \<lbrace>\<lambda>_. invs\<rbrace>"
   apply (wp dmo_invs)
   apply safe
@@ -340,15 +339,23 @@ lemma resetTimer_invs_ARCH[Interrupt_AI_asms]:
   apply(erule use_valid, wp no_irq_resetTimer no_irq, assumption)
   done
 
-lemma empty_fail_ackInterrupt_ARCH[Interrupt_AI_asms]:
+lemma empty_fail_ackInterrupt_ARCH[Arch_assms]:
   "empty_fail (ackInterrupt irq)"
   by (wp | simp add: ackInterrupt_def)+
 
-lemma empty_fail_maskInterrupt_ARCH[Interrupt_AI_asms]:
+lemma empty_fail_maskInterrupt_ARCH[Arch_assms]:
   "empty_fail (maskInterrupt f irq)"
   by (wp | simp add: maskInterrupt_def)+
 
-lemma (* handle_interrupt_invs *) [Interrupt_AI_asms]:
+crunch timer_tick
+  for invs[wp]: invs
+  (wp: thread_set_invs_trivial[OF ball_tcb_cap_casesI])
+
+crunch timer_tick
+  for invs[wp]: invs
+  (wp: thread_set_invs_trivial[OF ball_tcb_cap_casesI])
+
+lemma (* handle_interrupt_invs *) [Arch_assms]:
   "\<lbrace>invs\<rbrace> handle_interrupt irq \<lbrace>\<lambda>_. invs\<rbrace>"
   apply (simp add: handle_interrupt_def  )
   apply (rule conjI; rule impI)
@@ -356,14 +363,14 @@ lemma (* handle_interrupt_invs *) [Interrupt_AI_asms]:
      apply (wp dmo_maskInterrupt_invs maskInterrupt_invs_ARCH dmo_ackInterrupt
             | wpc | simp add: arch_mask_irq_signal_def)+
      apply (wp get_cap_wp send_signal_interrupt_states)
-    apply (rule_tac Q="\<lambda>rv. invs and (\<lambda>s. st = interrupt_states s irq)" in hoare_post_imp)
+    apply (rule_tac Q'="\<lambda>rv. invs and (\<lambda>s. st = interrupt_states s irq)" in hoare_post_imp)
      apply (clarsimp simp: ex_nonz_cap_to_def invs_valid_objs)
      apply (intro allI exI, erule cte_wp_at_weakenE)
      apply (clarsimp simp: is_cap_simps)
     apply (wp hoare_drop_imps resetTimer_invs_ARCH | simp add: get_irq_state_def handle_reserved_irq_def)+
  done
 
-lemma sts_arch_irq_control_inv_valid[wp, Interrupt_AI_asms]:
+lemma sts_arch_irq_control_inv_valid[wp, Arch_assms]:
   "\<lbrace>arch_irq_control_inv_valid i\<rbrace>
        set_thread_state t st
    \<lbrace>\<lambda>rv. arch_irq_control_inv_valid i\<rbrace>"
@@ -373,16 +380,16 @@ lemma sts_arch_irq_control_inv_valid[wp, Interrupt_AI_asms]:
    apply (wp ex_cte_cap_to_pres | simp add: cap_table_at_typ)+
   done
 
-crunch typ_at[wp]: arch_invoke_irq_handler "\<lambda>s. P (typ_at T p s)"
+crunch arch_invoke_irq_handler
+  for typ_at[wp]: "\<lambda>s. P (typ_at T p s)"
+
+lemmas Interrupt_AI_assms = Arch_assms (* extract accumulated assumptions *)
 
 end
 
-
-
 interpretation Interrupt_AI?: Interrupt_AI
   proof goal_cases
-  interpret Arch .
-  case 1 show ?case by (intro_locales; (unfold_locales, simp_all add: Interrupt_AI_asms)?)
+  case 1 show ?case by (intro_locales; (unfold_locales, simp_all add: X64.Interrupt_AI_assms)?)
   qed
 
 end

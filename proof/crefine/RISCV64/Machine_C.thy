@@ -37,6 +37,11 @@ assumes sfence_ccorres:
            (doMachineOp RISCV64.sfence)
            (Call sfence_'proc)"
 
+assumes ifence_ccorres:
+  "ccorres dc xfdc \<top> UNIV []
+           (doMachineOp RISCV64.ifence)
+           (Call ifence_'proc)"
+
 assumes maskInterrupt_ccorres:
   "ccorres dc xfdc \<top> (\<lbrace>\<acute>disable = from_bool m\<rbrace> \<inter> \<lbrace>\<acute>irq = ucast irq\<rbrace>) []
            (doMachineOp (maskInterrupt m irq))
@@ -80,6 +85,7 @@ assumes isIRQPending_ccorres:
 
 assumes getActiveIRQ_Normal:
   "\<Gamma> \<turnstile> \<langle>Call getActiveIRQ_'proc, Normal s\<rangle> \<Rightarrow> s' \<Longrightarrow> isNormal s'"
+
 
 (* The following are fastpath specific assumptions.
    We might want to move them somewhere else. *)
@@ -225,7 +231,7 @@ lemma clz64_spec:
    apply (simp add: not_max_word_iff_less)
    apply (rule word_of_nat_less)
    apply (rule le_less_trans[OF word_clz_max])
-   apply (simp add: word_size max_word_def)
+   apply (simp add: word_size unat_max_word)
   apply clarsimp
   done
 
@@ -384,6 +390,10 @@ lemma ctzl_spec:
    \<lbrace>\<acute>ret__long = of_nat (word_ctz (x___unsigned_long_' s))\<rbrace>"
   apply (rule allI, rule conseqPre, vcg)
   by (clarsimp simp: casts_of_nat_small[OF word_ctz_max[THEN le_less_trans]] word_size)
+
+lemma wrap_config_set_spec:
+  "\<forall>s. \<Gamma> \<turnstile> {s} Call wrap_config_set_'proc \<lbrace>\<acute>ret__int = x_' s\<rbrace>"
+  by (rule allI, rule conseqPre, vcg) clarsimp
 
 end
 end

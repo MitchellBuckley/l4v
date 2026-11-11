@@ -9,10 +9,10 @@ imports
   "ASpec.Syscall_A"
   "Lib.Crunch_Instances_NonDet"
 begin
-context Arch begin global_naming X64
+context Arch begin arch_global_naming
 
 
-crunch_ignore (add: debugPrint clearMemory invalidateTLB initL2Cache)
+crunch_ignore (add: debugPrint clearMemory)
 
 end
 

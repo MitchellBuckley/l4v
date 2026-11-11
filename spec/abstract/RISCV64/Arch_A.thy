@@ -10,7 +10,7 @@ theory Arch_A
 imports TcbAcc_A
 begin
 
-context Arch begin global_naming RISCV64_A
+context Arch begin arch_global_naming (A)
 
 definition page_bits :: nat
   where
@@ -35,6 +35,9 @@ definition arch_switch_to_idle_thread :: "(unit,'z::state_ext) s_monad"
     thread \<leftarrow> gets idle_thread;
     set_vm_root thread
   od"
+
+definition arch_prepare_next_domain :: "(unit,'z::state_ext) s_monad" where
+  "arch_prepare_next_domain \<equiv> return ()"
 
 definition arch_activate_idle_thread :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad"
   where
@@ -102,22 +105,16 @@ definition perform_pg_inv_map :: "arch_cap \<Rightarrow> cslot_ptr \<Rightarrow>
      do_machine_op sfence
    od"
 
-definition perform_pg_inv_get_addr :: "obj_ref \<Rightarrow> (unit,'z::state_ext) s_monad"
+definition perform_pg_inv_get_addr :: "obj_ref \<Rightarrow> (data list,'z::state_ext) s_monad"
   where
-  "perform_pg_inv_get_addr ptr \<equiv> do
-     paddr \<leftarrow> return $ fromPAddr $ addrFromPPtr ptr;
-     ct \<leftarrow> gets cur_thread;
-     msg_transferred \<leftarrow> set_mrs ct Nothing [paddr];
-     msg_info \<leftarrow> return $ MI msg_transferred 0 0 0;
-     set_message_info ct msg_info
-   od"
+  "perform_pg_inv_get_addr ptr \<equiv> return [addrFromPPtr ptr]"
 
 text \<open>The Frame capability confers the authority to map and unmap memory.\<close>
-definition perform_page_invocation :: "page_invocation \<Rightarrow> (unit,'z::state_ext) s_monad"
+definition perform_page_invocation :: "page_invocation \<Rightarrow> (data list,'z::state_ext) s_monad"
   where
   "perform_page_invocation iv \<equiv> case iv of
-     PageMap cap ct_slot (pte,slot) \<Rightarrow> perform_pg_inv_map cap ct_slot pte slot
-   | PageUnmap cap ct_slot \<Rightarrow> perform_pg_inv_unmap cap ct_slot
+     PageMap cap ct_slot (pte,slot) \<Rightarrow> do perform_pg_inv_map cap ct_slot pte slot; return [] od
+   | PageUnmap cap ct_slot \<Rightarrow> do perform_pg_inv_unmap cap ct_slot; return [] od
    | PageGetAddr ptr \<Rightarrow> perform_pg_inv_get_addr ptr"
 
 
@@ -161,7 +158,7 @@ definition arch_perform_invocation :: "arch_invocation \<Rightarrow> (data list,
   where
   "arch_perform_invocation i \<equiv> liftE $ case i of
      InvokePageTable oper \<Rightarrow> arch_no_return $ perform_page_table_invocation oper
-   | InvokePage oper \<Rightarrow> arch_no_return $ perform_page_invocation oper
+   | InvokePage oper \<Rightarrow> perform_page_invocation oper
    | InvokeASIDControl oper \<Rightarrow> arch_no_return $ perform_asid_control_invocation oper
    | InvokeASIDPool oper \<Rightarrow> arch_no_return $ perform_asid_pool_invocation oper"
 

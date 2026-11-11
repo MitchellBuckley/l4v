@@ -15,7 +15,7 @@ imports
   Interrupt_A
   InvocationLabels_A
 begin
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 section "Helper definitions"
 
@@ -55,6 +55,12 @@ definition
 where
   "page_base vaddr vmsize \<equiv> vaddr && ~~ mask (pageBitsForSize vmsize)"
 
+
+definition decode_sgi_signal_invocation :: "arch_cap \<Rightarrow> (arch_invocation,'z::state_ext) se_monad" where
+  "decode_sgi_signal_invocation acap \<equiv>
+     case acap of
+       SGISignalCap irq target \<Rightarrow> returnOk $ InvokeSGISignal $ SGISignalGenerate irq target
+     | _ \<Rightarrow> fail"
 
 definition
   arch_decode_invocation ::
@@ -178,10 +184,16 @@ where
             pd \<leftarrow> lookup_error_on_failure False $ find_pd_for_asid asid;
             whenE (end \<le> start) $ throwError $ InvalidArgument 1;
             page_size \<leftarrow> returnOk $ 1 << pageBitsForSize pgsz;
+            page_base \<leftarrow> returnOk $ addrFromPPtr p;
+            frame_info \<leftarrow> liftE $ resolve_vaddr pd vaddr;
+            case frame_info of
+              None \<Rightarrow> throwError $ InvalidCapability 0
+            | Some (sz', base') \<Rightarrow> whenE (sz' \<noteq> pgsz \<or> base' \<noteq> page_base) $
+                                         throwError $ InvalidCapability 0;
             whenE (start \<ge> page_size \<or> end > page_size) $ throwError $ InvalidArgument 0;
             returnOk $ InvokePage $ PageFlush
                 (label_to_flush_type (invocation_type label)) (start + vaddr)
-                (end + vaddr - 1) (addrFromPPtr p + start) pd asid
+                (end + vaddr - 1) (page_base + start) pd asid
     odE
     else throwError TruncatedMessage
     else if invocation_type label = ArchInvocationLabel ARMPageGetAddress
@@ -235,24 +247,28 @@ where
           odE
         | _ \<Rightarrow>  throwError $ InvalidCapability 1
   else  throwError TruncatedMessage
-  else  throwError IllegalOperation"
+  else  throwError IllegalOperation
+| SGISignalCap _ _ \<Rightarrow> decode_sgi_signal_invocation cap"
 
 
 definition
   arch_data_to_obj_type :: "nat \<Rightarrow> aobject_type option" where
  "arch_data_to_obj_type n \<equiv>
-  if n = 0 then Some SmallPageObj
-  else if n = 1 then Some LargePageObj
-  else if n = 2 then Some SectionObj
-  else if n = 3 then Some SuperSectionObj
-  else if n = 4 then Some PageTableObj
-  else if n = 5 then Some PageDirectoryObj
+  if n = 0 then Some PageDirectoryObj
+  else if n = 1 then Some SmallPageObj
+  else if n = 2 then Some LargePageObj
+  else if n = 3 then Some SectionObj
+  else if n = 4 then Some SuperSectionObj
+  else if n = 5 then Some PageTableObj
   else None"
 
 definition
   arch_check_irq :: "data \<Rightarrow> (unit,'z::state_ext) se_monad"
 where
-  "arch_check_irq irq \<equiv> whenE (irq > ucast maxIRQ) $ throwError (RangeError 0 (ucast maxIRQ))"
+  "arch_check_irq irq \<equiv> whenE (irq > maxIRQ) $ throwError (RangeError 0 maxIRQ)"
+
+definition sgi_target_valid :: "machine_word \<Rightarrow> bool" where
+  "sgi_target_valid t \<equiv> isGICPlatform \<and> t \<le> of_nat gicNumTargets - 1"
 
 definition arch_decode_irq_control_invocation ::
   "data \<Rightarrow> data list \<Rightarrow> cslot_ptr \<Rightarrow> cap list \<Rightarrow> (arch_irq_control_invocation,'z::state_ext) se_monad"
@@ -267,6 +283,7 @@ definition arch_decode_irq_control_invocation ::
                  cnode = cps ! 0;
                  irq = ucast irq_word
         in doE
+          unlessE haveSetTrigger $ throwError IllegalOperation;
           arch_check_irq irq_word;
           irq_active \<leftarrow> liftE $ is_irq_active irq;
           whenE irq_active $ throwError RevokeFirst;
@@ -275,6 +292,22 @@ definition arch_decode_irq_control_invocation ::
           ensure_empty dest_slot;
 
           returnOk $ ArchIRQControlIssue irq dest_slot src_slot (trigger \<noteq> 0)
+        odE
+      else throwError TruncatedMessage
+      else if invocation_type label = ArchInvocationLabel ARMIRQIssueSGISignal
+      then if length args \<ge> 4 \<and> length cps \<ge> 1
+        then let irq_word = args ! 0;
+                 target_word = args ! 1;
+                 index = args ! 2;
+                 depth = args ! 3;
+                 cnode = cps ! 0
+        in doE
+          whenE (numSGIs = 0) $ throwError IllegalOperation;
+          range_check irq_word 0 (of_nat numSGIs - 1);
+          unlessE (sgi_target_valid target_word) $ throwError $ InvalidArgument 1;
+          dest_slot \<leftarrow> lookup_target_slot cnode (data_to_cptr index) (unat depth);
+          ensure_empty dest_slot;
+          returnOk $ IssueSGISignal (ucast irq_word) (ucast target_word) src_slot dest_slot
         odE
       else throwError TruncatedMessage
     else throwError IllegalOperation)"

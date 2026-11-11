@@ -48,6 +48,12 @@ deriveCap _ (c@ASIDPoolCap {}) = return $ ArchObjectCap c
 isCapRevocable :: Capability -> Capability -> Bool
 isCapRevocable newCap srcCap = False
 
+-- Whether the first capability is a parent of the second one. Can assume that
+-- sameRegionAs is true for the two capabilities. If this function returns True,
+-- the remaining cases of generic isMDBParentOf are still checked.
+isArchMDBParentOf :: Capability -> Capability -> Bool -> Bool
+isArchMDBParentOf _ _ _ = True
+
 updateCapData :: Bool -> Word -> ArchCapability -> Capability
 updateCapData _ _ c = ArchObjectCap c
 
@@ -74,6 +80,12 @@ maskCapRights _ c = ArchObjectCap c
 
 postCapDeletion :: ArchCapability -> Kernel ()
 postCapDeletion c = return ()
+
+-- Flush the instruction cache for Untypeds that could be turned into
+-- non-device frames.
+postResetUntyped :: Bool -> Int -> Kernel ()
+postResetUntyped isDevice sizeBits =
+    when (not isDevice && sizeBits >= pageBits) $ doMachineOp ifence
 
 finaliseCap :: ArchCapability -> Bool -> Kernel (Capability, Capability)
 
@@ -105,6 +117,9 @@ finaliseCap (FrameCap {
 finaliseCap _ _ = return (NullCap, NullCap)
 
 {- Identifying Capabilities -}
+
+isIRQControlCapDescendant :: ArchCapability -> Bool
+isIRQControlCapDescendant _ = False
 
 sameRegionAs :: ArchCapability -> ArchCapability -> Bool
 sameRegionAs (a@FrameCap {}) (b@FrameCap {}) =
@@ -153,26 +168,26 @@ createObject t regionBase _ isDevice =
             modify (\ks -> ks { gsUserPages =
               funupd (gsUserPages ks)
                      (fromPPtr regionBase) (Just RISCVSmallPage)})
-            return $! FrameCap (pointerCast regionBase)
+            return $ FrameCap (pointerCast regionBase)
                   VMReadWrite RISCVSmallPage isDevice Nothing
         Arch.Types.LargePageObject -> do
             placeNewDataObject regionBase ptTranslationBits isDevice
             modify (\ks -> ks { gsUserPages =
               funupd (gsUserPages ks)
                      (fromPPtr regionBase) (Just RISCVLargePage)})
-            return $! FrameCap (pointerCast regionBase)
+            return $ FrameCap (pointerCast regionBase)
                   VMReadWrite RISCVLargePage isDevice Nothing
         Arch.Types.HugePageObject -> do
             placeNewDataObject regionBase (ptTranslationBits+ptTranslationBits) isDevice
             modify (\ks -> ks { gsUserPages =
               funupd (gsUserPages ks)
                      (fromPPtr regionBase) (Just RISCVHugePage)})
-            return $! FrameCap (pointerCast regionBase)
+            return $ FrameCap (pointerCast regionBase)
                   VMReadWrite RISCVHugePage isDevice Nothing
         Arch.Types.PageTableObject -> do
             let ptSize = ptBits - objBits (makeObject :: PTE)
             placeNewObject regionBase (makeObject :: PTE) ptSize
-            return $! PageTableCap (pointerCast regionBase) Nothing
+            return $ PageTableCap (pointerCast regionBase) Nothing
 
 {- Capability Invocation -}
 
@@ -203,7 +218,7 @@ capUntypedSize (PageTableCap {}) = bit ptBits
 capUntypedSize (ASIDControlCap {}) = 0
 capUntypedSize (ASIDPoolCap {}) = bit asidPoolBits
 
--- No arch-specific thread deletion operations needed on RISC-V platform.
+-- No arch-specific thread deletion operations needed on RISC-V.
 
 prepareThreadDelete :: PPtr TCB -> Kernel ()
 prepareThreadDelete _ = return ()

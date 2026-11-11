@@ -18,21 +18,12 @@ imports
   ArchStateData_H
 begin
 
-context begin interpretation Arch .
-
-requalify_types
-  vmpage_size
-
-end
-
 requalify_types (in Arch)
   kernel_state
 
 subsection "The Kernel State"
 
-type_synonym ready_queue = "machine_word list"
-translations
-(type) "machine_word list" <= (type) "ready_queue"
+type_synonym ready_queue = tcb_queue
 
 text \<open>We pull a fast one on haskell here ... although Haskell expects
 a KernelMonad which is a StateT monad in KernelData that wraps a MachineMonad,
@@ -46,9 +37,10 @@ record kernel_state =
   gsUntypedZeroRanges  :: "(machine_word \<times> machine_word) set"
   gsMaxObjectSize      :: nat
   ksDomScheduleIdx     :: nat
-  ksDomSchedule        :: "(domain \<times> machine_word) list"
+  ksDomScheduleStart   :: nat
+  ksDomSchedule        :: "domain_schedule_item list"
   ksCurDomain          :: domain
-  ksDomainTime         :: machine_word
+  ksDomainTime         :: ticks
   ksReadyQueues        :: "domain \<times> priority \<Rightarrow> ready_queue"
   ksReadyQueuesL1Bitmap :: "domain \<Rightarrow> machine_word"
   ksReadyQueuesL2Bitmap :: "domain \<times> nat \<Rightarrow> machine_word"
@@ -85,7 +77,7 @@ where
     return r
   od"
 
-#INCLUDE_HASKELL SEL4/Model/StateData.lhs NOT doMachineOp KernelState ReadyQueue Kernel assert stateAssert findM funArray newKernelState capHasProperty
-#INCLUDE_HASKELL SEL4/Model/StateData.lhs decls_only ONLY capHasProperty
+#INCLUDE_HASKELL SEL4/Model/StateData.lhs decls_only ONLY capHasProperty ksReadyQueues_asrt ready_qs_runnable idleThreadNotQueued
+#INCLUDE_HASKELL SEL4/Model/StateData.lhs NOT doMachineOp KernelState ReadyQueue Kernel assert stateAssert findM funArray newKernelState capHasProperty ksReadyQueues_asrt ready_qs_runnable idleThreadNotQueued
 
 end

@@ -1,4 +1,5 @@
 (*
+ * Copyright 2023, Proofcraft Pty Ltd
  * Copyright 2014, General Dynamics C4 Systems
  *
  * SPDX-License-Identifier: GPL-2.0-only
@@ -7,6 +8,8 @@
 theory CSpace_RAB_C
 imports CSpaceAcc_C "CLib.MonadicRewrite_C"
 begin
+
+unbundle l4v_word_context
 
 context kernel
 begin
@@ -51,7 +54,7 @@ lemma ccorres_remove_bind_returnOk_noguard:
   apply clarsimp
   apply (drule not_snd_bindE_I1)
   apply (erule (4) ccorresE[OF ac])
-  apply (clarsimp simp add: bindE_def returnOk_def NonDetMonad.lift_def bind_def return_def
+  apply (clarsimp simp add: bindE_def returnOk_def Nondet_Monad.lift_def bind_def return_def
     split_def)
   apply (rule bexI [rotated], assumption)
   apply (simp add: throwError_def return_def unif_rrel_def
@@ -90,20 +93,7 @@ lemma ccorres_req:
   apply (clarsimp elim!: bexI [rotated])
   done
 
-lemma valid_cap_cte_at':
-  "\<lbrakk>isCNodeCap cap; valid_cap' cap s'\<rbrakk> \<Longrightarrow> cte_at' (capCNodePtr cap + 2^cteSizeBits * (addr && mask (capCNodeBits cap))) s'"
-  apply (clarsimp simp: isCap_simps valid_cap'_def)
-  apply (rule real_cte_at')
-  apply (erule spec)
-  done
-
-lemma mask_64_max_word [simp]:
-  shows "mask 64 = (max_word :: machine_word)"
-  unfolding mask_def
-  by (simp add: max_word_def)
-
-declare ucast_id [simp]
-declare resolveAddressBits.simps [simp del]
+declare mask_64_max_word [simp]
 
 lemma rightsFromWord_wordFromRights:
   "rightsFromWord (wordFromRights rghts) = rghts"
@@ -138,10 +128,6 @@ lemma ccorres_cases:
   apply (cases P, auto simp: P notP)
   done
 
-lemma monadic_rewrite_stateAssert:
-  "monadic_rewrite F E P (stateAssert P xs) (return ())"
-  by (simp add: stateAssert_def monadic_rewrite_def exec_get)
-
 lemma ccorres_locateSlotCap_push:
   "ccorres_underlying sr \<Gamma> r xf ar axf P P' hs
     (a >>=E (\<lambda>x. locateSlotCap cp n >>= (\<lambda>p. b p x))) c
@@ -155,7 +141,8 @@ lemma ccorres_locateSlotCap_push:
    apply (rule monadic_rewrite_bindE[OF monadic_rewrite_refl])
     apply (rule monadic_rewrite_transverse)
      apply (rule monadic_rewrite_bind_head)
-     apply (rule monadic_rewrite_stateAssert)
+     apply (rule monadic_rewrite_stateAssert[where f="return", simplified])
+    apply (rule monadic_rewrite_refl)
     apply simp
     apply (rule monadic_rewrite_refl)
    apply assumption
@@ -222,10 +209,8 @@ next
      apply (simp add: cap_get_tag_isCap split del: if_split)
      apply (thin_tac "ret__unsigned_longlong = X" for X)
      apply (rule ccorres_split_throws [where P = "?P"])
-      apply (rule_tac G' = "\<lambda>w_rightsMask. ({s. nodeCap_' s = nodeCap}
-                              \<inter> {s. unat (n_bits_' s) = guard'})"
-         in ccorres_abstract  [where xf' = w_rightsMask_'])
-       apply (rule ceqv_refl)
+      apply (rule_tac P'="{s. nodeCap_' s = nodeCap} \<inter> {s. unat (n_bits_' s) = guard'}"
+               in ccorres_inst)
       apply (rule_tac r' = "?rvr" in
           ccorres_rel_imp [where xf' = rab_xf])
        defer
@@ -237,7 +222,7 @@ next
        apply (vcg strip_guards=true) \<comment> \<open>takes a while\<close>
        apply clarsimp
       apply simp
-     apply (clarsimp simp: cap_get_tag_isCap to_bool_def)
+     apply (clarsimp simp: cap_get_tag_isCap)
   \<comment> \<open>Main thm\<close>
   proof (induct cap' cptr' guard' rule: resolveAddressBits.induct [case_names ind])
     case (ind cap cptr guard)
@@ -251,14 +236,15 @@ next
       "\<And>a b p rs s. ((a, b) \<in> fst (getSlotCap p s)) =
       (option_map cteCap (ctes_of s p) = Some a
        \<and> b = s)"
-       apply (simp add: getSlotCap_def return_def bind_def objBits_simps split_def)
-       apply rule
+      apply (simp add: getSlotCap_def return_def bind_def objBits_simps split_def)
+      apply rule
        apply (clarsimp simp: in_getCTE_cte_wp_at' cte_wp_at_ctes_of)
-       apply clarsimp
-       apply (subgoal_tac "cte_wp_at' ((=) z) p s")
+      apply clarsimp
+      apply (rename_tac s p z)
+      apply (subgoal_tac "cte_wp_at' ((=) z) p s")
        apply (clarsimp simp: getCTE_def cte_wp_at'_def)
-       apply (simp add: cte_wp_at_ctes_of)
-       done
+      apply (simp add: cte_wp_at_ctes_of)
+      done
 
     note ih = ind.hyps[simplified, simplified in_monad
         getSlotCap_in_monad locateSlot_conv stateAssert_def, simplified]
@@ -367,8 +353,8 @@ next
       unat guardBits = capCNodeGuardSize cap;
       \<not> guard < capCNodeBits cap + capCNodeGuardSize cap \<rbrakk> \<Longrightarrow>
       \<forall>s s'. (s, s') \<in> rf_sr \<and> True \<and> True \<longrightarrow>
-                (guard = capCNodeBits cap + capCNodeGuardSize cap) = (s' \<in> \<lbrace>nb \<le> radixBits + guardBits\<rbrace>)"
-      by (simp add: Collect_const_mem word_le_nat_alt unat_word_ariths)
+                (guard = capCNodeBits cap + capCNodeGuardSize cap) = (s' \<in> \<lbrace>nb = radixBits + guardBits\<rbrace>)"
+      by clarsimp unat_arith
 
     have cond4:
       "\<And>rva nodeCapb ret__unsigned_long.
@@ -576,8 +562,8 @@ lemma rightsFromWord_spec:
   \<lbrace>seL4_CapRights_lift \<acute>ret__struct_seL4_CapRights_C = cap_rights_from_word_canon \<^bsup>s\<^esup>w \<rbrace>"
   apply vcg
   apply (simp add: seL4_CapRights_lift_def nth_shiftr mask_shift_simps nth_shiftr
-    cap_rights_from_word_canon_def from_bool_def word_and_1 eval_nat_numeral
-    word_sless_def word_sle_def)
+                   cap_rights_from_word_canon_def word_and_1 eval_nat_numeral
+                   word_sless_def word_sle_def)
   done
 
 
@@ -591,12 +577,6 @@ lemma cap_rights_to_H_from_word_canon [simp]:
   apply (simp add: cap_rights_from_word_canon_def)
   apply (simp add: cap_rights_to_H_def)
   done
-
-(* MOVE *)
-lemma to_bool_false [simp]:
-  "to_bool false = False"
-  unfolding to_bool_def false_def
-  by simp
 
 lemma tcb_ptr_to_ctcb_ptr_mask [simp]:
   assumes tcbat: "tcb_at' thread s"

@@ -12,12 +12,14 @@ chapter "ARM-Specific Data Types"
 
 theory Arch_Structs_A
 imports
-  "ExecSpec.Arch_Structs_B"
+  ExecSpec.Arch_Structs_B
   ExceptionTypes_A
   VMRights_A
+  ArchVMAttributes_A
+  ExecSpec.Arch_Kernel_Config_Lemmas
 begin
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 text \<open>
 This theory provides architecture-specific definitions and datatypes
@@ -29,13 +31,12 @@ section \<open>Architecture-specific virtual memory\<close>
 text \<open>An ASID is simply a word.\<close>
 type_synonym asid = "word32"
 
-datatype vm_attribute = ParityEnabled | PageCacheable | Global | XNever
-type_synonym vm_attributes = "vm_attribute set"
-
 section \<open>Architecture-specific capabilities\<close>
 
-text \<open>The ARM kernel supports capabilities for ASID pools and an ASID controller capability,
-along with capabilities for page directories, page tables, and page mappings.\<close>
+text \<open>
+  The ARM kernel supports capabilities for ASID pools and an ASID controller capability,
+  along with capabilities for page directories, page tables, page mappings, and
+  software-generated interrupts.\<close>
 
 datatype arch_cap =
    ASIDPoolCap obj_ref asid
@@ -43,6 +44,9 @@ datatype arch_cap =
  | PageCap bool obj_ref cap_rights vmpage_size "(asid * vspace_ref) option"
  | PageTableCap obj_ref "(asid * vspace_ref) option"
  | PageDirectoryCap obj_ref "asid option"
+ | SGISignalCap
+     (acap_sgi_irq : sgi_irq)
+     (acap_sgi_target : sgi_target)
 
 lemmas arch_cap_cases =
   arch_cap.induct[where arch_cap=x and P="\<lambda>x'. x = x' \<longrightarrow> P x'" for x P, simplified, rule_format]
@@ -55,15 +59,6 @@ definition
   is_page_cap :: "arch_cap \<Rightarrow> bool" where
   "is_page_cap c \<equiv> \<exists>x0 x1 x2 x3 x4. c = PageCap x0 x1 x2 x3 x4"
 
-definition
-  asid_high_bits :: nat where
-  "asid_high_bits \<equiv> 7"
-definition
-  asid_low_bits :: nat where
-  "asid_low_bits \<equiv> 10 :: nat"
-definition
-  asid_bits :: nat where
-  "asid_bits \<equiv> 17 :: nat"
 
 section \<open>Architecture-specific objects\<close>
 
@@ -113,15 +108,13 @@ where
 | "arch_obj_size (PageCap dev x rs sz as4) = pageBitsForSize sz"
 | "arch_obj_size (PageDirectoryCap x as2) = 14"
 | "arch_obj_size (PageTableCap x as3) = 10"
+| "arch_obj_size (SGISignalCap _ _) = 0"
 
-primrec
+fun
   arch_cap_is_device :: "arch_cap \<Rightarrow> bool"
 where
   "arch_cap_is_device (PageCap dev x rs sz as4) = dev"
-| "arch_cap_is_device ASIDControlCap = False"
-| "arch_cap_is_device (ASIDPoolCap p as) = False"
-| "arch_cap_is_device (PageTableCap x as3) = False"
-| "arch_cap_is_device (PageDirectoryCap x as2) = False"
+| "arch_cap_is_device _ = False"
 
 definition tcb_bits :: nat where
   "tcb_bits \<equiv> 9"
@@ -154,6 +147,7 @@ where
 | "aobj_ref (PageCap dev x rs sz as4) = Some x"
 | "aobj_ref (PageDirectoryCap x as2) = Some x"
 | "aobj_ref (PageTableCap x as3) = Some x"
+| "aobj_ref (SGISignalCap _ _) = None"
 
 primrec (nonexhaustive)
   acap_rights :: "arch_cap \<Rightarrow> cap_rights"
@@ -210,7 +204,7 @@ definition
   | PageDirectoryObj \<Rightarrow> PageDirectory (\<lambda>x. InvalidPDE)
   | ASIDPoolObj \<Rightarrow> ASIDPool (\<lambda>_. None)"
 
-type_synonym hw_asid = word8
+type_synonym hw_asid = "hw_asid_len word"
 
 type_synonym arm_vspace_region_uses = "vspace_ref \<Rightarrow> arm_vspace_region_use"
 
@@ -246,7 +240,7 @@ record arch_state =
 
 end_qualify
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 definition
   pd_bits :: "nat" where
@@ -292,14 +286,16 @@ record arch_tcb =
 
 end_qualify
 
-context Arch begin global_naming ARM_A
+context Arch begin arch_global_naming (A)
 
 definition
   default_arch_tcb :: arch_tcb where
   "default_arch_tcb \<equiv> \<lparr>
       tcb_context    = new_context\<rparr>"
 
-text \<open>accesors for @{text "tcb_context"} inside @{text "arch_tcb"}\<close>
+text \<open>
+  Accessors for @{text "tcb_context"} inside @{text "arch_tcb"}. These are later used to
+  implement @{text as_user}, i.e.\ need to be compatible with @{text user_monad}.\<close>
 definition
   arch_tcb_context_set :: "user_context \<Rightarrow> arch_tcb \<Rightarrow> arch_tcb"
 where
@@ -310,15 +306,20 @@ definition
 where
   "arch_tcb_context_get a_tcb \<equiv> tcb_context a_tcb"
 
+(* FIXME: the following means that we break the set/getRegister abstraction
+          and should move some of this into the machine interface (same as X64) *)
+text \<open>
+  Accessors for the user register part of the @{text "arch_tcb"}.
+  (Because @{typ "register \<Rightarrow> machine_word"} might not be equal to @{typ user_context}).\<close>
 definition
   arch_tcb_set_registers :: "(register \<Rightarrow> machine_word) \<Rightarrow> arch_tcb \<Rightarrow> arch_tcb"
 where
-  "arch_tcb_set_registers \<equiv> arch_tcb_context_set"
+  "arch_tcb_set_registers regs a_tcb \<equiv> a_tcb \<lparr> tcb_context := UserContext regs \<rparr>"
 
 definition
   arch_tcb_get_registers :: "arch_tcb \<Rightarrow> register \<Rightarrow> machine_word"
 where
-  "arch_tcb_get_registers \<equiv> arch_tcb_context_get"
+  "arch_tcb_get_registers a_tcb \<equiv> user_regs (tcb_context a_tcb)"
 
 end
 
